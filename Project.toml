@@ -5,6 +5,7 @@ authors = ["Ian Delègue <ian.delegue@gmail.com>"]
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 GaussianProcesses = "891a1506-143c-57d2-908e-e1f8e92e6de9"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
@@ -15,6 +16,7 @@ Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 
 [compat]
 CSV = "0.10.16"
+DSP = "0.8.4"
 DataFrames = "1.8.2"
 GaussianProcesses = "0.12.6"
 Interpolations = "0.16.2"

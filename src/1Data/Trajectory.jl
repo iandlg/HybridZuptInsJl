@@ -16,9 +16,13 @@ struct Trajectory <: AbstractTimeSeries
     end
 end
 
-# Slice operator — mirrors Python __getitem__
-Base.getindex(tr::Trajectory, mask) =
-    Trajectory(tr.t[mask], tr.pos[:, mask], tr.R_nb[:, :, mask])
+# Slice operator
+Base.getindex(tr::Trajectory, mask) = Trajectory(
+    tr.t[mask],
+    tr.pos[:, mask],
+    tr.R_nb[:, :, mask],
+    tr.vel === nothing ? nothing : tr.vel[:, mask]
+)
 
 # Euler angles (3, N) — roll/pitch/yaw from rotation matrices
 function euler_nb(tr::Trajectory)
@@ -40,14 +44,15 @@ function Trajectory(path::AbstractString)
     mask = [true; df[2:end, 1] .> df[1:end-1, 1]]
     df = df[mask, :]
     # Filter zero pos/rot
-    pos_ok = sum(eachcol(df[:, 3:5] .^ 2); dims=2) .!= 0
-    rot_ok = sum(eachcol(df[:, 6:14] .^ 2); dims=2) .!= 0
-    df = df[vec(pos_ok .& rot_ok), :]
+    pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
+    rot_ok = vec(sum(Matrix(df[:, 6:14]) .^ 2, dims=2) .!= 0)
+    df = df[pos_ok.&rot_ok, :]
     data = Matrix(df)
     N = size(data, 1)
     t = data[:, 1] ./ 1000
     pos = MM_TO_M .* data[:, 3:5]'          # (3, N)
-    R = permutedims(reshape(data[:, 6:14], N, 3, 3), (2, 3, 1))  # (3,3,N)
+    R = permutedims(reshape(data[:, 6:14], N, 3, 3), (3, 2, 1))  # (3,3,N)
+
     return clean(Trajectory(t, pos, R))
 end
 
@@ -56,13 +61,13 @@ Trajectory(dir::AbstractString, num::Int) =
 
 # Remove large Euler-angle jumps (same threshold as Python)
 function clean(tr::Trajectory)
-    eu = euler_nb(tr)
-    yaw = cumsum([eu[3, 1]; diff(eu[3, :])])   # unwrap
+    eu = matrix_to_euler(tr.R_nb)
+    yaw = unwrap(eu[3, :])
     d_roll = abs.(diff(eu[1, :]))
     d_pitch = abs.(diff(eu[2, :]))
-    d_yaw = abs.(diff(yaw))
+    d_yaw = diff(yaw)
     bad = findall((d_roll .> 0.3) .| (d_pitch .> 0.3) .| (d_yaw .> 0.3))
-    bad = unique(vcat(bad, bad .+ 1))
+    bad = vcat(bad, bad .+ 1)
     keep = setdiff(1:length(tr.t), bad)
     return tr[keep]
 end

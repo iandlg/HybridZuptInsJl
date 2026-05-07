@@ -1,19 +1,19 @@
 # scripts/main.jl
-include("../src/HybridZuptIns.jl");
+include("../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+using Printf
 
 data_dir = "data/angermann_high_precision"
-imu = InertialData(data_dir, 15)
-gt = Trajectory(data_dir, 15)
+imu = HybridZuptInsJl.InertialData(data_dir, 15)
+gt = HybridZuptInsJl.Trajectory(data_dir, 15)
 
-imu_ov, gt_ov = truncate_to_overlap(imu, gt)
+imu_ov, gt_ov = HybridZuptInsJl.truncate_to_overlap(imu, gt)
 
 println("IMU:  $(length(imu)) → $(length(imu_ov)) samples")
 println("GT:   $(length(gt))  → $(length(gt_ov))  samples")
-println("Overlap: $(imu_ov.t[begin]:.3f)s – $(imu_ov.t[end]:.3f)s")
+@printf("Overlap: %.3fs – %.3fs\n", imu_ov.t[begin], imu_ov.t[end])
 
 # Same spot-checks as Python __main__
-println(imu.u[:, 10000])          # Julia is 1-indexed
-println(gt.R_nb[:, :, 10000])
-println(gt.pos[1, 10000])         # x
-println(gt.pos[3, 10000])         # z
+display(imu.u[:, 10000])
+display(gt.R_nb[:, :, 10000])
+display(gt.pos[:, 10000])         # x

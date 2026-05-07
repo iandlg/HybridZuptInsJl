@@ -1,14 +1,18 @@
 module HybridZuptInsJl
 
 using LinearAlgebra, Statistics
-using Rotations          # QuatRotation, RotMatrix, Slerp
+using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
 using Interpolations     # LinearInterpolation
 using CSV, DataFrames
 
-
-include("0Data/TimeSeries.jl")
-include("0Data/Trajectory.jl")
-include("0Data/InertialData.jl")
+include("0Util/Orientation.jl")
+include("0Util/InsConfig.jl")
+include("1Data/TimeSeries.jl")
+include("1Data/Trajectory.jl")
+include("1Data/InertialData.jl")
+include("2ZuptIns/Equations.jl")
+include("2ZuptIns/Zupt.jl")
+include("2ZuptIns/SmoothZuptIns.jl")
 
 export TimeSeries, Trajectory, InertialData
 export truncate_to_overlap, is_compatible
