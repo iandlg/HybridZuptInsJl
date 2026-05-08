@@ -16,6 +16,7 @@ include("2ZuptIns/Zupt.jl")
 include("2ZuptIns/SmoothZuptIns.jl")
 
 include("Plotting/Trajectory.jl")
+include("Plotting/InertialData.jl")
 
 export TimeSeries, Trajectory, InertialData
 export truncate_to_overlap, is_compatible
