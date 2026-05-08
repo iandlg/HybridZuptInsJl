@@ -127,10 +127,6 @@ function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
             if update!(step_detector, zupt[n])
                 push!(step_seg, n)
                 seg_end = n
-                if (length(step_seg) == 1)
-                    display(dx[:, n])
-                    display(quat[:, n])
-                end
                 break
             end
         end

@@ -4,7 +4,7 @@ using LinearAlgebra, Statistics
 using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
 using Interpolations     # LinearInterpolation
 using CSV, DataFrames
-using Plots
+using GLMakie
 
 include("0Util/Orientation.jl")
 include("0Util/InsConfig.jl")

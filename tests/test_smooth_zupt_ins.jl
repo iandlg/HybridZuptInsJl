@@ -10,4 +10,5 @@ imu_ov, gt_ov = HybridZuptInsJl.truncate_to_overlap(imu, gt)
 
 zupt, traj, step_segs = HybridZuptInsJl.smoothed_zupt_aided_ins(imu_ov, simdata)
 
-HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(traj, gt_ov)
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(traj, gt_ov)
+display(fig)
