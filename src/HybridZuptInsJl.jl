@@ -4,6 +4,7 @@ using LinearAlgebra, Statistics
 using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
 using Interpolations     # LinearInterpolation
 using CSV, DataFrames
+using Plots
 
 include("0Util/Orientation.jl")
 include("0Util/InsConfig.jl")
@@ -13,6 +14,8 @@ include("1Data/InertialData.jl")
 include("2ZuptIns/Equations.jl")
 include("2ZuptIns/Zupt.jl")
 include("2ZuptIns/SmoothZuptIns.jl")
+
+include("Plotting/Trajectory.jl")
 
 export TimeSeries, Trajectory, InertialData
 export truncate_to_overlap, is_compatible
