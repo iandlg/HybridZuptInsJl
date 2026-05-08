@@ -1,22 +1,9 @@
 function integrate_quaternion(q::Vector{Float64}, w::Vector{Float64}, Ts::Float64)::Vector{Float64}
-    # w: angular rate vector [wx, wy, wz] in body frame
-    P, Q, R = w .* Ts  # pre-multiply by Ts so OMEGA is already scaled
-
-    # Hamilton convention: scalar-first q = [qw, qx, qy, qz]
-    # dq/dt = 0.5 * OMEGA(w) * q
-    OMEGA = 0.5 .* [
-        0 -P -Q -R;
-        P 0 R -Q;
-        Q -R 0 P;
-        R Q -P 0]
-
     v = norm(w) * Ts
+    v ≈ 0.0 && return q
 
-    if v ≈ 0.0
-        return q
-    end
-
-    q_new = (cos(v / 2) .* I(4) .+ (2 / v) .* sin(v / 2) .* OMEGA) * q
+    dq = [cos(v / 2); (w / norm(w)) .* sin(v / 2)]   # incremental rotation quaternion
+    q_new = quat_multiply(q, dq)                   # q ⊗ dq  (body-frame, Hamilton)
     return q_new ./ norm(q_new)
 end
 
@@ -113,9 +100,7 @@ function state_matrix(
     f_t = Rb2t * u[1:3]        # 3-element vector
 
     # Skew-symmetric matrix of f_t
-    St = [0.0 -f_t[3] f_t[2];
-        f_t[3] 0.0 -f_t[1];
-        -f_t[2] f_t[1] 0.0]
+    St = -Rb2t * skew(u[1:3])
 
     Omat = zeros(T, 3, 3)
     Imat = Matrix{T}(I, 3, 3)
@@ -127,11 +112,12 @@ function state_matrix(
 
     # Continuous-time process noise gain matrix (9x6)
     Gc = [Omat Omat;
-        Rb2t Omat;
-        Omat -Rb2t]
+        Imat Omat;
+        Omat Imat]
 
     # First-order discrete approximation
     F = I(9) + Ts * Fc
+    F[7:9, 7:9] = exp(skew(u[4:6] * Ts))'
     G = Ts * Gc
 
     return F, G
@@ -164,26 +150,41 @@ function comp_internal_states(
     x_out = x_in + dx
 
     # Orientation errors (small angles)
-    ϵ = dx[7:9]
+    dq = matrix_to_quat(euler_to_matrix(dx[7:9]))
 
     # Skew-symmetric matrix of orientation errors
-    Ω = [0.0 -ϵ[3] ϵ[2];
-        ϵ[3] 0.0 -ϵ[1];
-        -ϵ[2] ϵ[1] 0.0]
+    # Ω = skew(dx[7:9])
 
     # Correct rotation matrix: R_corrected = (I - Ω) * R
-    R_corr = (I(3) - Ω) * R
+    # R_corr = (I(3) - Ω) * R
 
     # Overwrite the Euler-angle part of the state vector
-    x_out[7:9] = matrix_to_euler(R_corr)
+    # x_out[7:9] = matrix_to_euler(R_corr)
 
     # Compute corrected quaternion (scalar-first)
-    q_out = matrix_to_quat(R_corr)
+    q_out = quat_multiply(q_in, dq)
 
-    return x_out, q_out
+    x_out[7:9] = matrix_to_euler(quat_to_matrix(q_out))
+
+    return x_out, q_out / norm(q_out)
 end
 
-using LinearAlgebra
+"""
+    compensate_internal_states!(x, dx, quat)
+
+Apply corrections `dx` (negative of the smoothing error) to the state vectors
+`x` (9xN) and quaternions `quat` (4xN) in‑place.
+"""
+function compensate_internal_states!(x::AbstractMatrix{T},
+    dx::AbstractMatrix{T},
+    quat::AbstractMatrix{T}) where T
+    for k in axes(x, 2)
+        x_corr, q_corr = comp_internal_states(x[:, k], dx[:, k], quat[:, k])
+        x[:, k] .= x_corr
+        quat[:, k] .= q_corr
+    end
+    return x, quat
+end
 
 """
     initialize_nav(u, init_heading, init_pos)

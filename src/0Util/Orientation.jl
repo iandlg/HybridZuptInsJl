@@ -14,12 +14,12 @@ function matrix_to_euler(R::AbstractArray{T,3}) where T
     size(R, 1) == 3 && size(R, 2) == 3 || throw(DimensionMismatch("First two dimensions must be 3"))
     N = size(R, 3)
 
-    # Pre‑allocate result matrix: 3 rows (roll, pitch, yaw), N columns
+    # Pre-allocate result matrix: 3 rows (roll, pitch, yaw), N columns
     result = Matrix{Float64}(undef, 3, N)
 
     # Loop over each rotation matrix in the stack
     for k in 1:N
-        # Extract the 3×3 matrix at index k
+        # Extract the 3x3 matrix at index k
         # Using views or direct indexing; here direct access for clarity
         R11 = R[1, 1, k]
         R21 = R[2, 1, k]
@@ -29,7 +29,7 @@ function matrix_to_euler(R::AbstractArray{T,3}) where T
 
         # Compute Euler angles
         roll = atan(R32, R33)
-        pitch = -asin(R31)
+        pitch = -asin(clamp(R31, -1.0, 1.0))
         yaw = atan(R21, R11)
 
         # Store in result
@@ -42,8 +42,8 @@ function matrix_to_euler(R::AbstractArray{T,3}) where T
 end
 
 function matrix_to_euler(R::AbstractArray{T,2}) where T
-    size(R) == (3, 3) || throw(DimensionMismatch("Expected a 3×3 matrix"))
-    # Convert to 3×3×1 and call the 3D version, then squeeze the column
+    size(R) == (3, 3) || throw(DimensionMismatch("Expected a 3x3 matrix"))
+    # Convert to 3x3x1 and call the 3D version, then squeeze the column
     result_3d = matrix_to_euler(reshape(R, 3, 3, 1))
     return result_3d[:, 1]   # returns a 3-element vector
 end
@@ -59,14 +59,14 @@ Compute rotation matrices from Euler angles [roll, pitch, yaw] (in radians).
          Each column contains [roll; pitch; yaw].
 
 # Returns
-- If `ang` is a vector: a 3×3 rotation matrix.
-- If `ang` is a matrix: a 3×3×N array, where `R[:,:,k]` is the k‑th rotation matrix.
+- If `ang` is a vector: a 3x3 rotation matrix.
+- If `ang` is a matrix: a 3x3xN array, where `R[:,:,k]` is the k-th rotation matrix.
 """
 function euler_to_matrix(ang::AbstractMatrix{T}) where T<:AbstractFloat
     size(ang, 1) == 3 || throw(DimensionMismatch("Expected 3 rows, got $(size(ang,1))"))
     N = size(ang, 2)
 
-    # Pre‑allocate result: (3,3,N) with the same element type
+    # Pre-allocate result: (3,3,N) with the same element type
     R = Array{T,3}(undef, 3, 3, N)
 
     for k in 1:N
@@ -96,9 +96,9 @@ end
 # Single vector case
 function euler_to_matrix(ang::AbstractVector{T}) where T<:AbstractFloat
     length(ang) == 3 || throw(DimensionMismatch("Expected 3 elements, got $(length(ang))"))
-    # Convert to 3×1 matrix, call the matrix version, then drop the third dimension
+    # Convert to 3x1 matrix, call the matrix version, then drop the third dimension
     Mstack = euler_to_matrix(reshape(ang, 3, 1))
-    return Mstack[:, :, 1]   # return a 3×3 matrix
+    return Mstack[:, :, 1]   # return a 3x3 matrix
 end
 
 # Convenience for integer input (promote to Float64)
@@ -114,8 +114,8 @@ Convert quaternion(s) to Direction Cosine Matrix (rotation matrix).
        Quaternion convention: `[q0, q1, q2, q3]` (scalar first).
 
 # Returns
-- If `q` is a vector: a 3×3 rotation matrix.
-- If `q` is a matrix: a 3×3×N array, where `R[:,:,k]` is the k‑th rotation matrix.
+- If `q` is a vector: a 3x3 rotation matrix.
+- If `q` is a matrix: a 3x3xN array, where `R[:,:,k]` is the k-th rotation matrix.
 """
 function quat_to_matrix(q::AbstractMatrix{T}) where T<:Real
     size(q, 1) == 4 || throw(DimensionMismatch("Expected 4 rows, got $(size(q,1))"))
@@ -166,11 +166,6 @@ function quat_to_matrix(q::AbstractVector{T}) where T<:Real
     return Rstack[:, :, 1]
 end
 
-# Convenience for integer input
-quat_to_matrix(q::AbstractVector{<:Integer}) = quat_to_matrix(float.(q))
-quat_to_matrix(q::AbstractMatrix{<:Integer}) = quat_to_matrix(float.(q))
-
-# ----------------------------------------------------------------------
 
 """
     matrix_to_quat(R)
@@ -178,12 +173,12 @@ quat_to_matrix(q::AbstractMatrix{<:Integer}) = quat_to_matrix(float.(q))
 Convert Direction Cosine Matrix (rotation matrix) to quaternion.
 
 # Arguments
-- `R`: 3×3 matrix (single), or 3×3×N array (batch)
+- `R`: 3x3 matrix (single), or 3x3xN array (batch)
        Rotation matrix/matrices.
 
 # Returns
-- If `R` is 3×3: a 4‑element vector `[q0, q1, q2, q3]` (scalar first).
-- If `R` is 3×3×N: a 4×N matrix, each column a quaternion `[q0; q1; q2; q3]`.
+- If `R` is 3x3: a 4-element vector `[q0, q1, q2, q3]` (scalar first).
+- If `R` is 3x3xN: a 4xN matrix, each column a quaternion `[q0; q1; q2; q3]`.
 """
 function matrix_to_quat(R::AbstractArray{T,3}) where T<:Real
     size(R, 1) == 3 && size(R, 2) == 3 || throw(DimensionMismatch("First two dimensions must be 3"))
@@ -191,7 +186,7 @@ function matrix_to_quat(R::AbstractArray{T,3}) where T<:Real
     q = Array{T,2}(undef, 4, N)
 
     for k in 1:N
-        # Extract the 3×3 matrix
+        # Extract the 3x3 matrix
         R11 = R[1, 1, k]
         R12 = R[1, 2, k]
         R13 = R[1, 3, k]
@@ -239,7 +234,7 @@ end
 
 # Single matrix case
 function matrix_to_quat(R::AbstractMatrix{T}) where T<:Real
-    size(R) == (3, 3) || throw(DimensionMismatch("Expected 3×3 matrix"))
+    size(R) == (3, 3) || throw(DimensionMismatch("Expected 3x3 matrix"))
     qstack = matrix_to_quat(reshape(R, 3, 3, 1))
     return qstack[:, 1]
 end
@@ -294,3 +289,70 @@ end
 # Convenience for integers
 normalize_quat(q::AbstractVector{<:Integer}) = normalize_quat(float.(q))
 normalize_quat(q::AbstractMatrix{<:Integer}) = normalize_quat(float.(q))
+
+
+function quat_multiply(p::AbstractVector, q::AbstractVector)
+    pw, px, py, pz = p
+    qw, qx, qy, qz = q
+    return [
+        pw * qw - px * qx - py * qy - pz * qz,
+        pw * qx + px * qw + py * qz - pz * qy,
+        pw * qy - px * qz + py * qw + pz * qx,
+        pw * qz + px * qy - py * qx + pz * qw
+    ]
+end
+
+using LinearAlgebra
+
+"""
+    skew(v)
+
+Return the 3x3 skew-symmetric matrix of a 3-element vector `v`.
+
+# Arguments
+- `v`: AbstractVector of length 3.
+
+# Returns
+- A 3x3 matrix S such that S * w = cross(v, w) for any vector w.
+"""
+function skew(v::AbstractVector{T}) where T<:Real
+    length(v) == 3 || throw(DimensionMismatch("Expected vector of length 3, got $(length(v))"))
+    # Unpack components
+    v1, v2, v3 = v[1], v[2], v[3]
+    return T[0 -v3 v2;
+        v3 0 -v1;
+        -v2 v1 0]
+end
+
+"""
+    skew(v)
+
+Compute skew-symmetric matrices for a batch of 3-element vectors.
+
+# Arguments
+- `v`: AbstractMatrix of size (3, N) – each column is a vector.
+
+# Returns
+- A 3x3xN array S_batch where S_batch[:,:,k] = skew(V[:,k]).
+"""
+function skew(v::AbstractMatrix{T}) where T<:Real
+    size(v, 1) == 3 || throw(DimensionMismatch("Expected 3 rows, got $(size(v,1))"))
+    N = size(v, 2)
+    S_batch = Array{T,3}(undef, 3, 3, N)
+    for k in 1:N
+        v1, v2, v3 = v[1, k], v[2, k], v[3, k]
+        S_batch[:, :, k] = T[0 -v3 v2;
+            v3 0 -v1;
+            -v2 v1 0]
+    end
+    return S_batch
+end
+
+
+function quat_conjugate(q::AbstractVector{T}) where T<:Real
+    length(q) == 4 || throw(DimensionMismatch("Expected vector of length 4, got $(length(q))"))
+    qw, qx, qy, qz = q
+    return [qw, -qx, -qy, -qz]
+end
+
+

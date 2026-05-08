@@ -35,26 +35,6 @@ function update!(det::StepDetector, zupt::Bool)
 end
 
 # --------------------------------------------------------------------------
-# Batch compensation for internal states (comp_internal_states on many columns)
-# --------------------------------------------------------------------------
-"""
-    compensate_internal_states!(x, dx, quat)
-
-Apply corrections `dx` (negative of the smoothing error) to the state vectors
-`x` (9×N) and quaternions `quat` (4×N) in‑place.
-"""
-function compensate_internal_states!(x::AbstractMatrix{T},
-    dx::AbstractMatrix{T},
-    quat::AbstractMatrix{T}) where T
-    for k in 1:size(x, 2)
-        x_corr, q_corr = comp_internal_states(x[:, k], dx[:, k], quat[:, k])
-        x[:, k] .= x_corr
-        quat[:, k] .= q_corr
-    end
-    return x, quat
-end
-
-# --------------------------------------------------------------------------
 # Main smoothed ZUPT‑aided INS
 # --------------------------------------------------------------------------
 """
@@ -171,7 +151,7 @@ function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
         # ------------------------------------------------------------------
         idx_range = seg_start:seg_end
         compensate_internal_states!(x[:, idx_range],
-            -dx_smooth[:, idx_range],
+            dx_smooth[:, idx_range],
             quat[:, idx_range])
 
         # ------------------------------------------------------------------
@@ -195,12 +175,7 @@ function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
     # Rotation matrices from Euler angles (3×3×N)
     R_nb = euler_to_matrix(x[7:9, :])   # assuming euler_to_matrix works on 3×N
 
-    traj = Trajectory(
-        t=inertial.t,
-        pos=x[1:3, :],
-        R_nb=R_nb,
-        vel=x[4:6, :]
-    )
+    traj = Trajectory(inertial.t, x[1:3, :], R_nb, x[4:6, :])
 
     return zupt, traj, step_seg
 end
