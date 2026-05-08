@@ -154,8 +154,6 @@ function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
         # Compensate internal states using the smoothed errors
         # ------------------------------------------------------------------
         idx_range = seg_start:seg_end
-        @show seg_start seg_end size(x) size(quat)
-        idx_range = seg_start:seg_end
         compensate_internal_states!(
             view(x, :, idx_range),           # view of columns idx_range
             -dx_smooth[:, idx_range],        # negative copy (or use view if needed)
