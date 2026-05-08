@@ -11,7 +11,7 @@ StepDetector() = StepDetector(0, 0, false)
 """
     update!(det::StepDetector, zupt::Bool) -> Bool
 
-Update the detector state with a new zero‑velocity flag.
+Update the detector state with a new zero-velocity flag.
 Returns `true` when a segment end should be triggered.
 """
 function update!(det::StepDetector, zupt::Bool)
@@ -35,19 +35,19 @@ function update!(det::StepDetector, zupt::Bool)
 end
 
 # --------------------------------------------------------------------------
-# Main smoothed ZUPT‑aided INS
+# Main smoothed ZUPT-aided INS
 # --------------------------------------------------------------------------
 """
     smoothed_zupt_aided_ins(inertial, simdata)
 
-Run the open‑loop zero‑velocity aided INS Kalman filter with RTS smoothing.
+Run the open-loop zero-velocity aided INS Kalman filter with RTS smoothing.
 
 # Arguments
 - `inertial`: `InertialData` with fields `t::Vector{Float64}` and `u::Matrix{Float64}` (6×N).
 - `simdata`: `InsConfig` object.
 
 # Returns
-- `zupt`: Boolean vector of zero‑velocity flags.
+- `zupt`: Boolean vector of zero-velocity flags.
 - `traj`: `Trajectory` object containing estimated positions, orientations and velocities.
 - `step_seg`: Vector of indices where step segments were terminated.
 """
@@ -63,8 +63,9 @@ function smoothed_zupt_aided_ins(
     else
         collect(simdata.g)
     end
+    display(g_vec)
 
-    # Zero‑velocity detection (assume external function)
+    # Zero-velocity detection (assume external function)
     zupt, _ = detect_zupt(u, simdata)   # returns Vector{Bool} of length N
 
     # Initialise filter matrices
@@ -92,7 +93,7 @@ function smoothed_zupt_aided_ins(
         init_pos_array(simdata))
 
     # Segmentation bookkeeping
-    seg_start = 2          # first index to process (1‑based, offset for n-1)
+    seg_start = 2          # first index to process (1-based, offset for n-1)
     seg_end = N
     step_detector = StepDetector()
     step_seg = Int[]
@@ -108,6 +109,7 @@ function smoothed_zupt_aided_ins(
             )
             F[:, :, n], G = state_matrix(quat[:, n], u[:, n], Ts)
 
+
             dx[:, n] = F[:, :, n] * dx[:, n-1]
             P[:, :, n] = F[:, :, n] * P[:, :, n-1] * F[:, :, n]' +
                          G * Q * G'
@@ -115,21 +117,33 @@ function smoothed_zupt_aided_ins(
             dx_timeupd[:, n] = dx[:, n]
             P_timeupd[:, :, n] = P[:, :, n]
 
-            # Zero‑velocity update
+            # Zero-velocity update
             if zupt[n]
                 S = H * P[:, :, n] * H' + R
                 K = P[:, :, n] * H' / S   # equivalent to K = P*H'*inv(S)
                 dx[:, n] = dx[:, n] - K * (dx[4:6, n] - x[4:6, n])
                 P[:, :, n] = (I9 - K * H) * P[:, :, n]
             end
-
+            if n == 3
+                display(dx[:, n])
+            end
             # Enforce symmetry
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
+            if n == 2
+                display(P[:, :, n])
+                display(dx[:, n])
+            end
 
             # Segmentation decision
             if update!(step_detector, zupt[n])
                 push!(step_seg, n)
                 seg_end = n
+                if length(step_seg) == 1
+                    display(n)
+                    display(dx[:, n])
+                    display(P[:, :, n])
+                    display(quat[:, n])
+                end
                 break
             end
         end
@@ -147,6 +161,11 @@ function smoothed_zupt_aided_ins(
             P_smooth[:, :, n] = P[:, :, n] +
                                 A * (P_smooth[:, :, n+1] - P_timeupd[:, :, n+1]) * A'
             P_smooth[:, :, n] = (P_smooth[:, :, n] + P_smooth[:, :, n]') / 2
+            # if (length(step_seg) == 1) & (n == seg_start)
+            #     display(n)
+            #     display(dx_smooth[:, n])
+            #     display(P_smooth[:, :, n])
+            # end
         end
 
         # ------------------------------------------------------------------
@@ -163,7 +182,7 @@ function smoothed_zupt_aided_ins(
         # Prepare for next segment (reset error state and covariance)
         # ------------------------------------------------------------------
         dx[:, seg_end] .= 0.0
-        P[1:2, 9, seg_end] .= 0.0   # note: 1‑based, element (9,?) – Python indices 0:2,8
+        P[1:2, 9, seg_end] .= 0.0   # note: 1-based, element (9,?) – Python indices 0:2,8
         P[9, 1:2, seg_end] .= 0.0
 
         if seg_end != N

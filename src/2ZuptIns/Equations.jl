@@ -1,74 +1,79 @@
-function integrate_quaternion(q::Vector{Float64}, w::Vector{Float64}, Ts::Float64)::Vector{Float64}
-    v = norm(w) * Ts
-    v ≈ 0.0 && return q
-
-    dq = [cos(v / 2); (w / norm(w)) .* sin(v / 2)]   # incremental rotation quaternion
-    q_new = quat_multiply(q, dq)                   # q ⊗ dq  (body-frame, Hamilton)
-    return q_new ./ norm(q_new)
-end
-
 """
-    navigation_equations(x, u, q, Ts, g)
+    navigation_equations(x, u, q, Ts, g_vec)
 
-Mechanized navigation equations of the inertial navigation system.
+Mechanized navigation equations (single step).
 
 # Arguments
-- `x`: 9-element vector `[position (3), velocity (3), euler angles (3)]`
-- `u`: 6-element vector `[specific_force (3), angular_rates (3)]`
-- `q`: 4-element quaternion **scalar-first** `[q0, q1, q2, q3]`
+- `x`: 9-element vector `[px, py, pz, vx, vy, vz, roll, pitch, yaw]` (old state)
+- `u`: 6-element vector `[ax, ay, az, wx, wy, wz]` (IMU measurements)
+- `q`: 4-element quaternion scalar-first `[q0, q1, q2, q3]` (old quaternion)
 - `Ts`: sampling time (seconds)
-- `g`: gravitational acceleration, scalar (added to each component of `f_t`)
+- `g_vec`: 3-element gravity vector `[gx, gy, gz]` (e.g., `[0,0,9.81]`)
 
 # Returns
-- `y`: new navigation state `[position (3), velocity (3), euler angles (3)]`
-- `q`: updated quaternion (scalar-first)
+- `y`: new state vector (9 elements)
+- `q_new`: updated quaternion
 """
-function navigation_equations(
-    x::AbstractVector{T},
+function navigation_equations(x::AbstractVector{T},
     u::AbstractVector{T},
     q::AbstractVector{T},
     Ts::Real,
-    g::AbstractVector{T}
-) where T<:Real
+    g_vec::AbstractVector{T}) where T<:Real
 
-    # Ensure floats and copy quaternion for in-place update
-    xf = float.(x)
-    uf = float.(u)
-    qf = float.(q)   # scalar-first
+    # ------------------------------------------------------------------
+    # 1. Quaternion update from angular rates
+    # ------------------------------------------------------------------
+    w_tb = u[4:6]          # angular rates [wx, wy, wz]
+    P, Q, R = w_tb .* Ts   # scaled angular increments
 
-    # -------- 1. Quaternion update from angular rates -----------------
-    qf = integrate_quaternion(qf, uf[4:6], Ts)
+    # Build OMEGA matrix (scalar-first convention)
+    OMEGA = 0.5 * [
+        0.0 R -Q P;
+        -R 0.0 P Q;
+        Q -P 0.0 R;
+        -P -Q -R 0.0
+    ]
 
-    # -------- 2. Euler angles from the updated quaternion ------------
-    # Convert scalar-first -> vector-first for quat_to_dcm
-    R_nb = quat_to_matrix(qf)               # 3x3 rotation matrix
-    euler = matrix_to_euler(R_nb)          # [roll, pitch, yaw]
+    v = norm(w_tb) * Ts
+    if v != 0.0
+        q_new = (cos(v / 2) * I(4) + (2 / v) * sin(v / 2) * OMEGA) * q
+        q_new ./= norm(q_new)
+    else
+        q_new = copy(q)
+    end
 
-    # -------- 3. Position & velocity update --------------------------
-    f_t = R_nb * uf[1:3]     # specific force in navigation frame
-    acc_t = f_t + g         # add gravity
+    # ------------------------------------------------------------------
+    # 2. Extract Euler angles from the updated quaternion
+    # ------------------------------------------------------------------
+    R_nb = quat_to_matrix(q_new)   # 3x3 rotation matrix (body-to-navigation)
+    attitude = matrix_to_euler(R_nb)
 
-    # Build state transition matrix A (6x6)
-    A = Matrix{Float64}(I, 6, 6)
+    # ------------------------------------------------------------------
+    # 3. Position and velocity update
+    # ------------------------------------------------------------------
+    # Specific force in navigation frame
+    f_t = R_nb * u[1:3]
+
+    # Acceleration in navigation frame (gravity added)
+    acc_t = f_t + g_vec
+
+    # State transition matrix A (6x6)
+    A = Matrix{T}(I, 6, 6)
     A[1, 4] = Ts
     A[2, 5] = Ts
     A[3, 6] = Ts
 
-    # Build input matrix B (6x3)
-    B = vcat((
-            Ts^2 / 2) * I(3),
-        Ts * I(3)
-    )
+    # Input matrix B (6x3)
+    B = vcat((Ts^2 / 2) * I(3), Ts * I(3))
 
-    # New position/velocity (first 6 elements)
-    y_pv = A * xf[1:6] + B * acc_t
+    # Update position and velocity (first 6 elements)
+    y_pv = A * x[1:6] + B * acc_t
 
-    # Assemble full output state
-    y = vcat(y_pv, euler)
+    # Assemble full new state
+    y = vcat(y_pv, attitude)
 
-    return y, qf
+    return y, q_new
 end
-
 
 """
     state_matrix(q, u, Ts)
@@ -76,7 +81,7 @@ end
 Calculate the state transition matrix F and the process noise gain matrix G.
 
 # Arguments
-- `q`: 4-element vector `[q0, q1, q2, q3]` – quaternion (scalar first)
+- `q`: 4-element vector `[qx, qy, qz, qw]`
 - `u`: 6-element vector `[specific_force (3), angular_rates (3)]`
 - `Ts`: sampling time (seconds)
 
@@ -94,13 +99,15 @@ function state_matrix(
     length(u) == 6 || throw(DimensionMismatch("u must have length 6"))
 
     # Rotation matrix (body-to-navigation) from quaternion
-    Rb2t = quat_to_matrix(q)   # 3x3
+    R_nb = quat_to_matrix(q)   # 3x3
 
     # Specific force in navigation frame
-    f_t = Rb2t * u[1:3]        # 3-element vector
+    f_n = R_nb * u[1:3]        # 3-element vector
 
     # Skew-symmetric matrix of f_t
-    St = -Rb2t * skew(u[1:3])
+    St = [0.0 -f_n[3] f_n[2];
+        f_n[3] 0.0 -f_n[1];
+        -f_n[2] f_n[1] 0.0]
 
     Omat = zeros(T, 3, 3)
     Imat = Matrix{T}(I, 3, 3)
@@ -112,16 +119,16 @@ function state_matrix(
 
     # Continuous-time process noise gain matrix (9x6)
     Gc = [Omat Omat;
-        Imat Omat;
-        Omat Imat]
+        R_nb Omat;
+        Omat -R_nb]
 
     # First-order discrete approximation
     F = I(9) + Ts * Fc
-    F[7:9, 7:9] = exp(skew(u[4:6] * Ts))'
     G = Ts * Gc
 
     return F, G
 end
+
 
 """
     comp_internal_states(x_in, dx, q_in)
@@ -131,11 +138,11 @@ Correct estimated navigation states with Kalman filter perturbations.
 # Arguments
 - `x_in`: A priori state vector, length 9: [position (3), velocity (3), Euler angles (3)]
 - `dx`:   Error state vector, length 9: [position errors, velocity errors, orientation errors]
-- `q_in`: A priori quaternion, scalar-first `[q0, q1, q2, q3]`
+- `q_in`: Quaternion vector, `[qx, qy, qz, qw]`
 
 # Returns
 - `x_out`: Corrected (posterior) state vector
-- `q_out`: Corrected quaternion (scalar-first)
+- `q_out`: Corrected quaternion
 """
 function comp_internal_states(
     x_in::AbstractVector{T},
@@ -143,37 +150,41 @@ function comp_internal_states(
     q_in::AbstractVector{T}
 ) where T<:Real
 
-    # Convert quaternion to rotation matrix (body-to-navigation)
+    # Convert quaternion to rotation matrix (body‑to‑navigation)
     R = quat_to_matrix(q_in)
 
     # Simple additive correction for position and velocity
     x_out = x_in + dx
 
     # Orientation errors (small angles)
-    dq = matrix_to_quat(euler_to_matrix(dx[7:9]))
+    ϵ = dx[7:9]
 
-    # Skew-symmetric matrix of orientation errors
-    # Ω = skew(dx[7:9])
+    # Skew‑symmetric matrix of orientation errors
+    Ω = skew(ϵ)
 
     # Correct rotation matrix: R_corrected = (I - Ω) * R
-    # R_corr = (I(3) - Ω) * R
+    R_corr = (I(3) - Ω) * R
 
-    # Overwrite the Euler-angle part of the state vector
-    # x_out[7:9] = matrix_to_euler(R_corr)
+    # Extract corrected Euler angles [roll, pitch, yaw]
+    roll = atan(R_corr[3, 2], R_corr[3, 3])
+    pitch = atan(-R_corr[3, 1] / sqrt(R_corr[3, 2]^2 + R_corr[3, 3]^2))
+    yaw = atan(R_corr[2, 1], R_corr[1, 1])
 
-    # Compute corrected quaternion (scalar-first)
-    q_out = quat_multiply(q_in, dq)
+    # Overwrite the Euler‑angle part of the state vector
+    x_out[7] = roll
+    x_out[8] = pitch
+    x_out[9] = yaw
 
-    x_out[7:9] = matrix_to_euler(quat_to_matrix(q_out))
+    # Compute corrected quaternion (scalar‑first)
+    q_out = matrix_to_quat(R_corr)
 
-    return x_out, q_out / norm(q_out)
+    return x_out, q_out
 end
-
 """
     compensate_internal_states!(x, dx, quat)
 
 Apply corrections `dx` (negative of the smoothing error) to the state vectors
-`x` (9xN) and quaternions `quat` (4xN) in‑place.
+`x` (9xN) and quaternions `quat` (4xN) in-place.
 """
 function compensate_internal_states!(x::AbstractMatrix{T},
     dx::AbstractMatrix{T},
@@ -198,11 +209,13 @@ Calculate the initial state of the navigation equations.
 
 # Returns
 - `x`: initial navigation state vector `[position (3), velocity (3), Euler angles (3)]`.
-- `quat`: quaternion `[q0, q1, q2, q3]` representing the initial attitude.
+- `quat`: quaternion `[qx, qy, qz, qw]` representing the initial attitude.
 """
-function initialize_nav(u::AbstractMatrix{T},
+function initialize_nav(
+    u::AbstractMatrix{T},
     init_heading::Real,
-    init_pos::AbstractVector{T}) where T<:Real
+    init_pos::AbstractVector{T}
+) where T<:Real
     # Use first 20 samples to estimate roll & pitch (assume stationary)
     n_samples = min(20, size(u, 2))
     f_u = mean(u[1, 1:n_samples])
@@ -232,7 +245,7 @@ initialize_nav(u::AbstractMatrix{<:Integer}, init_heading, init_pos) =
 """
     init_filter(simdata)
 
-Initialize the Kalman filter matrices from an `INSConfig` object.
+Initialize the Kalman filter matrices from an `InsConfig` object.
 
 # Arguments
 - `simdata`: `INSConfig` instance (provides noise standard deviations).

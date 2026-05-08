@@ -104,14 +104,16 @@ end
 # Convenience for integer input (promote to Float64)
 euler_to_matrix(ang::AbstractVector{<:Integer}) = euler_to_matrix(float.(ang))
 euler_to_matrix(ang::AbstractMatrix{<:Integer}) = euler_to_matrix(float.(ang))
+
+
 """
-    quat_to_matrix(q)
+    quat_to_dcm(q)
 
 Convert quaternion(s) to Direction Cosine Matrix (rotation matrix).
 
 # Arguments
 - `q`: AbstractVector of length 4 (single quaternion), or AbstractMatrix of size (4, N)
-       Quaternion convention: `[q0, q1, q2, q3]` (scalar first).
+       Quaternion convention: [qx, qy, qz, qw] (scalar last).
 
 # Returns
 - If `q` is a vector: a 3x3 rotation matrix.
@@ -123,12 +125,12 @@ function quat_to_matrix(q::AbstractMatrix{T}) where T<:Real
     R = Array{T,3}(undef, 3, 3, N)
 
     for k in 1:N
-        q0, q1, q2, q3 = q[1, k], q[2, k], q[3, k], q[4, k]
+        q1, q2, q3, q4 = q[1, k], q[2, k], q[3, k], q[4, k]   # qx, qy, qz, qw
 
         p1 = q1^2
         p2 = q2^2
         p3 = q3^2
-        p4 = q0^2
+        p4 = q4^2
         denom = p1 + p2 + p3 + p4
         p6 = denom == 0 ? 0.0 : 2.0 / denom
 
@@ -140,17 +142,17 @@ function quat_to_matrix(q::AbstractMatrix{T}) where T<:Real
         # Off-diagonal elements
         a1 = p6 * q1
         a2 = p6 * q2
-        t = p6 * q3 * q0
+        t = p6 * q3 * q4
         u = a1 * q2
         R[1, 2, k] = u - t
         R[2, 1, k] = u + t
 
-        t = a2 * q0
+        t = a2 * q4
         u = a1 * q3
         R[1, 3, k] = u + t
         R[3, 1, k] = u - t
 
-        t = a1 * q0
+        t = a1 * q4
         u = a2 * q3
         R[2, 3, k] = u - t
         R[3, 2, k] = u + t
@@ -166,9 +168,14 @@ function quat_to_matrix(q::AbstractVector{T}) where T<:Real
     return Rstack[:, :, 1]
 end
 
+# Convenience for integer input
+quat_to_matrix(q::AbstractVector{<:Integer}) = quat_to_matrix(float.(q))
+quat_to_matrix(q::AbstractMatrix{<:Integer}) = quat_to_matrix(float.(q))
+
+# ----------------------------------------------------------------------
 
 """
-    matrix_to_quat(R)
+    dcm_to_quat(R)
 
 Convert Direction Cosine Matrix (rotation matrix) to quaternion.
 
@@ -177,8 +184,8 @@ Convert Direction Cosine Matrix (rotation matrix) to quaternion.
        Rotation matrix/matrices.
 
 # Returns
-- If `R` is 3x3: a 4-element vector `[q0, q1, q2, q3]` (scalar first).
-- If `R` is 3x3xN: a 4xN matrix, each column a quaternion `[q0; q1; q2; q3]`.
+- If `R` is 3x3: a 4-element vector [qx, qy, qz, qw].
+- If `R` is 3x3xN: a 4xN matrix, each column a quaternion.
 """
 function matrix_to_quat(R::AbstractArray{T,3}) where T<:Real
     size(R, 1) == 3 && size(R, 2) == 3 || throw(DimensionMismatch("First two dimensions must be 3"))
@@ -201,30 +208,30 @@ function matrix_to_quat(R::AbstractArray{T,3}) where T<:Real
 
         if T_trace > 1e-8
             S = 0.5 / sqrt(T_trace)
-            q[1, k] = 0.25 / S            # q0 (scalar)
-            q[2, k] = (R32 - R23) * S      # q1
-            q[3, k] = (R13 - R31) * S      # q2
-            q[4, k] = (R21 - R12) * S      # q3
+            q[4, k] = 0.25 / S            # qw (scalar)
+            q[1, k] = (R32 - R23) * S      # qx
+            q[2, k] = (R13 - R31) * S      # qy
+            q[3, k] = (R21 - R12) * S      # qz
         else
             # Find the largest diagonal element
             if R11 > R22 && R11 > R33
                 S = sqrt(1 + R11 - R22 - R33) * 2
-                q[1, k] = (R32 - R23) / S
-                q[2, k] = 0.25 * S
-                q[3, k] = (R12 + R21) / S
-                q[4, k] = (R13 + R31) / S
+                q[4, k] = (R32 - R23) / S
+                q[1, k] = 0.25 * S
+                q[2, k] = (R12 + R21) / S
+                q[3, k] = (R13 + R31) / S
             elseif R22 > R33
                 S = sqrt(1 + R22 - R11 - R33) * 2
-                q[1, k] = (R13 - R31) / S
-                q[2, k] = (R12 + R21) / S
-                q[3, k] = 0.25 * S
-                q[4, k] = (R23 + R32) / S
+                q[4, k] = (R13 - R31) / S
+                q[1, k] = (R12 + R21) / S
+                q[2, k] = 0.25 * S
+                q[3, k] = (R23 + R32) / S
             else
                 S = sqrt(1 + R33 - R11 - R22) * 2
-                q[1, k] = (R21 - R12) / S
-                q[2, k] = (R13 + R31) / S
-                q[3, k] = (R23 + R32) / S
-                q[4, k] = 0.25 * S
+                q[4, k] = (R21 - R12) / S
+                q[1, k] = (R13 + R31) / S
+                q[2, k] = (R23 + R32) / S
+                q[3, k] = 0.25 * S
             end
         end
     end
@@ -238,10 +245,6 @@ function matrix_to_quat(R::AbstractMatrix{T}) where T<:Real
     qstack = matrix_to_quat(reshape(R, 3, 3, 1))
     return qstack[:, 1]
 end
-
-# Convenience for integer input
-matrix_to_quat(R::AbstractMatrix{<:Integer}) = matrix_to_quat(float.(R))
-matrix_to_quat(R::AbstractArray{<:Integer,3}) = matrix_to_quat(float.(R))
 
 # Integer input
 matrix_to_quat(R::AbstractMatrix{<:Integer}) = matrix_to_quat(float.(R))
@@ -290,20 +293,6 @@ end
 normalize_quat(q::AbstractVector{<:Integer}) = normalize_quat(float.(q))
 normalize_quat(q::AbstractMatrix{<:Integer}) = normalize_quat(float.(q))
 
-
-function quat_multiply(p::AbstractVector, q::AbstractVector)
-    pw, px, py, pz = p
-    qw, qx, qy, qz = q
-    return [
-        pw * qw - px * qx - py * qy - pz * qz,
-        pw * qx + px * qw + py * qz - pz * qy,
-        pw * qy - px * qz + py * qw + pz * qx,
-        pw * qz + px * qy - py * qx + pz * qw
-    ]
-end
-
-using LinearAlgebra
-
 """
     skew(v)
 
@@ -346,13 +335,6 @@ function skew(v::AbstractMatrix{T}) where T<:Real
             -v2 v1 0]
     end
     return S_batch
-end
-
-
-function quat_conjugate(q::AbstractVector{T}) where T<:Real
-    length(q) == 4 || throw(DimensionMismatch("Expected vector of length 4, got $(length(q))"))
-    qw, qx, qy, qz = q
-    return [qw, -qx, -qy, -qz]
 end
 
 

@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using LinearAlgebra
 
 # Single quaternion → DCM
-q = [0.1, 0.5, 0.5, 0.4]   # qx,qy,qz,qw
+q = [0.5, 0.5, 0.4, 0.1]   # qx,qy,qz,qw
 q = HybridZuptInsJl.normalize_quat(q)
 R = HybridZuptInsJl.quat_to_matrix(q)          # 3×3 matrix
 eu = HybridZuptInsJl.matrix_to_euler(R)
@@ -19,14 +19,6 @@ R_batch = HybridZuptInsJl.quat_to_matrix(q_batch)      # 3×3×10
 q_back = HybridZuptInsJl.matrix_to_quat(R_batch)      # 4×10 matrix
 
 
-# Test rotations and quaternion
-x = [0.1, 0.2, 0.3]
-x_quat = [0, 0.1, 0.2, 0.3]
-q = HybridZuptInsJl.normalize_quat([0.1, 0.5, 0.5, 0.4])
-q_conj = HybridZuptInsJl.quat_conjugate(q)
-x_prime_q = HybridZuptInsJl.quat_multiply(HybridZuptInsJl.quat_multiply(q, x_quat), q_conj)
-
-x_R = HybridZuptInsJl.quat_to_matrix(q) * x
 
 
 # Test using rotation vectors
