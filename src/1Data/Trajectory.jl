@@ -24,17 +24,6 @@ Base.getindex(tr::Trajectory, mask) = Trajectory(
     tr.vel === nothing ? nothing : tr.vel[:, mask]
 )
 
-# Euler angles (3, N) — roll/pitch/yaw from rotation matrices
-function euler_nb(tr::Trajectory)
-    N = length(tr.t)
-    eu = Matrix{Float64}(undef, 3, N)
-    for i in 1:N
-        R = RotMatrix{3}(tr.R_nb[:, :, i])
-        eu[:, i] .= Rotations.params(RotXYZ(R))  # roll, pitch, yaw
-    end
-    return eu
-end
-
 # Load from CSV (same column convention as Python)
 function Trajectory(path::AbstractString)
     df = CSV.read(path, DataFrame; header=false)
@@ -109,7 +98,9 @@ end
 # 2-D RMSE (x/y only)
 function rmse(tr::Trajectory, gt::Trajectory)
     is_compatible(tr, gt) || throw(ArgumentError("incompatible time series"))
-    return sqrt(mean(sum((tr.pos[1:2, :] .- gt.pos[1:2, :]) .^ 2; dims=1)))
+    n = size(tr.pos, 2)
+    err_sq = sum((tr.pos[1:2, :] .- gt.pos[1:2, :]) .^ 2, dims=1)[:]   # flatten to vector
+    return sqrt.(cumsum(err_sq) ./ (1:n))
 end
 
 # Step vectors in body frame
@@ -131,9 +122,21 @@ function step_vectors_heading(tr::Trajectory, step_seg::Vector{Int})
     Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:end-1]]
     steps = similar(Δpos)
     for k in 1:N
-        ψ = eu[3, k]                            # yaw only
-        R_hn = RotMatrix(RotZ(-ψ))               # heading→navigation inverse
+        eu_nh = [0, 0, eu[3, k]]
+        R_hn = euler_to_matrix(eu_nh)'
         steps[:, k] = R_hn * Δpos[:, k]
     end
     return steps
+end
+
+# Helper to compute step lengths from a trajectory and segment indices
+function step_lengths(traj::Trajectory, segs::Vector{Int})
+    n_steps = length(segs) - 1
+    lengths = Vector{Float64}(undef, n_steps)
+    for i in 1:n_steps
+        p1 = traj.pos[:, segs[i]]
+        p2 = traj.pos[:, segs[i+1]]
+        lengths[i] = sqrt(sum((p2 .- p1) .^ 2))
+    end
+    return lengths
 end

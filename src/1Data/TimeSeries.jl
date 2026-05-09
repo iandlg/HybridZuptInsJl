@@ -28,3 +28,9 @@ function is_compatible(series::AbstractTimeSeries...)
     return all(size(s.t) == size(base.t) && maximum(abs.(s.t .- base.t)) <= 1e-9
                for s in series[begin+1:end])
 end
+
+@enum ReferenceFrame begin
+    BODY = 1
+    HEADING = 2
+    NAVIGATION = 3
+end
