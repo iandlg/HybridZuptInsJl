@@ -143,6 +143,42 @@ function apply_corrections(
     )
 end
 
+function mcmc_with_priors!(gp::GaussianProcesses.GPE;
+    n_samples::Int=200,
+    burn_in::Int=100,
+    kern_prior=Normal(0.0, 1.0),   # applied to all kernel params
+    noise_prior=Normal(-2.0, 1.0))  # applied to logNoise
+
+    # Set priors on kernel params
+    n_kern_params = GaussianProcesses.num_params(gp.kernel)
+    kern_priors = fill(kern_prior, n_kern_params)
+    GaussianProcesses.set_priors!(gp.kernel, kern_priors)
+
+    # Set prior on noise
+    GaussianProcesses.set_priors!(gp.logNoise, [noise_prior])
+
+    # Run MCMC
+    chain = GaussianProcesses.mcmc(gp; nIter=n_samples + burn_in)
+    @show size(chain)
+
+    # chain is (n_params × n_iterations) — drop burn-in
+    chain_post = chain[:, burn_in+1:end]
+
+    # average_params = Distributions.StatsBase.mean(chain_post, dims=2)[:]
+    best_idx = argmax([
+        begin
+            GaussianProcesses.set_params!(gp, chain_post[:, i])
+            GaussianProcesses.update_target!(gp)
+            gp.target
+        end for i in axes(chain_post, 2)
+    ])
+
+    GaussianProcesses.set_params!(gp, chain_post[:, best_idx])
+
+    GaussianProcesses.update_target!(gp)
+
+    return chain_post
+end
 
 function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
     lo::Vector{Float64}=fill(-3.0, GaussianProcesses.num_params(gp.kernel)),
@@ -190,10 +226,10 @@ end
 
 
 function compute_gp_corrections(
-    x::Matrix{Float64}, y::Vector{Float64};
-    kernel::Union{Nothing,GaussianProcesses.Kernel}=nothing,
-    n_restarts_optimizer::Int=5,
-    hyperparameter::Union{Nothing,Vector{Any}}=nothing
+    x::Matrix{Float64}, y::Vector{Float64},
+    kernel::Union{Nothing,GaussianProcesses.Kernel}=nothing;
+    hyperparameter::Union{Nothing,Vector{Float64}}=nothing,
+    n_restarts_optimizer::Int=5
 )
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
@@ -218,8 +254,8 @@ function compute_gp_corrections(
     make_kernel() = kernel === nothing ? GaussianProcesses.SE(log_ℓ, log_σ_f) : deepcopy(kernel)
 
     # logNoise is handled separately inside the function
-    lo = [-4.0, -4.0]
-    hi = [4.0, 4.0]
+    lo = [-6.0, -6.0]
+    hi = [6.0, 6.0]
 
     for i in 1:D
         test_start = floor(Int, (i - 1) * n_samples / D) + 1
@@ -231,6 +267,7 @@ function compute_gp_corrections(
 
         x_train = x_scaled[:, train_ind]
         y_train = y[train_ind]
+        y_test = y[test_ind]
         x_test = x_scaled[:, test_ind]
 
         gp = GaussianProcesses.GP(x_train, y_train,
@@ -238,7 +275,22 @@ function compute_gp_corrections(
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
         @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
         if n_restarts_optimizer > 0
-            optimize_with_restarts!(gp, n_restarts_optimizer; lo=lo, hi=hi)
+            y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
+            target = sqrt(mean((y_test .- y_pred) .^ 2))
+            best_params = GaussianProcesses.get_params(gp)
+            for i in 1:1
+                optimize_with_restarts!(gp, 3; lo=lo, hi=hi)
+                y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
+
+                new_target = sqrt(mean((y_test .- y_pred) .^ 2))
+                if new_target < target
+                    target = new_target
+                    @info "new target $target"
+                    best_params = GaussianProcesses.get_params(gp)
+                end
+            end
+            # optimize_with_restarts!(gp, n_restarts_optimizer; lo=lo, hi=hi)
+            # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
         end
 
         y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
@@ -258,10 +310,21 @@ end
 
 function compute_static_corrections(
     x::Matrix{Float64},
-    y::Vector{Float64},
-    hyperparameter::Union{Nothing,Vector{Any}}=nothing
+    y::Vector{Float64};
+    hyperparameter::Union{Nothing,Vector{Float64}}=nothing,
+    n_restarts_optimizer::Int=5
 )
-    return fill(mean(y), size(y)), hyperparameter
+    D = 10
+    _, n_samples = size(x)
+    y_pred = fill(0.0, n_samples)
+    for i in 1:D
+        test_start = floor(Int, (i - 1) * n_samples / D) + 1
+        test_end = floor(Int, i * n_samples / D)
+        train_ind = vcat(1:test_start-1, test_end+1:n_samples)
+        test_ind = test_start:test_end
+        y_pred[test_ind] = fill(mean(y[train_ind]), length(test_ind))
+    end
+    return y_pred, nothing
 end
 """
     compute_corrections(
@@ -289,8 +352,9 @@ component, returning a dictionary of results.
 function compute_corrections(
     input_feature::Matrix{Float64},
     outputs::Dict{String,Union{Vector{Float64},Matrix{Float64}}},
-    correction_method::Function;
-    hyperparameters::Union{Dict{String,Vector{Float64}}}=nothing
+    correction_method::Function,
+    hyperparameters::Union{Nothing,SeHyperparams}=nothing;
+    kwargs...
 )
 
     n_samples = size(input_feature, 2)
@@ -302,18 +366,23 @@ function compute_corrections(
 
     # Yaw correction
     @info "Computing Yaw corrections"
-    y_pred, hyper = correction_method(input_feature, outputs["yaw"], hyperparameters["yaw"])
+    y_pred, hyper = correction_method(input_feature, outputs["yaw"]; hyperparameter=hyperparameters.yaw, kwargs...)
     predictions["yaw"] = y_pred
-    hyperparams["yaw"] = hyper
-
+    if !isnothing(hyper)
+        hyperparams["yaw"] = hyper
+    end
     # Position corrections
     predictions["pos"] = Matrix{Float64}(undef, 3, n_samples)
     for d in 1:3
         @info "Computing pos_$d corrections"
-        y_pred, hyper = correction_method(input_feature, outputs["pos"][d, :], hyperparameters["pos_$d"])
+        d_hyp = getfield(hyperparameters, Symbol("pos_$d"))
+        y_pred, hyper = correction_method(input_feature, outputs["pos"][d, :]; hyperparameter=d_hyp, kwargs...)
         predictions["pos"][d, :] = y_pred
-        hyperparams["pos_$d"] = hyper
+        if !isnothing(hyper)
+            hyperparams["pos_$d"] = hyper
+        end
     end
 
     return predictions, hyperparams
 end
+

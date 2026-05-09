@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "660f5441cc3969681e3f7627c4c4a39fda899ce2"
+project_hash = "692be83dd483bca20dbb5c0c6c9305d828df8e4b"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -441,9 +441,9 @@ version = "1.11.0"
 
 [[deps.Distributions]]
 deps = ["AliasTables", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SpecialFunctions", "Statistics", "StatsAPI", "StatsBase", "StatsFuns"]
-git-tree-sha1 = "12184a8cf11c7cbd90a4db8b2cb2f7b6f057cc46"
+git-tree-sha1 = "e421c1938fafab0165b04dc1a9dbe2a26272952c"
 uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
-version = "0.25.124"
+version = "0.25.125"
 
     [deps.Distributions.extensions]
     DistributionsChainRulesCoreExt = "ChainRulesCore"
@@ -752,7 +752,7 @@ uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "8.5.1+0"
 
 [[deps.HybridZuptInsJl]]
-deps = ["CSV", "DSP", "DataFrames", "GLMakie", "GaussianProcesses", "Interpolations", "LeastSquaresOptim", "LinearAlgebra", "Optim", "PDMats", "Random", "Revise", "Rotations"]
+deps = ["CSV", "DSP", "DataFrames", "GLMakie", "GaussianProcesses", "Interpolations", "JSON", "LeastSquaresOptim", "LinearAlgebra", "Optim", "PDMats", "Random", "Revise", "Rotations"]
 path = "."
 uuid = "9f3b139f-d70d-4b75-9d88-eeb9a306121e"
 version = "0.1.0"

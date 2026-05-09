@@ -9,6 +9,7 @@ import Optim
 import LeastSquaresOptim
 import GaussianProcesses
 import PDMats
+using Distributions
 
 # Resolve ambiguity between GaussianProcesses.jl and PDMats.jl
 function LinearAlgebra.ldiv!(
