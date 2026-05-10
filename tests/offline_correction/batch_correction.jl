@@ -26,7 +26,7 @@ N_train = size(input_feature, 2)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
-    n_restarts_optimizer=20)
+    n_restarts_optimizer=5)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hyper)

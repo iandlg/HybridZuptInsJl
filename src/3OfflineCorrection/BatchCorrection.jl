@@ -55,7 +55,11 @@ function compute_training_io(
     input_feature = funs[ref_frame](traj, step_seg)      # 3 x (n_steps-1)
     gt_steps = funs[ref_frame](traj_gt, step_seg)
 
+
     outputs["pos"] = gt_steps - input_feature
+    Δt = diff(step_seg)
+    # input_feature[3, :] = Δt
+    input_feature = vcat(input_feature, Δt')
 
     return outputs, input_feature
 end
