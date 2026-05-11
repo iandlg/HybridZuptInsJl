@@ -25,3 +25,9 @@ function SeHyperparams(d::Dict{String,Vector{Any}})
         Float64.(d["pos_3"])
     )
 end
+
+function to_json(filename::AbstractString, hp::SeHyperparams)
+    open(filename, "w") do f
+        JSON.print(f, hp, 4)
+    end
+end

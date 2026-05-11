@@ -144,7 +144,7 @@ function apply_corrections(
     new_euler = copy(euler[:, segs])
     new_euler[3, :] = new_yaws
     R_nb_new = euler_to_matrix(new_euler)
-    @show size(traj.t[segs])
+
     return Trajectory(
         traj.t[segs],      # time at step boundaries
         pos_out,           # 3 x n_steps
@@ -239,8 +239,8 @@ end
 
 
 function compute_gp_corrections(
-    x::Matrix{Float64}, y::Vector{Float64},
-    kernel::Union{Nothing,GaussianProcesses.Kernel}=nothing;
+    x::Matrix{Float64}, y::Vector{Float64};
+    kernel::Union{Nothing,GaussianProcesses.Kernel}=nothing,
     hyperparameter::Union{Nothing,Vector{Float64}}=nothing,
     n_restarts_optimizer::Int=5
 )
@@ -323,6 +323,98 @@ function compute_gp_corrections(
     return y_testing_gp, hyperparams
 end
 
+"""
+    compute_hsgp_corrections(
+    x::Matrix{Float64}, y::Vector{Float64};
+    m::Int=25, hp::Vector{Float64},
+    margin::Float64=1.8
+)
+
+Estimate output corrections using Hilbert Space Gaussian Process (HSGP) approximation
+with 10‑fold cross‑validation. Uses fixed kernel hyperparameters (no optimisation).
+
+# Arguments
+- `x`: Input features, size `(d, N)` where `d` = dimension, `N` = number of samples.
+- `y`: Target values, length `N`.
+- `m`: Number of basis functions (eigenvalues) to keep.
+- `hp`:  [σ_f, ℓs, σ_n].
+- `margin`: Factor to extend the domain beyond the scaled data range.
+
+# Returns
+- `predictions`: Vector of length `N` with cross‑validated HSGP predictions.
+- `hyperparams`: Dummy matrix `(10, 4)` filled with `[0.0, sigma_f, mean(ls), sigma_n]`
+  for tracking; matches the output format of `compute_gp_corrections`.
+"""
+function compute_hsgp_corrections(
+    x::Matrix{Float64}, y::Vector{Float64};
+    m::Int=25,
+    hyperparameter::Vector{Float64}=[0.0, 0.0, -1.0],
+    margin::Float64=1.8
+)
+    d, N = size(x)
+    @assert length(y) == N
+
+    # 1. Scale features to zero mean, unit variance per dimension
+    μ = mean(x, dims=2)[:]
+    σ = std(x, dims=2)[:]
+    σ[σ.==0.0] .= 1.0
+    x_scaled = (x .- μ) ./ σ      # (d, N)
+
+    # 2. Domain bounds L = margin * max(|x_scaled|) per dimension
+    L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
+
+    # 3. Compute eigenvalues (per‑dimension components)
+    eigvals = calc_eigenvalues(L_vec, m, d)   # (m, d)
+
+    # Pre‑compute sqrt of eigenvalues for PSD
+    ω = sqrt.(eigvals)                        # (m, d)
+
+    # 4. Pre‑compute PSD values (depends only on ω, ls, sigma_f)
+    psd = power_spectral_density(ω, hyperparameter[2], hyperparameter[1])   # (m,)
+
+    # 5. 10‑fold cross‑validation
+    D_folds = 10
+    predictions = zeros(N)
+
+    for fold in 1:D_folds
+        test_start = floor(Int, (fold - 1) * N / D_folds) + 1
+        test_end = floor(Int, fold * N / D_folds)
+        train_ind = vcat(1:test_start-1, test_end+1:N)
+        test_ind = test_start:test_end
+
+        isempty(train_ind) && continue
+        n_train = length(train_ind)
+
+        x_train = x_scaled[:, train_ind]    # (d, n_train)
+        y_train = y[train_ind]
+        x_test = x_scaled[:, test_ind]     # (d, n_test)
+
+        # 6. Basis matrices
+        phi = calc_eigenvectors(x_train', L_vec, eigvals)       # (n_train, m)
+        phi_star = calc_eigenvectors(x_test', L_vec, eigvals)   # (n_test, m)
+
+        # 7. Build A = ΦᵀΦ + σ_n² Λ⁻¹   where Λ = diag(psd)
+        A = phi' * phi
+        for i in 1:m
+            A[i, i] += hyperparameter[3]^2 / psd[i]
+        end
+
+        # 8. Solve A α = Φᵀ y
+        rhs = phi' * y_train
+        alpha = A \ rhs   # using backslash (Cholesky will be used internally)
+
+        # 9. Predict on test fold
+        predictions[test_ind] = phi_star * alpha
+    end
+
+    # 10. Dummy hyperparameter matrix (for interface compatibility)
+    dummy_hyper = zeros(D_folds, 4)
+    for i in 1:D_folds
+        dummy_hyper[i, :] = vcat([0.0], hyperparameter[:])
+    end
+
+    return predictions, dummy_hyper
+end
 
 function compute_static_corrections(
     x::Matrix{Float64},
