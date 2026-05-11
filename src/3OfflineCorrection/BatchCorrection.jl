@@ -57,9 +57,10 @@ function compute_training_io(
 
 
     outputs["pos"] = gt_steps - input_feature
+
     Δt = diff(step_seg)
     # input_feature[3, :] = Δt
-    input_feature = vcat(input_feature, Δt')
+    # input_feature = vcat(input_feature, Δt')
 
     return outputs, input_feature
 end
@@ -101,6 +102,7 @@ function apply_corrections(
     diff_yaw = diff(yaw[segs]) + yawdiff_correction
     # Reconstruct cumulative yaw: start with first yaw, then cumsum of diffs
     new_yaws = cumsum(vcat([yaw[segs[1]]], diff_yaw))
+    new_yaws = mod.(new_yaws .+ π, 2π) .- π
 
     # Prepare new Euler angle array (only yaw changes, roll/pitch keep original)
     if ref_frame == BODY
@@ -129,7 +131,7 @@ function apply_corrections(
 
     # Position integration: pos_out[:, k] = new_R[:,:,k-1] * (steps[:,k-1] + pos_correction[:,k-1]) + pos_out[:,k-1]
     pos_out = Matrix{Float64}(undef, 3, n_steps)
-    pos_out[:, 1] = traj.pos[:, segs[1]]   # first step position (1‑based index)
+    pos_out[:, 1] = traj.pos[:, segs[1]]
 
     for k in 2:n_steps
         pos_out[:, k] = new_R[:, :, k-1] * (steps[:, k-1] + pos_correction[:, k-1]) + pos_out[:, k-1]
@@ -137,6 +139,8 @@ function apply_corrections(
 
     # --- Build output trajectory ------------------------------------------------
     # Final orientation matrices (converted from the corrected Euler angles)
+    new_euler = copy(euler[:, segs])
+    new_euler[3, :] = new_yaws
     R_nb_new = euler_to_matrix(new_euler)
     @show size(traj.t[segs])
     return Trajectory(
@@ -185,13 +189,15 @@ function mcmc_with_priors!(gp::GaussianProcesses.GPE;
 end
 
 function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
-    lo::Vector{Float64}=fill(-3.0, GaussianProcesses.num_params(gp.kernel)),
-    hi::Vector{Float64}=fill(3.0, GaussianProcesses.num_params(gp.kernel)))
+    kern_lo::Vector{Float64}=fill(-3.0, GaussianProcesses.num_params(gp.kernel)),
+    kern_hi::Vector{Float64}=fill(3.0, GaussianProcesses.num_params(gp.kernel)),
+    noise_bounds::Vector{Float64}=[-2.0, 0.0]
+)
 
     # kernbounds covers ONLY kernel params, NOT the GP noise (logNoise)
     # num_params(gp.kernel) gives the right count for kernbounds
-    @assert length(lo) == length(hi) == GaussianProcesses.num_params(gp.kernel) """
-        Bounds length ($(length(lo))) must match kernel param count \
+    @assert length(kern_lo) == length(kern_hi) == GaussianProcesses.num_params(gp.kernel) """
+        Bounds length ($(length(kern_lo))) must match kernel param count \
         ($(GaussianProcesses.num_params(gp.kernel))), not total GP params \
         ($(length(GaussianProcesses.get_params(gp)))).
     """
@@ -200,26 +206,27 @@ function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
     best_params = GaussianProcesses.get_params(gp)   # includes logNoise
 
     for i in 1:n_restarts
-        try
-            # Sample random kernel params within bounds
-            kern_params = lo .+ (hi .- lo) .* rand(length(lo))
-            kern_params = clamp.(kern_params, lo, hi)   # guarantee inside bounds
+        # Sample random kernel params within bounds
+        kern_params = kern_lo .+ (kern_hi .- kern_lo) .* rand(length(kern_lo))
+        kern_params = clamp.(kern_params, kern_lo, kern_hi)   # guarantee inside bounds
 
-            # logNoise is separate — sample in its own range
-            log_noise = -8.0 + 10.0 * rand()   # uniform in [-8, 2]
+        # logNoise is separate — sample in its own range
+        log_noise = noise_bounds[1] + (noise_bounds[2] - noise_bounds[1]) * rand()
+        log_noise = clamp(log_noise, noise_bounds[1], noise_bounds[2])
 
-            # set_params! expects [kernel_params..., logNoise]
-            GaussianProcesses.set_params!(gp, vcat(log_noise, kern_params))
-            GaussianProcesses.update_target!(gp)
-            GaussianProcesses.optimize!(gp; kernbounds=[lo, hi])
 
-            if gp.target > best_target
-                best_target = gp.target
-                best_params = GaussianProcesses.get_params(gp)
-                @debug "Restart $i: log-likelihood = $best_target"
-            end
-        catch e
-            @warn "Restart $i failed: $e"
+        @info "Restart $i; starting parameters : log_σ_n = $log_noise, log_ℓ = $(kern_params[1]), log_σ_f = $(kern_params[2])"
+
+        # set_params! expects [kernel_params..., logNoise]
+        GaussianProcesses.set_params!(gp, vcat(log_noise, kern_params))
+        GaussianProcesses.update_target!(gp)
+        GaussianProcesses.optimize!(gp;
+            kernbounds=[kern_lo, kern_hi], noisebounds=noise_bounds)
+
+        if gp.target > best_target
+            best_target = gp.target
+            best_params = GaussianProcesses.get_params(gp)
+            @debug "Restart $i: log-likelihood = $best_target"
         end
     end
 
@@ -258,10 +265,12 @@ function compute_gp_corrections(
     make_kernel() = kernel === nothing ? GaussianProcesses.SE(log_ℓ, log_σ_f) : deepcopy(kernel)
 
     # logNoise is handled separately inside the function
-    lo = [-6.0, -6.0]
-    hi = [6.0, 6.0]
+    kern_lo = [-1.0, -3.0]
+    kern_hi = [3.0, 2.0]
+    noise_bounds = [-1.71, -0.1]
 
     for i in 1:D
+        @info "------------ Fold $i ------------"
         test_start = floor(Int, (i - 1) * n_samples / D) + 1
         test_end = floor(Int, i * n_samples / D)
         train_ind = vcat(1:test_start-1, test_end+1:n_samples)
@@ -271,29 +280,29 @@ function compute_gp_corrections(
 
         x_train = x_scaled[:, train_ind]
         y_train = y[train_ind]
-        y_test = y[test_ind]
         x_test = x_scaled[:, test_ind]
 
         gp = GaussianProcesses.GP(x_train, y_train,
             GaussianProcesses.MeanZero(), make_kernel(), log_σ_n)
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
-        @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
+        # @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
         if n_restarts_optimizer > 0
-            y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
-            target = sqrt(mean((y_test .- y_pred) .^ 2))
-            best_params = GaussianProcesses.get_params(gp)
-            for i in 1:1
-                optimize_with_restarts!(gp, 3; lo=lo, hi=hi)
-                y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
+            # y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
+            # target = sqrt(mean((y_test .- y_pred) .^ 2))
+            # best_params = GaussianProcesses.get_params(gp)
+            # for i in 1:1
+            #     optimize_with_restarts!(gp, 3; lo=lo, hi=hi)
+            #     y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
 
-                new_target = sqrt(mean((y_test .- y_pred) .^ 2))
-                if new_target < target
-                    target = new_target
-                    @info "new target $target"
-                    best_params = GaussianProcesses.get_params(gp)
-                end
-            end
-            # optimize_with_restarts!(gp, n_restarts_optimizer; lo=lo, hi=hi)
+            #     new_target = sqrt(mean((y_test .- y_pred) .^ 2))
+            #     if new_target < target
+            #         target = new_target
+            #         @info "new target $target"
+            #         best_params = GaussianProcesses.get_params(gp)
+            #     end
+            # end
+            optimize_with_restarts!(gp, n_restarts_optimizer;
+                kern_lo=kern_lo, kern_hi=kern_hi, noise_bounds=noise_bounds)
             # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
         end
 
@@ -303,7 +312,7 @@ function compute_gp_corrections(
         # params = [log(σ_n), log(ℓ), log(σ_f)]  — extract directly
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
 
-        @info "hyperparameters after optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
+        @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
         hyperparams[i, :] = [gp.target, exp(log_σ_f), exp(log_ℓ), exp(log_σ_n)]
         #                     lml        sigma_f        len_scale    sigma_n
     end

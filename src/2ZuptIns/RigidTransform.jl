@@ -197,14 +197,13 @@ Load inertial and ground truth data, compute an INS trajectory, and align it to 
 - `sim_config`: Updated simulation config (gravity rotated by the position alignment).
 """
 function compute_aligned_ins_trajectory(
-    data_path::AbstractString, trial_id::Int;
+    data_path::AbstractString,
+    trial_id::Int;
     sim_config::InsConfig=InsConfig(),
-    orientation_offset::AbstractVector=zeros(3)
+    orientation_offset::AbstractVector=zeros(3),
+    inertial::InertialData=InertialData(data_path, trial_id),
+    gt_traj::Trajectory=Trajectory(data_path, trial_id)
 )
-    # Load data
-    inertial = InertialData(data_path, trial_id)
-    gt_traj = Trajectory(data_path, trial_id)
-
     # Truncate to overlapping time window and align ground truth to IMU timestamps
     inertial_trunc, gt_traj_trunc = truncate_to_overlap(inertial, gt_traj)
     gt_traj_aligned = temporal_alignment(gt_traj_trunc, inertial_trunc.t)

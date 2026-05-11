@@ -71,25 +71,27 @@ function temporal_alignment(tr::Trajectory, inertial_t::Vector{Float64})
     if inertial_t[begin] < tg[begin]
         tg = [inertial_t[begin]; tg]
         pg = [pg[:, 1] pg]
-        Rg = cat(Rg[:, :, 1::nothing], Rg; dims=3)
+        Rg = cat(Rg[:, :, 1:1], Rg; dims=3)
     end
     if inertial_t[end] > tg[end]
         tg = [tg; inertial_t[end]]
         pg = [pg pg[:, end]]
-        Rg = cat(Rg, Rg[:, :, end::nothing]; dims=3)
+        Rg = cat(Rg, Rg[:, :, end:end]; dims=3)
     end
 
     # Linear interp for position
     pos = vcat([LinearInterpolation(tg, pg[i, :])(inertial_t)' for i in 1:3]...)
 
-    # SLERP for rotations using Rotations.jl QuatRotation
-    quats = [QuatRotation(RotMatrix{3}(Rg[:, :, i])) for i in axes(Rg, 3)]
+    quats = [Quaternions.Quaternion(QuatRotation(RotMatrix{3}(Rg[:, :, i])))
+             for i in axes(Rg, 3)]
     R_interp = Array{Float64}(undef, 3, 3, length(inertial_t))
+
     for (j, τ) in enumerate(inertial_t)
         k = searchsortedlast(tg, τ)
         k = clamp(k, 1, length(tg) - 1)
-        a = (τ - tg[k]) / (tg[k+1] - tg[k])
-        R_interp[:, :, j] .= Matrix(slerp(quats[k], quats[k+1], a))
+        a = clamp((τ - tg[k]) / (tg[k+1] - tg[k]), 0.0, 1.0)
+        q = Quaternions.slerp(quats[k], quats[k+1], a)
+        R_interp[:, :, j] .= Matrix(QuatRotation(q.s, q.v1, q.v2, q.v3))
     end
 
     return Trajectory(inertial_t, pos, R_interp)
@@ -104,12 +106,11 @@ function rmse(tr::Trajectory, gt::Trajectory)
 end
 
 # Step vectors in body frame
-function step_vectors_body(tr::Trajectory, step_seg::Vector{Int})
-    seg = step_seg
-    Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:end-1]]       # (3, N_steps)
-    steps = similar(Δpos)
-    for k in axes(Δpos, 2)
-        steps[:, k] = tr.R_nb[:, :, seg[k]]' * Δpos[:, k]          # Rᵀ·Δp
+function step_vectors_body(tr::Trajectory, seg::Vector{Int})
+    steps = zeros(3, length(seg) - 1)
+    for k in 2:length(seg)
+        Δp = tr.pos[:, seg[k]] - tr.pos[:, seg[k-1]]
+        steps[:, k-1] = tr.R_nb[:, :, seg[k-1]]' * Δp   # R at k-1, not k
     end
     return steps
 end
@@ -118,7 +119,7 @@ end
 function step_vectors_heading(tr::Trajectory, step_seg::Vector{Int})
     seg = step_seg
     N = length(seg) - 1
-    eu = euler_nb(tr)[:, seg[1:end-1]]      # (3, N_steps)
+    eu = matrix_to_euler(tr.R_nb)[:, seg[1:end-1]]      # (3, N_steps)
     Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:end-1]]
     steps = similar(Δpos)
     for k in 1:N

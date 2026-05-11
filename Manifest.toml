@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "692be83dd483bca20dbb5c0c6c9305d828df8e4b"
+project_hash = "28c1301080d4307f23dc68898aa1de6c3658a406"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -752,7 +752,7 @@ uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "8.5.1+0"
 
 [[deps.HybridZuptInsJl]]
-deps = ["CSV", "DSP", "DataFrames", "GLMakie", "GaussianProcesses", "Interpolations", "JSON", "LeastSquaresOptim", "LinearAlgebra", "Optim", "PDMats", "Random", "Revise", "Rotations"]
+deps = ["CSV", "DSP", "DataFrames", "Distributions", "GLMakie", "GaussianProcesses", "Interpolations", "JSON", "LeastSquaresOptim", "LinearAlgebra", "Optim", "PDMats", "Random", "Revise", "Rotations"]
 path = "."
 uuid = "9f3b139f-d70d-4b75-9d88-eeb9a306121e"
 version = "0.1.0"

@@ -1,6 +1,7 @@
 module HybridZuptInsJl
 
 using LinearAlgebra, Statistics
+using Quaternions
 using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
 using Interpolations     # LinearInterpolation
 using CSV, DataFrames
