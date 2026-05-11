@@ -362,7 +362,7 @@ function compute_hsgp_corrections(
 
     # 2. Domain bounds L = margin * max(|x_scaled|) per dimension
     L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
-
+    @show L_vec
     # 3. Compute eigenvalues (per‑dimension components)
     eigvals = calc_eigenvalues(L_vec, m, d)   # (m, d)
 

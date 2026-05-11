@@ -1,11 +1,13 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+using JSON
 
-
-hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/nn_outlier.json", HybridZuptInsJl.SeHyperparams)
+hp = JSON.parsefile("out/hyperparameters/py_hypers.json", HybridZuptInsJl.SeHyperparams)
 data_dir = "data/angermann_high_precision"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
+m = 500
+margin = 2.5
 
 imu = HybridZuptInsJl.InertialData(data_dir, 15)
 gt = HybridZuptInsJl.Trajectory(data_dir, 15)
@@ -32,7 +34,7 @@ static_corrections, _ = HybridZuptInsJl.compute_corrections(
 
 hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hp;
-    m=25, margin=2.0
+    m=m, margin=margin
 )
 
 
@@ -70,4 +72,10 @@ trajs = Dict{String,HybridZuptInsJl.Trajectory}(
     "model + GP" => gp_traj,
     "model + HSGP" => hsgp_traj
 )
+outputs = Dict(
+    "static" => static_corrections,
+    "GP" => gp_corrections,
+    "HSGP" => hsgp_corrections
+)
 fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
+fig_regression = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)

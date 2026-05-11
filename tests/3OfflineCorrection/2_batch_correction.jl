@@ -76,7 +76,7 @@ outputs = Dict(
 # Create figures
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[segs])
 fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
-fig_output = HybridZuptInsJl.plot_regression_results(true_outputs, outputs)
+fig_output = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
 
 ## Save things 
 open("./out/hyperparameters/jl_hypers_body_3d_list.json", "w") do f
