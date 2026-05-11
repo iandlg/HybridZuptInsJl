@@ -4,7 +4,7 @@ using LinearAlgebra, Statistics
 using Quaternions
 using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
 using Interpolations     # LinearInterpolation
-using CSV, DataFrames
+using CSV, DataFrames, JSON
 using GLMakie
 import Optim
 import LeastSquaresOptim
@@ -41,6 +41,7 @@ include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")
 include("Plotting/Steps.jl")
 include("Plotting/OfflineCorrection.jl")
+include("Plotting/PlotHypVariability.jl")
 
 export TimeSeries, Trajectory, InertialData
 export truncate_to_overlap, is_compatible

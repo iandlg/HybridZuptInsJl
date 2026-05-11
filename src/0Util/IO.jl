@@ -64,16 +64,6 @@ hypers = read_hyperparameters_json("out/hyperparameters/py_hypers.json")
 ```
 """
 function read_hyperparameters_json(filepath::String)
-    data = JSON.parsefile(filepath)
-
-    # Handle both array and single object cases
-    fold_list = isa(data, Vector) ? data : [data]
-
-    # Convert each fold to a SeHyperparams struct
-    structs = Vector{SeHyperparams}(undef, length(fold_list))
-    for (i, fold_data) in enumerate(fold_list)
-        structs[i] = SeHyperparams(fold_data)
-    end
-
-    return structs
+    data = JSON.parsefile(filepath, Vector{SeHyperparams})
+    return data
 end

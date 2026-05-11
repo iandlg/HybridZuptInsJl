@@ -14,7 +14,7 @@ gt = HybridZuptInsJl.Trajectory(
     gt.vel
 )
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, 15
+    data_dir, 15; inertial=imu, gt_traj=gt
 )
 
 
@@ -33,7 +33,7 @@ N_train = size(input_feature, 2)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
-    n_restarts_optimizer=0)
+    n_restarts_optimizer=2)
 
 @show input_feature[:, 199:201]
 static_corrections, _ = HybridZuptInsJl.compute_corrections(

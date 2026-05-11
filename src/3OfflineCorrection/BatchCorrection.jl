@@ -66,11 +66,13 @@ function compute_training_io(
 end
 
 """
-    apply_corrections(traj::Trajectory,
-                      yawdiff_correction::Vector{Float64},
-                      pos_correction::Matrix{Float64},
-                      segs::Vector{Int};
-                      ref_frame::ReferenceFrame = BODY) -> Trajectory
+    apply_corrections(
+        traj::Trajectory,
+        yawdiff_correction::Vector{Float64},
+        pos_correction::Matrix{Float64},
+        segs::Vector{Int};
+        ref_frame::ReferenceFrame = BODY
+    ) -> Trajectory
 
 Apply yaw and position corrections to a full inertial trajectory, producing a corrected
 trajectory sampled at the step segment indices.
