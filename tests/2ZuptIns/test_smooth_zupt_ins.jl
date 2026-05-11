@@ -1,4 +1,4 @@
-include("../src/HybridZuptInsJl.jl");
+include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
 data_dir = "data/angermann_high_precision"

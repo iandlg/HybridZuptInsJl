@@ -1,5 +1,5 @@
 # scripts/main.jl
-include("../src/HybridZuptInsJl.jl");
+include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using Printf
 

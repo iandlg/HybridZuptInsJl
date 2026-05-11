@@ -34,6 +34,7 @@ include("2ZuptIns/SmoothZuptIns.jl")
 include("2ZuptIns/RigidTransform.jl")
 
 include("3OfflineCorrection/BatchCorrection.jl")
+include("3OfflineCorrection/HypVariability.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")

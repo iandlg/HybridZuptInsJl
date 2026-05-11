@@ -1,6 +1,6 @@
-include("../src/HybridZuptInsJl.jl");
+include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-
+using LinearAlgebra
 
 # Single quaternion → DCM
 q = [0.1, 0.5, 0.5, 0.4]   # qx,qy,qz,qw
