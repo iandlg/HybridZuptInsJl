@@ -314,6 +314,7 @@ function compute_gp_corrections(
 
         @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
         hyperparams[i, :] = [gp.target, exp(log_σ_f), exp(log_ℓ), exp(log_σ_n)]
+
         #                     lml        sigma_f        len_scale    sigma_n
     end
 
@@ -375,15 +376,13 @@ function compute_corrections(
     @assert size(outputs["pos"], 2) == n_samples
 
     predictions = Dict{String,Union{Vector{Float64},Matrix{Float64}}}()
-    hyperparams = Dict{String,Union{Matrix{Float64},Nothing}}()
+    hyperparams_dict = Dict{String,Union{Matrix{Float64},Nothing}}()
 
     # Yaw correction
     @info "Computing Yaw corrections"
     y_pred, hyper = correction_method(input_feature, outputs["yaw"]; hyperparameter=hyperparameters.yaw, kwargs...)
     predictions["yaw"] = y_pred
-    if !isnothing(hyper)
-        hyperparams["yaw"] = hyper
-    end
+    hyperparams_dict["yaw"] = hyper
     # Position corrections
     predictions["pos"] = Matrix{Float64}(undef, 3, n_samples)
     for d in 1:3
@@ -391,11 +390,13 @@ function compute_corrections(
         d_hyp = getfield(hyperparameters, Symbol("pos_$d"))
         y_pred, hyper = correction_method(input_feature, outputs["pos"][d, :]; hyperparameter=d_hyp, kwargs...)
         predictions["pos"][d, :] = y_pred
-        if !isnothing(hyper)
-            hyperparams["pos_$d"] = hyper
-        end
+        hyperparams_dict["pos_$d"] = hyper
     end
+
+    # Convert hyperparams to list of SeHyperparams structs per fold
+    hyperparams = _convert_hyperparams_to_struct_list(hyperparams_dict)
 
     return predictions, hyperparams
 end
+
 

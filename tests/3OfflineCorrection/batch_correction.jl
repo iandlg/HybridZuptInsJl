@@ -33,7 +33,7 @@ N_train = size(input_feature, 2)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
-    n_restarts_optimizer=3)
+    n_restarts_optimizer=0)
 
 @show input_feature[:, 199:201]
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
@@ -78,6 +78,7 @@ fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
 fig_output = HybridZuptInsJl.plot_regression_results(true_outputs, outputs)
 
 ## Save things 
-open("./out/hyperparameters/jl_hypers_body_3d.json", "w") do f
+open("./out/hyperparameters/jl_hypers_body_3d_list.json", "w") do f
     JSON.print(f, hyperparameters, 4)   # 4 = indentation spaces
 end
+

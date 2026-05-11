@@ -23,6 +23,7 @@ end
 
 include("0Util/Orientation.jl")
 include("0Util/InsConfig.jl")
+include("0Util/IO.jl")
 include("1Data/TimeSeries.jl")
 include("1Data/Trajectory.jl")
 include("1Data/InertialData.jl")
