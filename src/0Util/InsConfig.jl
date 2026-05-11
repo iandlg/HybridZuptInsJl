@@ -38,7 +38,7 @@ mutable struct InsConfig
     sigma_initial_vel::NTuple{3,Float64}
     sigma_initial_att::NTuple{3,Float64}
     # Gravity
-    g::Float64
+    g::Union{Float64,Vector{Float64}}
     # ZUPT segmentation
     segmentation_thrsld::Float64
     calibration_distance_m::Float64

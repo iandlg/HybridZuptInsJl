@@ -138,7 +138,7 @@ function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
         P_smooth[:, :, seg_end] = P[:, :, seg_end]
 
         for n in seg_end-1:-1:seg_start
-            A = P[:, :, n] * F[:, :, n]' * inv(P_timeupd[:, :, n+1])
+            A = P[:, :, n] * F[:, :, n]' / P_timeupd[:, :, n+1]
 
             dx_smooth[:, n] = dx[:, n] + A * (dx_smooth[:, n+1] - dx_timeupd[:, n+1])
             P_smooth[:, :, n] = P[:, :, n] +
@@ -150,9 +150,11 @@ function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
         # Compensate internal states using the smoothed errors
         # ------------------------------------------------------------------
         idx_range = seg_start:seg_end
-        compensate_internal_states!(x[:, idx_range],
-            dx_smooth[:, idx_range],
-            quat[:, idx_range])
+        compensate_internal_states!(
+            view(x, :, idx_range),           # view of columns idx_range
+            -dx_smooth[:, idx_range],        # negative copy (or use view if needed)
+            view(quat, :, idx_range)         # view of quat columns
+        )
 
         # ------------------------------------------------------------------
         # Prepare for next segment (reset error state and covariance)

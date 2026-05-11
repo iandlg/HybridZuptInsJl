@@ -10,7 +10,6 @@ function detect_zupt(u::AbstractMatrix{T}, simdata::InsConfig) where T<:Real
 
     # Create a boolean array (initialised false)
     zupt = zeros(Bool, N)        # Vector{Bool}
-    display(zupt)
 
     for k in eachindex(test_stats)
         if test_stats[k] < gamma
