@@ -200,13 +200,19 @@ function mcmc_with_priors!(gp::GaussianProcesses.GPE;
 end
 
 function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
-    kern_lo::Vector{Float64}=fill(-3.0, GaussianProcesses.num_params(gp.kernel)),
-    kern_hi::Vector{Float64}=fill(3.0, GaussianProcesses.num_params(gp.kernel)),
-    noise_bounds::Vector{Float64}=[-2.0, 0.0]
+    log_kern_bounds::Vector{Vector{Float64}}=[[-1.0, -3.0], [3.0, 2.0]],
+    log_noise_bounds::Vector{Vector{Float64}}=[[-1.71], [-0.1]],
+    method::Any=Optim.LBFGS()
 )
 
     # kernbounds covers ONLY kernel params, NOT the GP noise (logNoise)
     # num_params(gp.kernel) gives the right count for kernbounds
+    kern_lo = log_kern_bounds[1]
+    kern_hi = log_kern_bounds[2]
+    noise_lo = log_noise_bounds[1]
+    noise_hi = log_noise_bounds[2]
+
+
     @assert length(kern_lo) == length(kern_hi) == GaussianProcesses.num_params(gp.kernel) """
         Bounds length ($(length(kern_lo))) must match kernel param count \
         ($(GaussianProcesses.num_params(gp.kernel))), not total GP params \
@@ -216,28 +222,34 @@ function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
     best_target = -Inf
     best_params = GaussianProcesses.get_params(gp)   # includes logNoise
 
+
     for i in 1:n_restarts
         # Sample random kernel params within bounds
         kern_params = kern_lo .+ (kern_hi .- kern_lo) .* rand(length(kern_lo))
         kern_params = clamp.(kern_params, kern_lo, kern_hi)   # guarantee inside bounds
 
         # logNoise is separate — sample in its own range
-        log_noise = noise_bounds[1] + (noise_bounds[2] - noise_bounds[1]) * rand()
-        log_noise = clamp(log_noise, noise_bounds[1], noise_bounds[2])
+        log_noise = noise_lo .+ (noise_hi .- noise_lo) .* rand(length(noise_lo))
+        log_noise = clamp.(log_noise, noise_lo, noise_hi)
 
-        @info "Restart $i; starting parameters : log_σ_n = $log_noise, log_ℓ = $(kern_params[1]), log_σ_f = $(kern_params[2])"
+        @info "Restart $i; starting parameters : log_σ_n = $(log_noise[1]), log_ℓ = $(kern_params[1]), log_σ_f = $(kern_params[2])"
 
         # set_params! expects [kernel_params..., logNoise]
         GaussianProcesses.set_params!(gp, vcat(log_noise, kern_params))
         GaussianProcesses.update_target!(gp)
-        GaussianProcesses.optimize!(gp;
-            kernbounds=[kern_lo, kern_hi], noisebounds=noise_bounds)
+        try
+            GaussianProcesses.optimize!(gp;
+                kernbounds=log_kern_bounds, noisebounds=log_noise_bounds, method=method)
 
-        if gp.target > best_target
-            best_target = gp.target
-            best_params = GaussianProcesses.get_params(gp)
-            @debug "Restart $i: log-likelihood = $best_target"
+            if gp.target > best_target
+                best_target = gp.target
+                best_params = GaussianProcesses.get_params(gp)
+                @debug "Restart $i: log-likelihood = $best_target"
+            end
+        catch e
+            @warn "Error optimizing $e"
         end
+
     end
 
     GaussianProcesses.set_params!(gp, best_params)
@@ -250,7 +262,10 @@ function compute_gp_corrections(
     x::Matrix{Float64}, y::Vector{Float64};
     kernel::Union{Nothing,GaussianProcesses.Kernel}=nothing,
     hyperparameter::Union{Nothing,Vector{Float64}}=nothing,
-    n_restarts_optimizer::Int=5
+    n_restarts_optimizer::Int=5,
+    log_kern_bounds::Vector{Vector{Float64}}=[[-1.0, -3.0], [3.0, 2.0]],
+    log_noise_bounds::Vector{Vector{Float64}}=[[-1.71], [-0.1]],
+    method::Any=Optim.LBFGS()
 )
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
@@ -275,9 +290,10 @@ function compute_gp_corrections(
     make_kernel() = kernel === nothing ? GaussianProcesses.SE(log_ℓ, log_σ_f) : deepcopy(kernel)
 
     # logNoise is handled separately inside the function
-    kern_lo = [-1.0, -3.0]
-    kern_hi = [3.0, 2.0]
-    noise_bounds = [-1.71, -0.1]
+    kern_lo = log_kern_bounds[1]
+    kern_hi = log_kern_bounds[2]
+    noise_lo = log_noise_bounds[1]
+    noise_hi = log_noise_bounds[2]
 
     for i in 1:D
         @info "------------ Fold $i ------------"
@@ -297,22 +313,8 @@ function compute_gp_corrections(
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
         # @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
         if n_restarts_optimizer > 0
-            # y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
-            # target = sqrt(mean((y_test .- y_pred) .^ 2))
-            # best_params = GaussianProcesses.get_params(gp)
-            # for i in 1:1
-            #     optimize_with_restarts!(gp, 3; lo=lo, hi=hi)
-            #     y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
-
-            #     new_target = sqrt(mean((y_test .- y_pred) .^ 2))
-            #     if new_target < target
-            #         target = new_target
-            #         @info "new target $target"
-            #         best_params = GaussianProcesses.get_params(gp)
-            #     end
-            # end
             optimize_with_restarts!(gp, n_restarts_optimizer;
-                kern_lo=kern_lo, kern_hi=kern_hi, noise_bounds=noise_bounds)
+                log_kern_bounds=log_kern_bounds, log_noise_bounds=log_noise_bounds)
             # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
         end
 

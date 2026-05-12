@@ -1,19 +1,27 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using GLMakie, JSON, OrderedCollections
-import Dates
+import Dates, Optim
 
-data_dirs = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)
 data_key = "ANG"
-
-
-data_dir = data_dirs[data_key]
+data_dir = Dict{String,String}(
+    "ANG" => "data/angermann_high_precision"
+)[data_key]
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
 FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-n_restarts_optimizer = 0
+n_restarts_optimizer = 3
+kern_lo = [-7.0, -7.0]
+kern_hi = [7.0, 7.0]
+log_kern_bounds = [kern_lo, kern_hi]
+log_noise_bounds = [[-3.0], [0.0]]
+
+method_key = "LBFGS"
+method = Dict{String,Any}(
+    "CG" => Optim.ConjugateGradient(),
+    "NM" => Optim.NelderMead(),
+    "LBFGS" => Optim.LBFGS()
+)[method_key]
 
 imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
@@ -28,6 +36,8 @@ ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_al
     data_dir, trial_id; inertial=imu, gt_traj=gt
 )
 
+# fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
+
 hypvect = JSON.parsefile(
     "out/hyperparameters/fixed_jl_hypers_body_3d_list.json", Vector{HybridZuptInsJl.SeHyperparams})
 hyper = hypvect[1]
@@ -41,7 +51,11 @@ N_train = size(input_feature, 2)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
-    n_restarts_optimizer=n_restarts_optimizer)
+    n_restarts_optimizer=n_restarts_optimizer,
+    log_kern_bounds=log_kern_bounds,
+    log_noise_bounds=log_noise_bounds,
+    method=method
+)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hyper)
@@ -70,11 +84,18 @@ static_traj = HybridZuptInsJl.apply_corrections(
 trajs = OrderedDict{String,HybridZuptInsJl.Trajectory}(
     "model" => ins_traj_aligned[segs],
     "model + static" => static_traj,
-    "model + GP" => gp_traj)
+    "model + GP" => gp_traj
+)
 
 outputs = OrderedDict(
     "gp" => gp_corrections,
     "static" => static_corrections
+)
+
+rmses = OrderedDict{String,Float64}(
+    "model" => HybridZuptInsJl.rmse(ins_traj_aligned[segs], gt_traj_aligned[segs])[end],
+    "model + static" => HybridZuptInsJl.rmse(static_traj, gt_traj_aligned[segs])[end],
+    "model + GP" => HybridZuptInsJl.rmse(gp_traj, gt_traj_aligned[segs])[end],
 )
 
 # Create figures
@@ -95,5 +116,10 @@ HybridZuptInsJl.to_json(joinpath(outdir, filename), hyperparameters;
         "ref_frame" => FRAME,
         "feature_type" => FEATURE_TYPE,
         "n_restarts_optimizer" => n_restarts_optimizer,
-        "time_offset" => Δt)
+        "time_offset" => Δt,
+        "log_kern_bounds" => log_kern_bounds,
+        "log_noise_bounds" => log_noise_bounds,
+        "rmse" => rmses,
+        "method" => method_key
+    )
 )
