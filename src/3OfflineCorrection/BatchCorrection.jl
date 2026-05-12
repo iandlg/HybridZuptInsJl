@@ -225,7 +225,6 @@ function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
         log_noise = noise_bounds[1] + (noise_bounds[2] - noise_bounds[1]) * rand()
         log_noise = clamp(log_noise, noise_bounds[1], noise_bounds[2])
 
-
         @info "Restart $i; starting parameters : log_σ_n = $log_noise, log_ℓ = $(kern_params[1]), log_σ_f = $(kern_params[2])"
 
         # set_params! expects [kernel_params..., logNoise]

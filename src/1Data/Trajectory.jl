@@ -80,7 +80,7 @@ function temporal_alignment(tr::Trajectory, inertial_t::Vector{Float64})
     end
 
     # Linear interp for position
-    pos = vcat([LinearInterpolation(tg, pg[i, :])(inertial_t)' for i in 1:3]...)
+    pos = vcat([Interpolations.LinearInterpolation(tg, pg[i, :])(inertial_t)' for i in 1:3]...)
 
     quats = [Quaternions.Quaternion(QuatRotation(RotMatrix{3}(Rg[:, :, i])))
              for i in axes(Rg, 3)]

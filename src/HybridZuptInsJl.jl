@@ -1,10 +1,10 @@
 module HybridZuptInsJl
 
 using LinearAlgebra, Statistics
-using Quaternions
+import Quaternions
 using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
-using Interpolations     # LinearInterpolation
-using CSV, DataFrames, JSON
+import Interpolations     # LinearInterpolation
+using CSV, DataFrames, JSON, OrderedCollections
 using GLMakie
 import Optim
 import LeastSquaresOptim
@@ -48,13 +48,6 @@ include("Plotting/InertialData.jl")
 include("Plotting/Steps.jl")
 include("Plotting/OfflineCorrection.jl")
 include("Plotting/PlotHypVariability.jl")
-
-export TimeSeries, Trajectory, InertialData
-export truncate_to_overlap, is_compatible
-export temporal_alignment, rmse
-export step_vectors_body, step_vectors_heading
-export accel, gyro
-
 
 end
 

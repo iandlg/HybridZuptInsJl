@@ -10,16 +10,21 @@ Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories
 # Returns
 - A `Figure` object (Makie figure).
 """
-function plot_groundtruth_vs_inertial_positions(trajs::Trajectory, gt_traj::Trajectory)
-    plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj)
+function plot_groundtruth_vs_inertial_positions(trajs::Trajectory, gt_traj::Trajectory; samples::Int=20)
+    plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
 end
 
-function plot_groundtruth_vs_inertial_positions(trajs::Dict{String,Trajectory}, gt_traj::Trajectory)
+function plot_groundtruth_vs_inertial_positions(
+    trajs::AbstractDict{String,Trajectory},
+    gt_traj::Trajectory;
+    samples::Int=20
+)
     # Find common length (shortest trajectory)
     n = size(gt_traj.pos, 2)
     for traj in values(trajs)
         n = min(n, size(traj.pos, 2))
     end
+    n = min(n, samples)
 
     # Create figure and axis
     fig = Figure(size=(800, 600))
@@ -91,7 +96,7 @@ RMSE(k) = sqrt( (1/k) * Σ_{i=1..k} ( (x̂_i - x_i)² + (ŷ_i - y_i)² ) )
 
 Only the overlapping portion of the trajectories (minimum number of samples) is used.
 """
-function plot_position_rmse(trajs::Union{Dict{String,Trajectory},Trajectory}, gt_traj::Trajectory)
+function plot_position_rmse(trajs::Union{AbstractDict{String,Trajectory},Trajectory}, gt_traj::Trajectory)
     if trajs isa Trajectory
         trajs = Dict("Estimation" => trajs)
     end
@@ -126,6 +131,8 @@ function plot_position_rmse(trajs::Union{Dict{String,Trajectory},Trajectory}, gt
     return fig
 end
 
+
+
 """
     plot_groundtruth_vs_inertial_orientations(trajs::Union{Dict{String,Trajectory},Trajectory},
                                                gt_traj::Trajectory)
@@ -143,7 +150,7 @@ Plot Euler angles (roll, pitch, yaw) from estimated trajectories against a groun
 - A `Figure` object with three side‑by‑side axis objects.
 """
 function plot_groundtruth_vs_inertial_orientations(
-    trajs::Union{Dict{String,Trajectory},Trajectory},
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
     gt_traj::Trajectory
 )
     if trajs isa Trajectory
@@ -212,7 +219,7 @@ Plot 3D positions (x, y, z) from one or more trajectories using an interactive G
 - A `Figure` object with a 3D axis.
 """
 function plot_trajectory_3d(
-    trajs::Union{Trajectory,Dict{String,Trajectory}},
+    trajs::Union{Trajectory,AbstractDict{String,Trajectory}},
     gt_traj::Union{Nothing,Trajectory}=nothing;
     start_marker::Bool=true,
     end_marker::Bool=true)

@@ -5,7 +5,8 @@ using JSON
 
 data_dir = "data/angermann_high_precision"
 trial_id = 15
-hsgp_p, meta, _ = HybridZuptInsJl.from_json("out/3OfflineCorrection/HsgpResults/3d_body_hsgp_params.json")
+hsgp_p, meta, _ = HybridZuptInsJl.from_json(
+    HybridZuptInsJl.HsgpParameters, "out/3OfflineCorrection/HsgpResults/3d_body_hsgp_params.json")
 data_dir = meta["data_dir"]
 trial_id = meta["trial_id"]
 train_ratio = 0.6

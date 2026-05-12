@@ -15,8 +15,8 @@ Plot regression results for yaw and position components (X, Y, Z) with RMSE anno
 - `Figure` object.
 """
 function plot_regression_results(
-    pred_data::Dict{String,Dict{String,VecOrMat{Float64}}},
-    true_data::Dict{String,VecOrMat{Float64}})
+    pred_data::AbstractDict{String,Dict{String,VecOrMat{Float64}}},
+    true_data::AbstractDict{String,VecOrMat{Float64}})
     # Unpack true data
     yaw_true = true_data["yaw"]
     pos_true = true_data["pos"]

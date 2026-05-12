@@ -26,17 +26,33 @@ function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     )
 end
 
-function to_json(filename::AbstractString, hp::SeHyperparams)
+function to_json(filename::AbstractString, hp::SeHyperparams;
+    metadata::Dict{String,Any}=Dict{String,Any}()
+)
+    envelope = OrderedDict{String,Any}(
+        "saved_at" => string(now()),          # Dates.now()
+        "metadata" => metadata,
+        "params" => hp
+    )
     open(filename, "w") do f
-        JSON.print(f, hp, 4)
+        JSON.print(f, envelope, 4)
     end
 end
 
-function to_json(filename::AbstractString, hp::Vector{SeHyperparams})
+function to_json(
+    filename::AbstractString, hp::Vector{SeHyperparams};
+    metadata::Dict{String,Any}=Dict{String,Any}()
+)
+    envelope = OrderedDict{String,Any}(
+        "saved_at" => string(now()),          # Dates.now()
+        "metadata" => metadata,
+        "params" => hp
+    )
     open(filename, "w") do f
-        JSON.print(f, hp, 4)
+        JSON.print(f, envelope, 4)
     end
 end
+
 
 struct HsgpParameters
     hp::SeHyperparams          # kernel hyperparameters (σ_f, ℓ, σ_n) for each output
@@ -89,9 +105,11 @@ function HsgpParameters(d::Dict{String,Any})
     )
 end
 
-function to_json(filename::AbstractString, p::HsgpParameters;
-    metadata::Dict{String,Any}=Dict{String,Any}())
-    envelope = Dict{String,Any}(
+function to_json(
+    filename::AbstractString, p::HsgpParameters;
+    metadata::Dict{String,Any}=Dict{String,Any}()
+)
+    envelope = OrderedDict{String,Any}(
         "saved_at" => string(now()),          # Dates.now()
         "metadata" => metadata,
         "params" => p
@@ -101,10 +119,18 @@ function to_json(filename::AbstractString, p::HsgpParameters;
     end
 end
 
-function from_json(filename::AbstractString)
+# function from_json(filename::AbstractString)
+#     raw = JSON.parsefile(filename)
+#     metadata = Dict(raw["metadata"])
+#     saved_at = raw["saved_at"]
+#     params = HsgpParameters(Dict(raw["params"]))
+#     return params, metadata, saved_at
+# end
+
+function from_json(::Type{T}, filename::AbstractString) where {T}
     raw = JSON.parsefile(filename)
     metadata = Dict(raw["metadata"])
     saved_at = raw["saved_at"]
-    params = HsgpParameters(Dict(raw["params"]))     # your existing conversion logic
-    return params, metadata, saved_at
+    obj = T(Dict(raw["params"]))
+    return obj, metadata, saved_at
 end
