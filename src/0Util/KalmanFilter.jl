@@ -38,8 +38,8 @@ function measurement_update(state::AbstractVector{T}, stateCov::AbstractMatrix{T
     updated_state = state + K * innovation        # (dim_x,)
 
     # Updated covariance (Joseph form is stable, but here simple form)
-    I = Matrix{T}(I, dim_x, dim_x)
-    updated_cov = (I - K * H) * stateCov          # (dim_x, dim_x)
+    Idimx = I(dim_x)
+    updated_cov = (Idimx - K * H) * stateCov          # (dim_x, dim_x)
 
     return updated_state, updated_cov
 end

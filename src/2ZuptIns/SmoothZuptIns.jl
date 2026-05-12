@@ -51,7 +51,10 @@ Run the open‑loop zero‑velocity aided INS Kalman filter with RTS smoothing.
 - `traj`: `Trajectory` object containing estimated positions, orientations and velocities.
 - `step_seg`: Vector of indices where step segments were terminated.
 """
-function smoothed_zupt_aided_ins(inertial::InertialData, simdata::InsConfig)
+function smoothed_zupt_aided_ins(
+    inertial::InertialData,
+    simdata::InsConfig
+)
     u = inertial.u
     N = size(u, 2)
     Ts = simdata.Ts

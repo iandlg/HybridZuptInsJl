@@ -1,3 +1,22 @@
+@enum ReferenceFrame begin
+    BODY = 1
+    HEADING = 2
+    NAVIGATION = 3
+end
+
+@enum FeatureType begin
+    THREED_STEP = 1
+    TWOD_STEP_DT = 2
+    THREED_STEP_DT = 3
+end
+
+function string_to_enum(::Type{T}, s::AbstractString) where T<:Enum
+    for v in instances(T)
+        string(v) == s && return v
+    end
+    throw(ArgumentError("\"$s\" is not a valid $(T)"))
+end
+
 """
     compute_gravity(latitude, altitude)
 

@@ -2,7 +2,7 @@ function detect_zupt(u::AbstractMatrix{T}, simdata::InsConfig) where T<:Real
     N = size(u, 2)
     W = simdata.window_size
     gamma = simdata.gamma
-    g = simdata.g
+    g = norm(simdata.g)
     sigma_a = simdata.sigma_a
     sigma_g = simdata.sigma_g
 

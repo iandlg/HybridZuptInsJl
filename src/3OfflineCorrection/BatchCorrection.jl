@@ -12,6 +12,7 @@ Compute training inputs and outputs for GP regression from a pair of trajectorie
 - `traj_gt`: Ground truth trajectory, temporally aligned with `traj`.
 - `step_seg`: Indices marking step boundaries in the trajectory (1‑based, length `n_steps`).
 - `ref_frame`: Reference frame for step vector computation (`BODY` or `HEADING`).
+- `feature_type` : Type of feature to use during the regression (`THREED_STEP` ,`TWOD_STEP_DT`, `THREED_STEP_DT`).
 
 # Returns
 - `ouputs`: Dictionnary with `yaw` and `pos` keys .
@@ -24,7 +25,8 @@ function compute_training_io(
     traj::Trajectory,
     traj_gt::Trajectory,
     step_seg::Vector{Int};
-    ref_frame::ReferenceFrame=BODY
+    ref_frame::ReferenceFrame=BODY,
+    feature_type::FeatureType=THREED_STEP
 )
     if !is_compatible(traj, traj_gt)
         throw(ArgumentError("TimeSeries must be compatible."))
@@ -52,15 +54,22 @@ function compute_training_io(
         throw(ArgumentError("Unsupported reference frame: $ref_frame"))
     end
 
-    input_feature = funs[ref_frame](traj, step_seg)      # 3 x (n_steps-1)
+    ins_step = funs[ref_frame](traj, step_seg)      # 3 x (n_steps-1)
     gt_steps = funs[ref_frame](traj_gt, step_seg)
 
+    outputs["pos"] = gt_steps - ins_step
 
-    outputs["pos"] = gt_steps - input_feature
+    # Time difference between consecutive step indices
+    Δt = diff(traj.t[step_seg])   # length (n_steps-1)
 
-    Δt = diff(step_seg)
-    input_feature[3, :] = Δt
-    # input_feature = vcat(input_feature, Δt')
+    # Feature selectors based on the enum
+    feature_selectors = Dict(
+        THREED_STEP => () -> ins_step,                             # 3 × N
+        TWOD_STEP_DT => () -> vcat(ins_step[1:2, :], Δt'),          # 3 × N (x, y, dt)
+        THREED_STEP_DT => () -> vcat(ins_step, Δt'),                  # 4 × N (x, y, z, dt)
+    )
+    input_feature = feature_selectors[feature_type]()
+    @show input_feature[:, 5]
 
     return outputs, input_feature
 end

@@ -11,6 +11,7 @@ import LeastSquaresOptim
 import GaussianProcesses
 import PDMats
 using Distributions
+using Dates
 
 # Resolve ambiguity between GaussianProcesses.jl and PDMats.jl
 function LinearAlgebra.ldiv!(
@@ -39,6 +40,8 @@ include("2ZuptIns/RigidTransform.jl")
 
 include("3OfflineCorrection/BatchCorrection.jl")
 include("3OfflineCorrection/HypVariability.jl")
+
+include("4OnlineCorrection/HybridZuptIns.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")

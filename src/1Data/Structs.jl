@@ -17,7 +17,7 @@ struct SeHyperparams
 end
 
 
-function SeHyperparams(d::Dict{String,Vector{Any}})
+function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     SeHyperparams(
         Float64.(d["yaw"]),
         Float64.(d["pos_1"]),
@@ -75,4 +75,36 @@ struct HsgpParameters
 
         new(hp, d, m, feature_std, feature_mean, LL_vec)
     end
+end
+
+function HsgpParameters(d::Dict{String,Any})
+    hp = SeHyperparams(Dict(d["hp"]))
+    HsgpParameters(
+        hp,
+        d["d"],
+        d["m"],
+        Float64.(d["feature_std"]),
+        Float64.(d["feature_mean"]),
+        Float64.(d["LL"])
+    )
+end
+
+function to_json(filename::AbstractString, p::HsgpParameters;
+    metadata::Dict{String,Any}=Dict{String,Any}())
+    envelope = Dict{String,Any}(
+        "saved_at" => string(now()),          # Dates.now()
+        "metadata" => metadata,
+        "params" => p
+    )
+    open(filename, "w") do f
+        JSON.print(f, envelope, 4)
+    end
+end
+
+function from_json(filename::AbstractString)
+    raw = JSON.parsefile(filename)
+    metadata = Dict(raw["metadata"])
+    saved_at = raw["saved_at"]
+    params = HsgpParameters(Dict(raw["params"]))     # your existing conversion logic
+    return params, metadata, saved_at
 end

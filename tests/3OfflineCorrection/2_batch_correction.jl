@@ -26,6 +26,8 @@ hyper = hypvect[1]
 
 N_steps = length(segs)
 FRAME = HybridZuptInsJl.HEADING
+FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
+
 @info "N_step = $N_steps"
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME)
@@ -35,7 +37,7 @@ N_train = size(input_feature, 2)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
-    n_restarts_optimizer=2)
+    n_restarts_optimizer=0)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hyper)
