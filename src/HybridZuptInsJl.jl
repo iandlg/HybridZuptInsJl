@@ -14,13 +14,13 @@ using Distributions
 using Dates
 
 # Resolve ambiguity between GaussianProcesses.jl and PDMats.jl
-function LinearAlgebra.ldiv!(
-    A::PDMats.PDMat{Float64,Matrix{Float64}},
-    B::AbstractVecOrMat{Float64}
-)
-    LinearAlgebra.ldiv!(A.chol, B)
-    return B
-end
+# function LinearAlgebra.ldiv!(
+#     A::PDMats.PDMat{Float64,Matrix{Float64}},
+#     B::AbstractVecOrMat{Float64}
+# )
+#     LinearAlgebra.ldiv!(A.chol, B)
+#     return B
+# end
 
 include("0Util/Orientation.jl")
 include("0Util/InsConfig.jl")

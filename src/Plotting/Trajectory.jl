@@ -190,3 +190,70 @@ function plot_groundtruth_vs_inertial_orientations(
 
     return fig
 end
+
+"""
+    plot_trajectory_3d(
+    trajs::Union{Trajectory, Dict{String,Trajectory}};
+    gt_traj::Union{Nothing,Trajectory}=nothing,
+    start_marker::Bool=true, end_marker::Bool=true
+)
+
+Plot 3D positions (x, y, z) from one or more trajectories using an interactive GLMakie window.
+
+# Arguments
+- `trajs`: Either a single `Trajectory` (labelled "Estimation") or a dictionary mapping
+  labels (e.g. "Estimation", "GP corrected") to `Trajectory` objects. Each trajectory
+  must provide `pos::Matrix{Float64}` (3×N) with columns as time steps.
+- `gt_traj`: Optional ground truth trajectory (plotted as a dashed black line).
+- `start_marker`: If `true`, mark the start point of each trajectory with a green sphere.
+- `end_marker`: If `true`, mark the end point with a red sphere.
+
+# Returns
+- A `Figure` object with a 3D axis.
+"""
+function plot_trajectory_3d(
+    trajs::Union{Trajectory,Dict{String,Trajectory}},
+    gt_traj::Union{Nothing,Trajectory}=nothing;
+    start_marker::Bool=true,
+    end_marker::Bool=true)
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
+
+    fig = Figure(size=(1000, 800))
+    ax = Axis3(fig[1, 1];
+        title="3D Trajectory",
+        xlabel="x (m)", ylabel="y (m)", zlabel="z (m)",
+        aspect=(1, 1, 1))
+
+    colours = [:steelblue, :orange, :seagreen, :purple, :tomato]
+
+    for (i, (label, traj)) in enumerate(trajs)
+        pos = traj.pos
+        N = size(pos, 2)
+        colour = colours[(i-1)%length(colours)+1]
+
+        lines!(ax, pos[1, :], pos[2, :], pos[3, :];
+            color=colour, linewidth=2, label=label)
+
+        if start_marker
+            scatter!(ax, [pos[1, 1]], [pos[2, 1]], [pos[3, 1]];
+                color=:green, markersize=12, marker=:circle,
+                label=i == 1 ? "Start" : "")
+        end
+        if end_marker
+            scatter!(ax, [pos[1, end]], [pos[2, end]], [pos[3, end]];
+                color=:red, markersize=12, marker=:circle,
+                label=i == 1 ? "End" : "")
+        end
+    end
+
+    if gt_traj !== nothing
+        pos_gt = gt_traj.pos
+        lines!(ax, pos_gt[1, :], pos_gt[2, :], pos_gt[3, :];
+            color=:black, linewidth=1.5, linestyle=:dash, label="Ground truth")
+    end
+
+    axislegend(ax; position=:rb)
+    return fig
+end

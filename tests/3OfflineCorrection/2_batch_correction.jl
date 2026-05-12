@@ -4,8 +4,12 @@ using GLMakie
 using JSON
 
 data_dir = "data/angermann_high_precision"
-imu = HybridZuptInsJl.InertialData(data_dir, 15)
-gt = HybridZuptInsJl.Trajectory(data_dir, 15)
+trial_id = 15
+FRAME = HybridZuptInsJl.BODY
+FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
+
+imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
+gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 Δt = -0.05
 gt = HybridZuptInsJl.Trajectory(
     (gt.t .+ Δt),
@@ -13,9 +17,11 @@ gt = HybridZuptInsJl.Trajectory(
     gt.R_nb,
     gt.vel
 )
-ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, 15; inertial=imu, gt_traj=gt
+ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
+    data_dir, trial_id; inertial=imu, gt_traj=gt
 )
+
+fig_rmse_full = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned, gt_traj_aligned)
 
 hypvect = JSON.parsefile(
     "out/hyperparameters/fixed_jl_hypers_body_3d_list.json", Vector{HybridZuptInsJl.SeHyperparams})
@@ -25,8 +31,7 @@ hyper = hypvect[1]
 
 
 N_steps = length(segs)
-FRAME = HybridZuptInsJl.HEADING
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
+
 
 @info "N_step = $N_steps"
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(

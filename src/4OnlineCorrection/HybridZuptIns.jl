@@ -24,7 +24,9 @@ function hybrid_nominal_zupt_aided_ins(
     simdata::InsConfig,
     gt_traj::Trajectory,
     gp_params::HsgpParameters;
-    x_init::Vector{Float64}=zeros(9)
+    x_init::Vector{Float64}=zeros(9),
+    correction::Bool=true,
+    train_ratio::Float64=0.5
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -78,12 +80,18 @@ function hybrid_nominal_zupt_aided_ins(
     beta = Dict(k => zeros(gp_params.m) for k in outputs_keys)
     P_beta = Dict(k => Matrix(Diagonal(psd[k])) for k in outputs_keys)
 
-    # Ground truth availability: first 40 % of samples
-    train_percent = 0.4
-    n_train_cutoff = floor(Int, train_percent * N)
+    # Ground truth availability
+    n_train_cutoff = floor(Int, train_ratio * N)
     gt_available = [n <= n_train_cutoff for n in 1:N]   # 1-based
 
-    y_train = Vector{Vector{Float64}}()
+    true_outputs = Dict{String,VecOrMat{Float64}}(
+        "yaw" => Float64[],
+        "pos" => Float64[]
+    )
+    predicted_outputs = Dict{String,VecOrMat{Float64}}(
+        "yaw" => Float64[],
+        "pos" => Float64[]
+    )
 
     # ── segmentation bookkeeping ─────────────────────────────────────────────
     seg_start = 2          # first index to process (1-based, history is at n-1)
@@ -201,7 +209,9 @@ function hybrid_nominal_zupt_aided_ins(
                     )
                 end
 
-                push!(y_train, y)
+                # Save training data
+                push!(true_outputs["yaw"], y_yaw)
+                push!(true_outputs["pos"], y_pos)
 
                 # Update nominal position with ground truth position
                 x[1:3, curr_step] = gt_traj.pos[:, curr_step]
@@ -209,7 +219,7 @@ function hybrid_nominal_zupt_aided_ins(
             end
 
             # ── GP prediction when GT is NOT available ────────────────────────
-            if !gt_available[curr_step]
+            if !gt_available[curr_step] && correction
                 preds = Vector{Float64}(undef, 4)
                 for (idx, outpt) in enumerate(outputs_keys)
                     preds[idx] = (eigvect*beta[outpt])[1]
@@ -247,5 +257,5 @@ function hybrid_nominal_zupt_aided_ins(
     R_nb_final = euler_to_matrix(x[7:9, :])
     zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
-    return zupt, zupt_ins_traj, step_seg, y_train
+    return zupt, zupt_ins_traj, step_seg, true_outputs
 end

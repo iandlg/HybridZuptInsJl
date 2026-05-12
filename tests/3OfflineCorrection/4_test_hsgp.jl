@@ -11,8 +11,8 @@ FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
 m = 500
 margin = 2.5
 
-imu = HybridZuptInsJl.InertialData(data_dir, 15)
-gt = HybridZuptInsJl.Trajectory(data_dir, 15)
+imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
+gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 gt = HybridZuptInsJl.Trajectory(
     (gt.t .- 0.05),
     gt.pos,
@@ -23,6 +23,11 @@ gt = HybridZuptInsJl.Trajectory(
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id; inertial=imu, gt_traj=gt
 )
+
+fig_3d_traj = HybridZuptInsJl.plot_trajectory_3d(ins_traj_aligned[segs[1:20]], gt_traj_aligned[segs[1:20]])
+fig_rmse = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned[segs], gt_traj_aligned[segs])
+
+display(ins_traj_aligned.pos[:, 1])
 
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
