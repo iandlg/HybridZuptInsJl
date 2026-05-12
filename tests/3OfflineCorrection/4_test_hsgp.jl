@@ -1,8 +1,9 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using JSON
+using JSON, Statistics
 
-hp = JSON.parsefile("out/hyperparameters/py_hypers.json", HybridZuptInsJl.SeHyperparams)
+hsgp_hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/handtune_hsgp.json", HybridZuptInsJl.SeHyperparams)
+gp_hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/nn_outlier.json", HybridZuptInsJl.SeHyperparams)
 data_dir = "data/angermann_high_precision"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
@@ -12,7 +13,7 @@ margin = 2.5
 imu = HybridZuptInsJl.InertialData(data_dir, 15)
 gt = HybridZuptInsJl.Trajectory(data_dir, 15)
 gt = HybridZuptInsJl.Trajectory(
-    (gt.t .+ -0.05),
+    (gt.t .- 0.05),
     gt.pos,
     gt.R_nb,
     gt.vel
@@ -26,14 +27,14 @@ true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hp;
+    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, gp_hp;
     n_restarts_optimizer=0)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hp)
+    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, gp_hp)
 
 hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hp;
+    input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hsgp_hp;
     m=m, margin=margin
 )
 
@@ -77,5 +78,12 @@ outputs = Dict(
     "GP" => gp_corrections,
     "HSGP" => hsgp_corrections
 )
+
+# Show output Statistics
+@info "Yaw correction standard deviation : $(std(true_outputs["yaw"]))"
+@info "Yaw correction mean : $(mean(true_outputs["yaw"]))"
+
 fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
 fig_regression = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[segs])
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)

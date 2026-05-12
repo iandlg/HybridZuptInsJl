@@ -25,7 +25,7 @@ hyper = hypvect[1]
 
 
 N_steps = length(segs)
-FRAME = HybridZuptInsJl.BODY
+FRAME = HybridZuptInsJl.HEADING
 @info "N_step = $N_steps"
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME)
@@ -35,7 +35,7 @@ N_train = size(input_feature, 2)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
-    n_restarts_optimizer=0)
+    n_restarts_optimizer=2)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hyper)
@@ -82,4 +82,4 @@ fig_output = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
 open("./out/hyperparameters/jl_hypers_body_3d_list.json", "w") do f
     JSON.print(f, hyperparameters, 4)   # 4 = indentation spaces
 end
-
+HybridZuptInsJl.to_json("./out/hyperparameters/jl_hypers_body_3d_list.json", hyperparameters)

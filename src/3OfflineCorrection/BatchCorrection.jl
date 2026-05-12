@@ -59,7 +59,7 @@ function compute_training_io(
     outputs["pos"] = gt_steps - input_feature
 
     Δt = diff(step_seg)
-    # input_feature[3, :] = Δt
+    input_feature[3, :] = Δt
     # input_feature = vcat(input_feature, Δt')
 
     return outputs, input_feature
@@ -394,10 +394,7 @@ function compute_hsgp_corrections(
         phi_star = calc_eigenvectors(x_test', L_vec, eigvals)   # (n_test, m)
 
         # 7. Build A = ΦᵀΦ + σ_n² Λ⁻¹   where Λ = diag(psd)
-        A = phi' * phi
-        for i in 1:m
-            A[i, i] += hyperparameter[3]^2 / psd[i]
-        end
+        A = hyperparameter[3]^2 * Diagonal(1.0 ./ psd) + phi' * phi                    # (m, m)
 
         # 8. Solve A α = Φᵀ y
         rhs = phi' * y_train
