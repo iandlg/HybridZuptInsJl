@@ -15,7 +15,7 @@ Plot regression results for yaw and position components (X, Y, Z) with RMSE anno
 - `Figure` object.
 """
 function plot_regression_results(
-    pred_data::AbstractDict{String,Dict{String,VecOrMat{Float64}}},
+    pred_data::Union{Nothing,AbstractDict{String,Dict{String,VecOrMat{Float64}}}},
     true_data::AbstractDict{String,VecOrMat{Float64}})
     # Unpack true data
     yaw_true = true_data["yaw"]
@@ -44,28 +44,30 @@ function plot_regression_results(
         lines!(axes[dim+1], 1:N, pos_true[dim, :]; color=:black, linewidth=1.5, label="True")
     end
 
-    # ---- Plot each prediction method ----
-    colors = [:red, :blue, :green, :orange, :purple]
-    method_names = collect(keys(pred_data))
-    for (method_idx, method_name) in enumerate(method_names)
-        color = colors[(method_idx-1)%length(colors)+1]
-        pred_dict = pred_data[method_name]
+    if !isnothing(pred_data)
+        # ---- Plot each prediction method ----
+        colors = [:red, :blue, :green, :orange, :purple]
+        method_names = collect(keys(pred_data))
+        for (method_idx, method_name) in enumerate(method_names)
+            color = colors[(method_idx-1)%length(colors)+1]
+            pred_dict = pred_data[method_name]
 
-        # Yaw predictions
-        yaw_pred = pred_dict["yaw"]
-        @assert length(yaw_pred) == N
-        rmse_yaw = sqrt(mean((yaw_pred .- yaw_true) .^ 2))
-        label_yaw = "$method_name (RMSE = $(round(rmse_yaw, digits=4)))"
-        lines!(axes[1], 1:N, yaw_pred; color=color, linestyle=:dash, linewidth=1.2, label=label_yaw)
+            # Yaw predictions
+            yaw_pred = pred_dict["yaw"]
+            @assert length(yaw_pred) == N
+            rmse_yaw = sqrt(mean((yaw_pred .- yaw_true) .^ 2))
+            label_yaw = "$method_name (RMSE = $(round(rmse_yaw, digits=4)))"
+            lines!(axes[1], 1:N, yaw_pred; color=color, linestyle=:dash, linewidth=1.2, label=label_yaw)
 
-        # Position predictions
-        pos_pred = pred_dict["pos"]
-        @assert size(pos_pred) == (3, N)
-        for dim in 1:3
-            rmse_pos = sqrt(mean((pos_pred[dim, :] .- pos_true[dim, :]) .^ 2))
-            label_pos = "$method_name (RMSE = $(round(rmse_pos, digits=4)))"
-            lines!(axes[dim+1], 1:N, pos_pred[dim, :]; color=color, linestyle=:dash,
-                linewidth=1.2, label=label_pos)
+            # Position predictions
+            pos_pred = pred_dict["pos"]
+            @assert size(pos_pred) == (3, N)
+            for dim in 1:3
+                rmse_pos = sqrt(mean((pos_pred[dim, :] .- pos_true[dim, :]) .^ 2))
+                label_pos = "$method_name (RMSE = $(round(rmse_pos, digits=4)))"
+                lines!(axes[dim+1], 1:N, pos_pred[dim, :]; color=color, linestyle=:dash,
+                    linewidth=1.2, label=label_pos)
+            end
         end
     end
 
@@ -74,5 +76,51 @@ function plot_regression_results(
         axislegend(ax; position=:rt, framevisible=true)
     end
 
+    return fig
+end
+
+"""
+    plot_input_features(
+        features::Matrix{Float64}, t::Union{Vector{Float64},Nothing}=nothing;
+        labels::Union{Vector{String},Nothing}=nothing,
+        title::String="Input Features"
+    )
+
+Plot three‑dimensional input features over time.
+
+# Arguments
+- `features`: Feature matrix of size `(3, N)`.
+- `t`: Optional time vector of length `N`. If `nothing`, uses sample indices.
+- `labels`: Optional legend labels for the three dimensions (default: `["x", "y", "z"]`).
+- `title`: Plot title.
+
+# Returns
+- A `Figure` object.
+"""
+function plot_input_features(
+    features::Matrix{Float64},
+    t::Union{Vector{Float64},Nothing}=nothing;
+    labels::Union{Vector{String},Nothing}=nothing,
+    title::String="Input Features"
+)
+    @assert size(features, 1) == 3 "features must have 3 rows"
+    N = size(features, 2)
+    if t === nothing
+        t = 1:N
+    end
+    if labels === nothing
+        labels = ["x", "y", "z"]
+    end
+    @assert length(labels) == 3 "Must provide three labels"
+
+    colors = [:red, :green, :blue]
+    fig = Figure(size=(800, 400))
+    ax = Axis(fig[1, 1]; xlabel="Time (s)", ylabel="Value", title=title,
+        xgridvisible=true, ygridvisible=true)
+
+    for i in 1:3
+        lines!(ax, t, features[i, :]; color=colors[i], linewidth=1.2, label=labels[i])
+    end
+    axislegend(ax; position=:rt)
     return fig
 end

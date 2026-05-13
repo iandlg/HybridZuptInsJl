@@ -1,28 +1,24 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using JSON, Statistics
+using OrderedCollections
 
-hsgp_hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/handtune_hsgp.json", HybridZuptInsJl.SeHyperparams)
-gp_hp = JSON.parsefile("out/hyperparameters/py_hypers.json", HybridZuptInsJl.SeHyperparams)
+hyp_key = 1
+hyp_path = Dict{Int,String}(
+    1 => "out/3OfflineCorrection/VariabilityResults/PY_ANG15_BODY_THREED_STEP.json",
+    2 => "out/3OfflineCorrection/VariabilityResults/ANG15_BODY_THREED_STEP_2026-05-13T14:14:24.485.json"
+)[hyp_key]
 
+hp, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.SeHyperparams, hyp_path)
 data_dir = "data/angermann_high_precision"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
 FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-m = 300
-margin = 2.0
-
-imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
-gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
-gt = HybridZuptInsJl.Trajectory(
-    (gt.t .- 0.05),
-    gt.pos,
-    gt.R_nb,
-    gt.vel
-)
+m = 1000
+margin = 2.5
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; inertial=imu, gt_traj=gt
+    data_dir, trial_id
 )
 
 fig_3d_traj = HybridZuptInsJl.plot_trajectory_3d(ins_traj_aligned[segs[1:20]], gt_traj_aligned[segs[1:20]])
@@ -34,14 +30,14 @@ true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, gp_hp;
+    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hp;
     n_restarts_optimizer=0)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, gp_hp)
+    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hp)
 
 hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hsgp_hp;
+    input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hp;
     m=m, margin=margin
 )
 
@@ -92,13 +88,13 @@ static_traj = HybridZuptInsJl.apply_corrections(
     segs; ref_frame=FRAME
 )
 
-trajs = Dict{String,HybridZuptInsJl.Trajectory}(
+trajs = OrderedDict{String,HybridZuptInsJl.Trajectory}(
     "model" => ins_traj_aligned[segs],
     "model + static" => static_traj,
     "model + GP" => gp_traj,
     "model + HSGP" => hsgp_traj
 )
-outputs = Dict(
+outputs = OrderedDict(
     "static" => static_corrections,
     "GP" => gp_corrections,
     "HSGP" => hsgp_corrections

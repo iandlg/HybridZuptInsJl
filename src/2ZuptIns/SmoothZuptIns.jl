@@ -129,21 +129,11 @@ function smoothed_zupt_aided_ins(
             end
             # Enforce symmetry
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
-            if n == 2
-                display(P[:, :, n])
-                display(dx[:, n])
-            end
 
             # Segmentation decision
             if update!(step_detector, zupt[n])
                 push!(step_seg, n)
                 seg_end = n
-                if length(step_seg) == 1
-                    display(n)
-                    display(dx[:, n])
-                    display(P[:, :, n])
-                    display(quat[:, n])
-                end
                 break
             end
         end
@@ -161,11 +151,6 @@ function smoothed_zupt_aided_ins(
             P_smooth[:, :, n] = P[:, :, n] +
                                 A * (P_smooth[:, :, n+1] - P_timeupd[:, :, n+1]) * A'
             P_smooth[:, :, n] = (P_smooth[:, :, n] + P_smooth[:, :, n]') / 2
-            # if (length(step_seg) == 1) & (n == seg_start)
-            #     display(n)
-            #     display(dx_smooth[:, n])
-            #     display(P_smooth[:, :, n])
-            # end
         end
 
         # ------------------------------------------------------------------

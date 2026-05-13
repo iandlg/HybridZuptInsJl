@@ -11,8 +11,10 @@ n_restarts_optimizer = 2
 kern_lo = [-4.0, -4.0]
 kern_hi = [4.0, 4.0]
 log_kern_bounds = [kern_lo, kern_hi]
-log_noise_bounds = [[-1.7], [0.0]]
+log_noise_bounds = [[-6.0], [0.0]]
 method_key = "LBFGS"
+normalize_input = true
+normalize_output = true
 
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision"
@@ -23,39 +25,36 @@ method = Dict{String,Any}(
     "LBFGS" => Optim.LBFGS()
 )[method_key]
 
-imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
-gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
-Δt = -0.05
-gt = HybridZuptInsJl.Trajectory(
-    (gt.t .+ Δt),
-    gt.pos,
-    gt.R_nb,
-    gt.vel
-)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; inertial=imu, gt_traj=gt
+    data_dir, trial_id
 )
 
-# fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
+##
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
 
-hypvect = JSON.parsefile(
-    "out/hyperparameters/fixed_jl_hypers_body_3d_list.json", Vector{HybridZuptInsJl.SeHyperparams})
-hyper = hypvect[1]
+# hypvect = JSON.parsefile(
+#     "out/hyperparameters/fixed_jl_hypers_body_3d_list.json", Vector{HybridZuptInsJl.SeHyperparams})
+# hyper = hypvect[1]
 
 
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
+# fig_in = HybridZuptInsJl.plot_input_features(input_feature)
+# fig_out = HybridZuptInsJl.plot_regression_results(nothing, true_outputs)
+
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
+    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections;
     n_restarts_optimizer=n_restarts_optimizer,
     log_kern_bounds=log_kern_bounds,
     log_noise_bounds=log_noise_bounds,
-    method=method
+    method=method,
+    normalize_x=normalize_input,
+    normalize_y=normalize_output
 )
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hyper)
+    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections)
 
 true_output_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
@@ -63,6 +62,7 @@ true_output_traj = HybridZuptInsJl.apply_corrections(
     true_outputs["pos"],
     segs; ref_frame=FRAME
 )
+
 
 gp_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
@@ -77,6 +77,8 @@ static_traj = HybridZuptInsJl.apply_corrections(
     static_corrections["pos"],
     segs; ref_frame=FRAME
 )
+
+fig_stat = HybridZuptInsJl.plot_trajectory_xyz_euler(static_traj)
 
 trajs = OrderedDict{String,HybridZuptInsJl.Trajectory}(
     "model" => ins_traj_aligned[segs],
@@ -109,15 +111,16 @@ filename = "$(data_key)$(trial_id)_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
 
 HybridZuptInsJl.to_json(joinpath(outdir, filename), hyperparameters;
     metadata=Dict{String,Any}(
-        "data_dir" => data_dir,
+        "data_key" => data_key,
         "trial_id" => trial_id,
         "ref_frame" => FRAME,
         "feature_type" => FEATURE_TYPE,
         "n_restarts_optimizer" => n_restarts_optimizer,
-        "time_offset" => Δt,
         "log_kern_bounds" => log_kern_bounds,
         "log_noise_bounds" => log_noise_bounds,
         "rmse" => rmses,
-        "method" => method_key
+        "method" => method_key,
+        "normalize_input" => normalize_input,
+        "normalize_output" => normalize_output
     )
 )

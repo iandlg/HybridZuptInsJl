@@ -92,5 +92,5 @@ function evaluate_hyperparameter_variability(
     end
     best_non_outlier_hyper = hyperparams_vec[best_non_outlier_idx]
 
-    return rmse_per_fold, corrected_trajs, best_hyper, best_non_outlier_hyper
+    return rmse_per_fold, corrected_trajs, best_hyper, best_idx, best_non_outlier_hyper, best_non_outlier_idx
 end

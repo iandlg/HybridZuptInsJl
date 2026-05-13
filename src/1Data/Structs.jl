@@ -131,6 +131,14 @@ function from_json(::Type{T}, filename::AbstractString) where {T}
     raw = JSON.parsefile(filename)
     metadata = Dict(raw["metadata"])
     saved_at = raw["saved_at"]
-    obj = T(Dict(raw["params"]))
+
+    # Check if T is a Vector type
+    if T <: AbstractVector
+        # Extract element type and convert each element
+        ElementType = eltype(T)
+        obj = [ElementType(Dict(item)) for item in raw["params"]]
+    else
+        obj = T(Dict(raw["params"]))
+    end
     return obj, metadata, saved_at
 end

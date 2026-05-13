@@ -263,7 +263,9 @@ function compute_gp_corrections(
     n_restarts_optimizer::Int=5,
     log_kern_bounds::Vector{Vector{Float64}}=[[-1.0, -3.0], [3.0, 2.0]],
     log_noise_bounds::Vector{Vector{Float64}}=[[-1.71], [-0.1]],
-    method::Any=Optim.LBFGS()
+    method::Any=Optim.LBFGS(),
+    normalize_y::Bool=true,
+    normalize_x::Bool=true
 )
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
@@ -273,10 +275,17 @@ function compute_gp_corrections(
     hyperparams = zeros(D, 4)
 
     # --- scale features ---------------------------------------------------
-    μ = mean(x, dims=2)[:]
-    sigma = std(x, dims=2)[:]
-    sigma[sigma.==0.0] .= 1.0
-    x_scaled = (x .- μ) ./ sigma
+    x_μ = mean(x, dims=2)[:]
+    x_σ = std(x, dims=2)[:]
+    x_σ[x_σ.==0.0] .= 1.0
+    x_scaled = normalize_x ? (x .- x_μ) ./ x_σ : x
+
+    # --- scale outptut ---------------------------------------------------
+    y_μ = mean(y)
+    y_σ = std(y)
+    y_σ = y_σ == 0.0 ? 1.0 : y_σ
+    y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
+
 
     log_ℓ, log_σ_f, log_σ_n = 0.0, 0.0, -1.0
     if !isnothing(hyperparameter)
@@ -303,7 +312,7 @@ function compute_gp_corrections(
         isempty(train_ind) && continue
 
         x_train = x_scaled[:, train_ind]
-        y_train = y[train_ind]
+        y_train = y_scaled[train_ind]
         x_test = x_scaled[:, test_ind]
 
         gp = GaussianProcesses.GP(x_train, y_train,
@@ -317,14 +326,12 @@ function compute_gp_corrections(
         end
 
         y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
-        y_testing_gp[test_ind] = y_pred
+        y_testing_gp[test_ind] = normalize_y ? y_pred .* y_σ .+ y_μ : y_pred
 
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
 
         @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
         hyperparams[i, :] = [gp.target, exp(log_σ_f), exp(log_ℓ), exp(log_σ_n)]
-
-        #                     lml        sigma_f        len_scale    sigma_n
     end
 
     return y_testing_gp, hyperparams
@@ -356,16 +363,24 @@ function compute_hsgp_corrections(
     x::Matrix{Float64}, y::Vector{Float64};
     m::Int=25,
     hyperparameter::Vector{Float64}=[0.0, 0.0, -1.0],
-    margin::Float64=1.8
+    margin::Float64=1.8,
+    normalize_x::Bool=true,
+    normalize_y::Bool=true
 )
     d, N = size(x)
     @assert length(y) == N
 
-    # 1. Scale features to zero mean, unit variance per dimension
-    μ = mean(x, dims=2)[:]
-    σ = std(x, dims=2)[:]
-    σ[σ.==0.0] .= 1.0
-    x_scaled = (x .- μ) ./ σ      # (d, N)
+    # --- scale features ---------------------------------------------------
+    x_μ = mean(x, dims=2)[:]
+    x_σ = std(x, dims=2)[:]
+    x_σ[x_σ.==0.0] .= 1.0
+    x_scaled = normalize_x ? (x .- x_μ) ./ x_σ : x
+
+    # --- scale outptut ---------------------------------------------------
+    y_μ = mean(y)
+    y_σ = std(y)
+    y_σ = y_σ == 0.0 ? 1.0 : y_σ
+    y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
 
     # 2. Domain bounds L = margin * max(|x_scaled|) per dimension
     L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
@@ -393,7 +408,7 @@ function compute_hsgp_corrections(
         n_train = length(train_ind)
 
         x_train = x_scaled[:, train_ind]    # (d, n_train)
-        y_train = y[train_ind]
+        y_train = y_scaled[train_ind]
         x_test = x_scaled[:, test_ind]     # (d, n_test)
 
         # 6. Basis matrices
@@ -408,7 +423,7 @@ function compute_hsgp_corrections(
         alpha = A \ rhs   # using backslash (Cholesky will be used internally)
 
         # 9. Predict on test fold
-        predictions[test_ind] = phi_star * alpha
+        predictions[test_ind] = normalize_y ? phi_star * alpha .* y_σ .+ y_μ : phi_star * alpha
     end
 
     # 10. Dummy hyperparameter matrix (for interface compatibility)
@@ -428,14 +443,15 @@ function compute_static_corrections(
 )
     D = 10
     _, n_samples = size(x)
-    y_pred = fill(0.0, n_samples)
-    for i in 1:D
-        test_start = floor(Int, (i - 1) * n_samples / D) + 1
-        test_end = floor(Int, i * n_samples / D)
-        train_ind = vcat(1:test_start-1, test_end+1:n_samples)
-        test_ind = test_start:test_end
-        y_pred[test_ind] = fill(mean(y[train_ind]), length(test_ind))
-    end
+    # y_pred = fill(0.0, n_samples)
+    # for i in 1:D
+    #     test_start = floor(Int, (i - 1) * n_samples / D) + 1
+    #     test_end = floor(Int, i * n_samples / D)
+    #     train_ind = vcat(1:test_start-1, test_end+1:n_samples)
+    #     test_ind = test_start:test_end
+    #     y_pred[test_ind] = fill(mean(y[train_ind]), length(test_ind))
+    # end
+    y_pred = fill(mean(y), n_samples)
     return y_pred, nothing
 end
 """
@@ -473,19 +489,26 @@ function compute_corrections(
     @assert length(outputs["yaw"]) == n_samples
     @assert size(outputs["pos"], 2) == n_samples
 
+    hp = hyperparameters
+    if isnothing(hyperparameters)
+        hp = SeHyperparams(
+            zeros(Float64, 3), zeros(Float64, 3), zeros(Float64, 3), zeros(Float64, 3)
+        )
+    end
+
     predictions = Dict{String,Union{Vector{Float64},Matrix{Float64}}}()
     hyperparams_dict = Dict{String,Union{Matrix{Float64},Nothing}}()
 
     # Yaw correction
     @info "Computing Yaw corrections"
-    y_pred, hyper = correction_method(input_feature, outputs["yaw"]; hyperparameter=hyperparameters.yaw, kwargs...)
+    y_pred, hyper = correction_method(input_feature, outputs["yaw"]; hyperparameter=hp.yaw, kwargs...)
     predictions["yaw"] = y_pred
     hyperparams_dict["yaw"] = hyper
     # Position corrections
     predictions["pos"] = Matrix{Float64}(undef, 3, n_samples)
     for d in 1:3
         @info "Computing pos_$d corrections"
-        d_hyp = getfield(hyperparameters, Symbol("pos_$d"))
+        d_hyp = getfield(hp, Symbol("pos_$d"))
         y_pred, hyper = correction_method(input_feature, outputs["pos"][d, :]; hyperparameter=d_hyp, kwargs...)
         predictions["pos"][d, :] = y_pred
         hyperparams_dict["pos_$d"] = hyper
