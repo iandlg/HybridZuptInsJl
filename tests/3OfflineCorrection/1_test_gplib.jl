@@ -1,34 +1,29 @@
-# using GaussianProcesses
-# using Random
-# using Optim
-# using LinearAlgebra
-
-# #Training data
-# d, n = 2, 50;         #Dimension and number of observations
-# x = 2π * rand(d, n);                               #Predictors
-# y = vec(sin.(x[1, :]) .* sin.(x[2, :])) + 0.05 * rand(n);  #Responses
-
-# mZero = MeanZero()                             # Zero mean function
-# kern = SE(0.0, 0.0)    # Sum kernel with Matern 5/2 ARD kernel 
-# # with parameters [log(ℓ₁), log(ℓ₂)] = [0,0] and log(σ) = 0
-# # and Squared Exponential Iso kernel with
-# # parameters log(ℓ) = 0 and log(σ) = 0
-# @show size(x)
-# @show size(y)
-# gp = GP(x, y, mZero, kern, -2.0)          # Fit the GP
-
-# μ, σ² = predict_y(gp, 2π * rand(d, n));
-
-# optimize!(gp; ker)
-
 using GaussianProcesses
+using Random
 
-x = rand(10, 20)
-y = rand(20)
+Random.seed!(20140430)
+# Training data
+n = 10;                          #number of training points
+x = 2π * rand(n);              #predictors
+y = sin.(x) + 0.05 * randn(n);   #regressors
 
-m = MeanZero()
-k = SEIso(0.0, 0.0)
 
-gp = GP(x, y, m, k, 0.01)
+#Select mean and covariance function
+mZero = MeanZero()                   #Zero mean function
+kern = SE(0.1, 0.0)                   #Sqaured exponential kernel (note that hyperparameters are on the log scale)
 
-optimize!(gp)
+logObsNoise = -1.0                        # log standard deviation of observation noise (this is optional)
+gp = GP(x, y, mZero, kern, logObsNoise)       #Fit the GP
+
+GaussianProcesses.get_params(gp)
+
+μ, σ² = predict_y(gp, range(0, stop=2π, length=100));
+
+using Plots  #Load Plots.jl package
+
+plot(gp; xlabel="x", ylabel="y", title="Gaussian process", legend=false, fmt=:png)      # Plot the GP
+
+using Optim
+optimize!(gp; method=ConjugateGradient())   # Optimise the hyperparameters
+
+plot(gp; legend=false, fmt=:png)   #Plot the GP after the hyperparameters have been optimised 

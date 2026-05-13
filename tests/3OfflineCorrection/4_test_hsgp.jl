@@ -3,13 +3,14 @@ using .HybridZuptInsJl;
 using JSON, Statistics
 
 hsgp_hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/handtune_hsgp.json", HybridZuptInsJl.SeHyperparams)
-gp_hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/nn_outlier.json", HybridZuptInsJl.SeHyperparams)
+gp_hp = JSON.parsefile("out/hyperparameters/py_hypers.json", HybridZuptInsJl.SeHyperparams)
+
 data_dir = "data/angermann_high_precision"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
 FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-m = 500
-margin = 2.5
+m = 300
+margin = 2.0
 
 imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
@@ -108,6 +109,7 @@ outputs = Dict(
 @info "Yaw correction mean : $(mean(true_outputs["yaw"]))"
 
 fig_rmse_hspg = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
+fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[segs])
 fig_regression = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[segs])
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)

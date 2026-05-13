@@ -4,19 +4,19 @@ using GLMakie, JSON, OrderedCollections
 import Dates, Optim
 
 data_key = "ANG"
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)[data_key]
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
 FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-n_restarts_optimizer = 3
-kern_lo = [-7.0, -7.0]
-kern_hi = [7.0, 7.0]
+n_restarts_optimizer = 2
+kern_lo = [-4.0, -4.0]
+kern_hi = [4.0, 4.0]
 log_kern_bounds = [kern_lo, kern_hi]
-log_noise_bounds = [[-3.0], [0.0]]
-
+log_noise_bounds = [[-1.7], [0.0]]
 method_key = "LBFGS"
+
+data_dir = Dict{String,String}(
+    "ANG" => "data/angermann_high_precision"
+)[data_key]
 method = Dict{String,Any}(
     "CG" => Optim.ConjugateGradient(),
     "NM" => Optim.NelderMead(),
@@ -45,9 +45,6 @@ hyper = hypvect[1]
 
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
-
-N_train = size(input_feature, 2)
-@info "N_train = $N_train"
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hyper;
@@ -101,6 +98,7 @@ rmses = OrderedDict{String,Float64}(
 # Create figures
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[segs]; samples=20)
 fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
+fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[segs])
 fig_output = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
 
 

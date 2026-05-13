@@ -233,21 +233,19 @@ function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
         log_noise = clamp.(log_noise, noise_lo, noise_hi)
 
         @info "Restart $i; starting parameters : log_σ_n = $(log_noise[1]), log_ℓ = $(kern_params[1]), log_σ_f = $(kern_params[2])"
-
         # set_params! expects [kernel_params..., logNoise]
         GaussianProcesses.set_params!(gp, vcat(log_noise, kern_params))
         GaussianProcesses.update_target!(gp)
         try
             GaussianProcesses.optimize!(gp;
                 kernbounds=log_kern_bounds, noisebounds=log_noise_bounds, method=method)
-
             if gp.target > best_target
                 best_target = gp.target
                 best_params = GaussianProcesses.get_params(gp)
                 @debug "Restart $i: log-likelihood = $best_target"
             end
         catch e
-            @warn "Error optimizing $e"
+            @warn "Error during optimisation : $e"
         end
 
     end
@@ -311,17 +309,16 @@ function compute_gp_corrections(
         gp = GaussianProcesses.GP(x_train, y_train,
             GaussianProcesses.MeanZero(), make_kernel(), log_σ_n)
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
-        # @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
+        @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
         if n_restarts_optimizer > 0
             optimize_with_restarts!(gp, n_restarts_optimizer;
-                log_kern_bounds=log_kern_bounds, log_noise_bounds=log_noise_bounds)
+                log_kern_bounds=log_kern_bounds, log_noise_bounds=log_noise_bounds, method=method)
             # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
         end
 
         y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
         y_testing_gp[test_ind] = y_pred
 
-        # params = [log(σ_n), log(ℓ), log(σ_f)]  — extract directly
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
 
         @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"

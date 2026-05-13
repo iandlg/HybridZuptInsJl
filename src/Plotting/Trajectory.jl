@@ -264,3 +264,87 @@ function plot_trajectory_3d(
     axislegend(ax; position=:rb)
     return fig
 end
+
+"""
+    plot_position_distance_error(trajs::Union{Dict{String,Trajectory},Trajectory},
+                                 gt_traj::Trajectory)
+
+Plot the horizontal position error (Euclidean distance) over time for one or more
+estimated trajectories against a ground truth trajectory.
+
+# Arguments
+- `trajs`: Either a single `Trajectory` (labelled "Estimation") or a dictionary mapping
+  labels (e.g. "Estimation", "Filter") to `Trajectory` objects. Each trajectory may
+  optionally have a `name` field used in the legend.
+- `gt_traj`: Ground truth trajectory (only the first two position coordinates are used).
+
+# Returns
+- A `Figure` object containing the distance plot.
+"""
+function plot_position_distance_error(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory
+)
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
+
+    fig = Figure(size=(800, 600))
+    ax = Axis(fig[1, 1];
+        xlabel="Time (s)",
+        ylabel="Position error (m)",
+        title="Absolute Distance Error",
+        xgridvisible=true)
+
+    for (key, traj) in trajs
+        n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
+        # Horizontal distance error per sample (no cumulative sum)
+        diff = traj.pos[1:2, 1:n] .- gt_traj.pos[1:2, 1:n]
+        dist = sqrt.(sum(diff .^ 2, dims=1))[:]   # (n,)
+
+        # Use trajectory name if available, else the dictionary key
+        lines!(ax, traj.t[1:n], dist; linewidth=1.2, label=key)
+    end
+
+    axislegend(ax; position=:rt)
+    return fig
+end
+
+
+function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
+    """
+    Plot the XYZ position and Euler angles of a single trajectory.
+
+    # Arguments
+    - `traj`: Trajectory object with fields:
+        - t::Vector{Float64}
+        - pos::Matrix{Float64} (3×N)
+        - euler_nb::Matrix{Float64} (3×N) angles in radians (roll, pitch, yaw)
+    - `figsize`: (width, height) in pixels.
+    """
+    t = traj.t
+    pos = traj.pos
+    euler_deg = rad2deg.(matrix_to_euler(traj.R_nb))
+
+    fig = Figure(size=figsize)
+    # 2 rows, 3 columns
+    ax_pos_x = Axis(fig[1, 1]; xlabel="Time (s)", ylabel="X (m)", title="Position components")
+    ax_pos_y = Axis(fig[1, 2]; xlabel="Time (s)", ylabel="Y (m)")
+    ax_pos_z = Axis(fig[1, 3]; xlabel="Time (s)", ylabel="Z (m)")
+
+    ax_roll = Axis(fig[2, 1]; xlabel="Time (s)", ylabel="Roll (deg)", title="Euler angles")
+    ax_pitch = Axis(fig[2, 2]; xlabel="Time (s)", ylabel="Pitch (deg)")
+    ax_yaw = Axis(fig[2, 3]; xlabel="Time (s)", ylabel="Yaw (deg)")
+
+    # Plot positions
+    lines!(ax_pos_x, t, pos[1, :]; color=:blue, linewidth=1.5)
+    lines!(ax_pos_y, t, pos[2, :]; color=:blue, linewidth=1.5)
+    lines!(ax_pos_z, t, pos[3, :]; color=:blue, linewidth=1.5)
+
+    # Plot Euler angles (converted to degrees)
+    lines!(ax_roll, t, euler_deg[1, :]; color=:red, linewidth=1.5)
+    lines!(ax_pitch, t, euler_deg[2, :]; color=:red, linewidth=1.5)
+    lines!(ax_yaw, t, euler_deg[3, :]; color=:red, linewidth=1.5)
+
+    return fig
+end
