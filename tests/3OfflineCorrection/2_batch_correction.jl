@@ -6,15 +6,15 @@ import Dates, Optim
 data_key = "ANG"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-n_restarts_optimizer = 2
+FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_DT
+n_restarts_optimizer = 5
 kern_lo = [-4.0, -4.0]
 kern_hi = [4.0, 4.0]
 log_kern_bounds = [kern_lo, kern_hi]
 log_noise_bounds = [[-6.0], [0.0]]
 method_key = "LBFGS"
-normalize_input = true
-normalize_output = true
+normalize_input = false
+normalize_output = false
 
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision"
@@ -29,19 +29,8 @@ ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_al
     data_dir, trial_id
 )
 
-##
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
-
-# hypvect = JSON.parsefile(
-#     "out/hyperparameters/fixed_jl_hypers_body_3d_list.json", Vector{HybridZuptInsJl.SeHyperparams})
-# hyper = hypvect[1]
-
-
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
-
-# fig_in = HybridZuptInsJl.plot_input_features(input_feature)
-# fig_out = HybridZuptInsJl.plot_regression_results(nothing, true_outputs)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections;

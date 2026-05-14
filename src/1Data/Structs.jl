@@ -53,55 +53,72 @@ function to_json(
     end
 end
 
-
 struct HsgpParameters
-    hp::SeHyperparams          # kernel hyperparameters (σ_f, ℓ, σ_n) for each output
-    d::Int                     # input dimension
-    m::Int                     # number of basis functions
-    feature_std::Vector{Float64}   # per‑dimension standard deviation for scaling
-    feature_mean::Vector{Float64}  # per‑dimension mean for scaling
-    LL::Vector{Float64}            # domain half‑width per dimension (post‑scaling)
+    hp::SeHyperparams
+    d::Int
+    m::Int
+    input_stats::Vector{Vector{Float64}}   # [mean(d,), std(d,)]
+    yaw_stats::Vector{Float64}             # [mean, std]
+    pos_stats::Vector{Vector{Float64}}     # [mean(3,), std(3,)]
+    LL::Vector{Float64}
 
     function HsgpParameters(
         hp::SeHyperparams,
         d::Int,
         m::Int,
-        feature_std::Vector{Float64},
-        feature_mean::Vector{Float64},
-        LL::Union{Float64,Vector{Float64}}
+        LL::Union{Float64,Vector{Float64}};
+        input_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
+        yaw_stats::Union{Nothing,Vector{Float64}}=nothing,
+        pos_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing
     )
-        # dimension checks
-        if length(feature_std) != d
-            throw(ArgumentError("length(feature_std) = $(length(feature_std)) != d = $d"))
-        end
-        if length(feature_mean) != d
-            throw(ArgumentError("length(feature_mean) = $(length(feature_mean)) != d = $d"))
-        end
-
-        # convert LL to vector of length d
         LL_vec = LL isa Float64 ? fill(LL, d) : copy(LL)
-        if length(LL_vec) != d
+        length(LL_vec) == d ||
             throw(ArgumentError("length(LL) = $(length(LL_vec)) != d = $d"))
-        end
+        any(LL_vec .<= 0) &&
+            throw(ArgumentError("All LL must be positive, got $LL_vec"))
 
-        # optional: check positivity of LL
-        if any(LL_vec .<= 0)
-            throw(ArgumentError("All domain half‑widths (LL) must be positive, got $LL_vec"))
-        end
+        _safe_std(v) = map(x -> abs(x) < eps(Float64) ? 1.0 : x, v)
+        _safe_std_scalar(x) = abs(x) < eps(Float64) ? 1.0 : x
 
-        new(hp, d, m, feature_std, feature_mean, LL_vec)
+        input_stats_ = isnothing(input_stats) ? [zeros(d), ones(d)] :
+                       [input_stats[1], _safe_std(input_stats[2])]
+        length(input_stats_[1]) == d && length(input_stats_[2]) == d ||
+            throw(ArgumentError("input_stats vectors must have length d=$d"))
+
+        yaw_stats_ = isnothing(yaw_stats) ? [0.0, 1.0] :
+                     [yaw_stats[1], _safe_std_scalar(yaw_stats[2])]
+        length(yaw_stats_) == 2 ||
+            throw(ArgumentError("yaw_stats must have 2 elements [mean, std]"))
+
+        pos_stats_ = isnothing(pos_stats) ? [zeros(3), ones(3)] :
+                     [pos_stats[1], _safe_std(pos_stats[2])]
+        length(pos_stats_[1]) == 3 && length(pos_stats_[2]) == 3 ||
+            throw(ArgumentError("pos_stats vectors must have length 3"))
+
+        new(hp, d, m, input_stats_, yaw_stats_, pos_stats_, LL_vec)
     end
 end
 
 function HsgpParameters(d::Dict{String,Any})
     hp = SeHyperparams(Dict(d["hp"]))
+
+    input_stats = haskey(d, "input_stats") && !isnothing(d["input_stats"]) ?
+                  [Float64.(d["input_stats"][1]), Float64.(d["input_stats"][2])] : nothing
+
+    yaw_stats = haskey(d, "yaw_stats") && !isnothing(d["yaw_stats"]) ?
+                Float64.(d["yaw_stats"]) : nothing
+
+    pos_stats = haskey(d, "pos_stats") && !isnothing(d["pos_stats"]) ?
+                [Float64.(d["pos_stats"][1]), Float64.(d["pos_stats"][2])] : nothing
+
     HsgpParameters(
         hp,
         d["d"],
         d["m"],
-        Float64.(d["feature_std"]),
-        Float64.(d["feature_mean"]),
-        Float64.(d["LL"])
+        Float64.(d["LL"]);
+        input_stats=input_stats,
+        yaw_stats=yaw_stats,
+        pos_stats=pos_stats
     )
 end
 
