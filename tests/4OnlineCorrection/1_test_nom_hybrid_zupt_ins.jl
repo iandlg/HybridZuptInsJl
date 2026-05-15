@@ -42,7 +42,7 @@ pred_outputs = Dict{String,Any}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 1000, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 600, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     yaw_stats=hsgp_p.yaw_stats,
     pos_stats=hsgp_p.pos_stats
@@ -91,6 +91,6 @@ pred_outputs = OrderedDict{String,Dict{String,VecOrMat{Float64}}}(
     "model + HSGP" => pred_outputs["hsgp"]
 )
 
-fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
 fig_train_out = HybridZuptInsJl.plot_regression_results(training_outputs, true_outputs["model"])
 fig_pred_out = HybridZuptInsJl.plot_regression_results_no_rmse(pred_outputs, true_outputs["model"])
+fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
