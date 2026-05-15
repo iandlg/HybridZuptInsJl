@@ -83,3 +83,29 @@ function predict_correction(c::HsgpCorrector, input::Vector{Float64})
     preds[2:4] = preds[2:4] .* c.params.pos_stats[2] .+ c.params.pos_stats[1]
     return preds
 end
+
+
+# ── Concrete static mean corrector ────────────────────────────────────────────
+mutable struct StaticMeanCorrector <: AbstractNominalCorrector
+    sum::Vector{Float64}   # running sum for each of the 4 outputs (yaw, x, y, z)
+    count::Int             # number of updates performed
+end
+
+function StaticMeanCorrector()
+    return StaticMeanCorrector(zeros(4), 0)
+end
+
+function update_corrector!(c::StaticMeanCorrector, input::Vector{Float64}, y::Vector{Float64})
+    @assert length(y) == 4 "y must have length 4 (yaw, pos_x, pos_y, pos_z)"
+    c.sum .+= y
+    c.count += 1
+    return nothing
+end
+
+function predict_correction(c::StaticMeanCorrector, input::Vector{Float64})
+    if c.count == 0
+        return zeros(4)   # no data yet, return zero correction
+    else
+        return c.sum ./ c.count
+    end
+end

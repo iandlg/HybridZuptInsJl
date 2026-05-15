@@ -42,7 +42,7 @@ include("3OfflineCorrection/BatchCorrection.jl")
 include("3OfflineCorrection/HypVariability.jl")
 
 include("4OnlineCorrection/NominalCorrectors.jl")
-include("4OnlineCorrection/HybridZuptIns.jl")
+include("4OnlineCorrection/NominalHybridZuptIns.jl")
 
 
 include("Plotting/Trajectory.jl")

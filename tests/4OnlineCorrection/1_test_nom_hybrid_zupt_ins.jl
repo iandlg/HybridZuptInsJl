@@ -37,22 +37,50 @@ x_init = vcat(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
+true_outputs = Dict{String,Any}()
+pred_outputs = Dict{String,Any}()
 
 # Run online correction
+hsgp_p = HybridZuptInsJl.HsgpParameters(
+    hsgp_p.hp, hsgp_p.d, 1000, hsgp_p.LL;
+    input_stats=hsgp_p.input_stats,
+    yaw_stats=hsgp_p.yaw_stats,
+    pos_stats=hsgp_p.pos_stats
+)
 hsgp_corrector = HybridZuptInsJl.HsgpCorrector(hsgp_p)
-zupt, hybrid_ins_traj, step_seg, y_train = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+zupt, hsgp_ins_traj, step_seg, true_outputs["hsgp"], pred_outputs["hsgp"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
     corrector=hsgp_corrector, x_init=x_init, train_ratio=train_ratio
 )
 
-zupt, classic_ins_traj, step_seg, y_train = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
-    inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
-    x_init=x_init, correction=false, train_ratio=train_ratio
+# Run static mean correction
+static_corrector = HybridZuptInsJl.StaticMeanCorrector()
+zupt, static_ins_traj, step_seg, true_outputs["static"], pred_outputs["static"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+    inertial_updated, sim_config_updated, gt_traj_aligned;
+    corrector=static_corrector, x_init=x_init, train_ratio=train_ratio
+)
+
+
+zupt, classic_ins_traj, step_seg, true_outputs["model"], pred_outputs["model"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+    inertial_updated, sim_config_updated, gt_traj_aligned;
+    x_init=x_init, train_ratio=train_ratio
 )
 
 step_trajs = OrderedDict(
     "model" => classic_ins_traj[segs],
-    "model + online HSGP" => hybrid_ins_traj[segs]
+    "model + static" => static_ins_traj[segs],
+    "model + online HSGP" => hsgp_ins_traj[segs],
+)
+
+training_outputs = OrderedDict{String,Dict{String,VecOrMat{Float64}}}(
+    "model + static" => true_outputs["static"],
+    "model + HSGP" => true_outputs["hsgp"]
+)
+pred_outputs = OrderedDict{String,Dict{String,VecOrMat{Float64}}}(
+    "model + static" => pred_outputs["static"],
+    "model + HSGP" => pred_outputs["hsgp"]
 )
 
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
+fig_train_out = HybridZuptInsJl.plot_regression_results(training_outputs, true_outputs["model"])
+fig_pred_out = HybridZuptInsJl.plot_regression_results_no_rmse(pred_outputs, true_outputs["model"])
