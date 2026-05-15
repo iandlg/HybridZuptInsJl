@@ -1,7 +1,7 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
-
+##
 # Choose Parameters file
 hsgp_p_key = 1
 hsgp_p_path = Dict{Int,String}(
@@ -66,18 +66,28 @@ zupt, classic_ins_traj, step_seg, true_outputs["model"], pred_outputs["model"] =
     x_init=x_init, train_ratio=train_ratio
 )
 
+gp_corrector = HybridZuptInsJl.ExactGpCorrector(hsgp_p)
+zupt, gp_ins_traj, step_seg, true_outputs["gp"], pred_outputs["gp"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+    inertial_updated, sim_config_updated, gt_traj_aligned;
+    x_init=x_init, train_ratio=train_ratio, corrector=gp_corrector
+)
+
+
 step_trajs = OrderedDict(
     "model" => classic_ins_traj[segs],
     "model + static" => static_ins_traj[segs],
+    "model + GP" => gp_ins_traj[segs],
     "model + online HSGP" => hsgp_ins_traj[segs],
 )
 
 training_outputs = OrderedDict{String,Dict{String,VecOrMat{Float64}}}(
     "model + static" => true_outputs["static"],
+    "model + GP" => true_outputs["gp"],
     "model + HSGP" => true_outputs["hsgp"]
 )
 pred_outputs = OrderedDict{String,Dict{String,VecOrMat{Float64}}}(
     "model + static" => pred_outputs["static"],
+    "model + GP" => pred_outputs["gp"],
     "model + HSGP" => pred_outputs["hsgp"]
 )
 
