@@ -62,12 +62,47 @@ function clean(tr::Trajectory)
 end
 
 # Temporal alignment via linear interp (pos) + Slerp (rotation)
+# function temporal_alignment(tr::Trajectory, inertial_t::Vector{Float64})
+#     tg = tr.t
+#     pg = tr.pos
+#     Rg = tr.R_nb
+
+#     # Zero-order-hold extend left / right
+#     if inertial_t[begin] < tg[begin]
+#         tg = [inertial_t[begin]; tg]
+#         pg = [pg[:, 1] pg]
+#         Rg = cat(Rg[:, :, 1:1], Rg; dims=3)
+#     end
+#     if inertial_t[end] > tg[end]
+#         tg = [tg; inertial_t[end]]
+#         pg = [pg pg[:, end]]
+#         Rg = cat(Rg, Rg[:, :, end:end]; dims=3)
+#     end
+
+#     # Linear interp for position
+#     pos = vcat([Interpolations.LinearInterpolation(tg, pg[i, :])(inertial_t)' for i in 1:3]...)
+
+#     quats = [Quaternions.Quaternion(QuatRotation(RotMatrix{3}(Rg[:, :, i])))
+#              for i in axes(Rg, 3)]
+#     R_interp = Array{Float64}(undef, 3, 3, length(inertial_t))
+
+#     for (j, τ) in enumerate(inertial_t)
+#         k = searchsortedlast(tg, τ)
+#         k = clamp(k, 1, length(tg) - 1)
+#         a = clamp((τ - tg[k]) / (tg[k+1] - tg[k]), 0.0, 1.0)
+#         q = Quaternions.slerp(quats[k], quats[k+1], a)
+#         R_interp[:, :, j] .= Matrix(QuatRotation(q.s, q.v1, q.v2, q.v3))
+#     end
+
+#     return Trajectory(inertial_t, pos, R_interp)
+# end
+
 function temporal_alignment(tr::Trajectory, inertial_t::Vector{Float64})
     tg = tr.t
     pg = tr.pos
     Rg = tr.R_nb
 
-    # Zero-order-hold extend left / right
+    # Zero-order-hold boundary extension
     if inertial_t[begin] < tg[begin]
         tg = [inertial_t[begin]; tg]
         pg = [pg[:, 1] pg]
@@ -79,19 +114,22 @@ function temporal_alignment(tr::Trajectory, inertial_t::Vector{Float64})
         Rg = cat(Rg, Rg[:, :, end:end]; dims=3)
     end
 
-    # Linear interp for position
-    pos = vcat([LinearInterpolation(tg, pg[i, :])(inertial_t)' for i in 1:3]...)
+    # Linear interpolation for position (3 × M)
+    M = length(inertial_t)
+    pos = Matrix{Float64}(undef, 3, M)
+    for i in 1:3
+        itp = Interpolations.linear_interpolation(tg, pg[i, :])
+        pos[i, :] = itp.(inertial_t)
+    end
 
-    quats = [Quaternions.Quaternion(QuatRotation(RotMatrix{3}(Rg[:, :, i])))
-             for i in axes(Rg, 3)]
-    R_interp = Array{Float64}(undef, 3, 3, length(inertial_t))
+    # Slerp for orientations — use Rotations.slerp directly on QuatRotation
+    quats = [QuatRotation(RotMatrix{3}(Rg[:, :, i])) for i in axes(Rg, 3)]
+    R_interp = Array{Float64}(undef, 3, 3, M)
 
     for (j, τ) in enumerate(inertial_t)
-        k = searchsortedlast(tg, τ)
-        k = clamp(k, 1, length(tg) - 1)
+        k = clamp(searchsortedlast(tg, τ), 1, length(tg) - 1)
         a = clamp((τ - tg[k]) / (tg[k+1] - tg[k]), 0.0, 1.0)
-        q = Quaternions.slerp(quats[k], quats[k+1], a)
-        R_interp[:, :, j] .= Matrix(QuatRotation(q.s, q.v1, q.v2, q.v3))
+        R_interp[:, :, j] .= Matrix(slerp(quats[k], quats[k+1], a))
     end
 
     return Trajectory(inertial_t, pos, R_interp)

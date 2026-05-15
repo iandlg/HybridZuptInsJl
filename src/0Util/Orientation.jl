@@ -104,6 +104,8 @@ end
 # Convenience for integer input (promote to Float64)
 euler_to_matrix(ang::AbstractVector{<:Integer}) = euler_to_matrix(float.(ang))
 euler_to_matrix(ang::AbstractMatrix{<:Integer}) = euler_to_matrix(float.(ang))
+
+
 """
     quat_to_matrix(q)
 
@@ -111,7 +113,7 @@ Convert quaternion(s) to Direction Cosine Matrix (rotation matrix).
 
 # Arguments
 - `q`: AbstractVector of length 4 (single quaternion), or AbstractMatrix of size (4, N)
-       Quaternion convention: `[q0, q1, q2, q3]` (scalar first).
+       Quaternion convention: `[qw, qx, qy, qz]` (scalar first).
 
 # Returns
 - If `q` is a vector: a 3x3 rotation matrix.
@@ -166,6 +168,11 @@ function quat_to_matrix(q::AbstractVector{T}) where T<:Real
     return Rstack[:, :, 1]
 end
 
+# Convenience for integer input
+quat_to_matrix(q::AbstractVector{<:Integer}) = quat_to_matrix(float.(q))
+quat_to_matrix(q::AbstractMatrix{<:Integer}) = quat_to_matrix(float.(q))
+
+# ----------------------------------------------------------------------
 
 """
     matrix_to_quat(R)
@@ -177,8 +184,8 @@ Convert Direction Cosine Matrix (rotation matrix) to quaternion.
        Rotation matrix/matrices.
 
 # Returns
-- If `R` is 3x3: a 4-element vector `[q0, q1, q2, q3]` (scalar first).
-- If `R` is 3x3xN: a 4xN matrix, each column a quaternion `[q0; q1; q2; q3]`.
+- If `R` is 3x3: a 4-element vector `[qw, qx, qy, qz]` (scalar first).
+- If `R` is 3x3xN: a 4xN matrix, each column a quaternion `[qw, qx, qy, qz]`.
 """
 function matrix_to_quat(R::AbstractArray{T,3}) where T<:Real
     size(R, 1) == 3 && size(R, 2) == 3 || throw(DimensionMismatch("First two dimensions must be 3"))
@@ -201,10 +208,10 @@ function matrix_to_quat(R::AbstractArray{T,3}) where T<:Real
 
         if T_trace > 1e-8
             S = 0.5 / sqrt(T_trace)
-            q[1, k] = 0.25 / S            # q0 (scalar)
-            q[2, k] = (R32 - R23) * S      # q1
-            q[3, k] = (R13 - R31) * S      # q2
-            q[4, k] = (R21 - R12) * S      # q3
+            q[1, k] = 0.25 / S            # qw (scalar)
+            q[2, k] = (R32 - R23) * S      # qx
+            q[3, k] = (R13 - R31) * S      # qy
+            q[4, k] = (R21 - R12) * S      # qz
         else
             # Find the largest diagonal element
             if R11 > R22 && R11 > R33
@@ -302,7 +309,6 @@ function quat_multiply(p::AbstractVector, q::AbstractVector)
     ]
 end
 
-using LinearAlgebra
 
 """
     skew(v)

@@ -8,7 +8,7 @@ function integrate_quaternion(q::Vector{Float64}, w::Vector{Float64}, Ts::Float6
 end
 
 """
-    navigation_equations(x, u, q, Ts, g)
+    navigation_equations(x, u, q, Ts, g_vec)
 
 Mechanized navigation equations of the inertial navigation system.
 
@@ -17,7 +17,7 @@ Mechanized navigation equations of the inertial navigation system.
 - `u`: 6-element vector `[specific_force (3), angular_rates (3)]`
 - `q`: 4-element quaternion **scalar-first** `[q0, q1, q2, q3]`
 - `Ts`: sampling time (seconds)
-- `g`: gravitational acceleration, scalar (added to each component of `f_t`)
+- `g_vec`: 3-element gravity vector `[gx, gy, gz]` (e.g., `[0,0,9.81]`)
 
 # Returns
 - `y`: new navigation state `[position (3), velocity (3), euler angles (3)]`
@@ -28,8 +28,7 @@ function navigation_equations(
     u::AbstractVector{T},
     q::AbstractVector{T},
     Ts::Real,
-    g::AbstractVector{T}
-) where T<:Real
+    g_vec::AbstractVector{T}) where T<:Real
 
     # Ensure floats and copy quaternion for in-place update
     xf = float.(x)
@@ -46,7 +45,7 @@ function navigation_equations(
 
     # -------- 3. Position & velocity update --------------------------
     f_t = R_nb * uf[1:3]     # specific force in navigation frame
-    acc_t = f_t + g         # add gravity
+    acc_t = f_t + g_vec         # add gravity
 
     # Build state transition matrix A (6x6)
     A = Matrix{Float64}(I, 6, 6)
@@ -76,7 +75,7 @@ end
 Calculate the state transition matrix F and the process noise gain matrix G.
 
 # Arguments
-- `q`: 4-element vector `[q0, q1, q2, q3]` – quaternion (scalar first)
+- `q`: 4-element vector `[qw, qx, qy, qz]` - quaternion (scalar first)
 - `u`: 6-element vector `[specific_force (3), angular_rates (3)]`
 - `Ts`: sampling time (seconds)
 
@@ -131,11 +130,11 @@ Correct estimated navigation states with Kalman filter perturbations.
 # Arguments
 - `x_in`: A priori state vector, length 9: [position (3), velocity (3), Euler angles (3)]
 - `dx`:   Error state vector, length 9: [position errors, velocity errors, orientation errors]
-- `q_in`: A priori quaternion, scalar-first `[q0, q1, q2, q3]`
+- `q_in`: Quaternion vector, `[qw, qx, qy, qz]`
 
 # Returns
 - `x_out`: Corrected (posterior) state vector
-- `q_out`: Corrected quaternion (scalar-first)
+- `q_out`: Corrected quaternion
 """
 function comp_internal_states(
     x_in::AbstractVector{T},
@@ -198,11 +197,13 @@ Calculate the initial state of the navigation equations.
 
 # Returns
 - `x`: initial navigation state vector `[position (3), velocity (3), Euler angles (3)]`.
-- `quat`: quaternion `[q0, q1, q2, q3]` representing the initial attitude.
+- `quat`: quaternion `[qw, qx, qy, qz]` representing the initial attitude.
 """
-function initialize_nav(u::AbstractMatrix{T},
+function initialize_nav(
+    u::AbstractMatrix{T},
     init_heading::Real,
-    init_pos::AbstractVector{T}) where T<:Real
+    init_pos::AbstractVector{T}
+) where T<:Real
     # Use first 20 samples to estimate roll & pitch (assume stationary)
     n_samples = min(20, size(u, 2))
     f_u = mean(u[1, 1:n_samples])
@@ -232,7 +233,7 @@ initialize_nav(u::AbstractMatrix{<:Integer}, init_heading, init_pos) =
 """
     init_filter(simdata)
 
-Initialize the Kalman filter matrices from an `INSConfig` object.
+Initialize the Kalman filter matrices from an `InsConfig` object.
 
 # Arguments
 - `simdata`: `INSConfig` instance (provides noise standard deviations).
