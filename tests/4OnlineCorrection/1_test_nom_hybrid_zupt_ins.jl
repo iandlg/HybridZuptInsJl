@@ -1,11 +1,14 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
-##
+
 # Choose Parameters file
-hsgp_p_key = 1
+hsgp_p_key = 11
 hsgp_p_path = Dict{Int,String}(
-    1 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-14T12:01:36.700.json"
+    11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
+    20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
+    21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
+    3 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json"
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -27,8 +30,6 @@ ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_upda
     data_dir, trial_id
 )
 
-@info "First position from ZUPT aided INS : $(ins_traj_aligned.pos[:,1])"
-
 ## Extract the aligned initial state from the trajectory
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
@@ -42,7 +43,7 @@ pred_outputs = Dict{String,Any}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 600, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 1000, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     yaw_stats=hsgp_p.yaw_stats,
     pos_stats=hsgp_p.pos_stats
@@ -50,26 +51,26 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 hsgp_corrector = HybridZuptInsJl.HsgpCorrector(hsgp_p)
 zupt, hsgp_ins_traj, step_seg, true_outputs["hsgp"], pred_outputs["hsgp"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
-    corrector=hsgp_corrector, x_init=x_init, train_ratio=train_ratio
+    corrector=hsgp_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
 # Run static mean correction
 static_corrector = HybridZuptInsJl.StaticMeanCorrector()
 zupt, static_ins_traj, step_seg, true_outputs["static"], pred_outputs["static"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
-    corrector=static_corrector, x_init=x_init, train_ratio=train_ratio
+    corrector=static_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
 
 zupt, classic_ins_traj, step_seg, true_outputs["model"], pred_outputs["model"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
-    x_init=x_init, train_ratio=train_ratio
+    x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
 gp_corrector = HybridZuptInsJl.ExactGpCorrector(hsgp_p)
 zupt, gp_ins_traj, step_seg, true_outputs["gp"], pred_outputs["gp"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
-    x_init=x_init, train_ratio=train_ratio, corrector=gp_corrector
+    x_init=x_init, train_ratio=train_ratio, corrector=gp_corrector, feature_type=FEATURE_TYPE
 )
 
 

@@ -5,16 +5,16 @@ import Dates, Optim
 
 data_key = "ANG"
 trial_id = 15
-FRAME = HybridZuptInsJl.BODY
+FRAME = HybridZuptInsJl.HEADING
 FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_DT
 n_restarts_optimizer = 5
-kern_lo = [-4.0, -4.0]
-kern_hi = [4.0, 4.0]
+kern_lo = [-6.0, -6.0]
+kern_hi = [6.0, 6.0]
 log_kern_bounds = [kern_lo, kern_hi]
-log_noise_bounds = [[-6.0], [0.0]]
-method_key = "LBFGS"
-normalize_input = false
-normalize_output = false
+log_noise_bounds = [[-8.0], [2.0]]
+method_key = "NM"
+normalize_input = true
+normalize_output = true
 
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision"
@@ -88,13 +88,13 @@ rmses = OrderedDict{String,Float64}(
 
 # Create figures
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[segs]; samples=20)
-fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[segs])
 fig_output = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
+fig_rmse = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
 
 
 ## Save things 
-outdir = "out/3OfflineCorrection/OptimizationResults"
+outdir = "out/3OfflineCorrection/1_OptimizationResults"
 time = string(Dates.now())
 filename = "$(data_key)$(trial_id)_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
 

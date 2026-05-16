@@ -69,7 +69,6 @@ function compute_training_io(
         THREED_STEP_DT => () -> vcat(ins_step, Δt'),                  # 4 × N (x, y, z, dt)
     )
     input_feature = feature_selectors[feature_type]()
-    @show input_feature[:, 5]
 
     return outputs, input_feature
 end
@@ -482,6 +481,7 @@ function compute_corrections(
     outputs::Dict{String,Union{Vector{Float64},Matrix{Float64}}},
     correction_method::Function,
     hyperparameters::Union{Nothing,SeHyperparams}=nothing;
+    feature_type::FeatureType=THREED_STEP,
     kwargs...
 )
 
@@ -508,6 +508,13 @@ function compute_corrections(
     predictions["pos"] = Matrix{Float64}(undef, 3, n_samples)
     for d in 1:3
         @info "Computing pos_$d corrections"
+        if feature_type == TWOD_STEP_DT && d == 3 # Avoid ill posed problem in x,y inputs
+            predictions["pos"][d, :] = zeros(Float64, n_samples)
+            hyperparams_dict["pos_$d"] = nothing
+            @info "$feature_type , $d"
+            continue
+        end
+
         d_hyp = getfield(hp, Symbol("pos_$d"))
         y_pred, hyper = correction_method(input_feature, outputs["pos"][d, :]; hyperparameter=d_hyp, kwargs...)
         predictions["pos"][d, :] = y_pred

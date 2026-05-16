@@ -1,5 +1,6 @@
 using GaussianProcesses
 using Random
+using Plots
 
 Random.seed!(20140430)
 # Training data
@@ -21,9 +22,9 @@ GaussianProcesses.get_params(gp)
 
 using Plots  #Load Plots.jl package
 
-plot(gp; xlabel="x", ylabel="y", title="Gaussian process", legend=false, fmt=:png)      # Plot the GP
+GaussianProcesses.plot(gp; xlabel="x", ylabel="y", title="Gaussian process", legend=false, fmt=:png)      # Plot the GP
 
 using Optim
 optimize!(gp; method=ConjugateGradient())   # Optimise the hyperparameters
 
-plot(gp; legend=false, fmt=:png)   #Plot the GP after the hyperparameters have been optimised 
+GaussianProcesses.plot(gp; legend=false, fmt=:png)   #Plot the GP after the hyperparameters have been optimised 

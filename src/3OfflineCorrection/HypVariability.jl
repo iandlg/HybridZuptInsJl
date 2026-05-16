@@ -21,22 +21,22 @@ compute corrections and apply them, then record the 2‑D horizontal position RM
 
 # Returns
 - `rmse_per_fold`: Vector of horizontal RMSE (metres) for each fold.
+- `p` : permutation vector of the smallest to largest RMSE
 - `corrected_trajs`: List of step‑level corrected trajectories (one per fold).
-- `best_hyper`: `SeHyperparams` of the fold with lowest RMSE.
-- `best_non_outlier_hyper`: `SeHyperparams` of the best fold that is **not** an
-  outlier (IQR criterion). If all folds are outliers, the best overall is returned.
 """
 function evaluate_hyperparameter_variability(
     ins_traj_aligned::Trajectory,
     gt_traj_aligned::Trajectory,
     segs::Vector{Int},
     hyperparams_vec::Vector{SeHyperparams};
-    ref_frame::ReferenceFrame=BODY
+    ref_frame::ReferenceFrame=BODY,
+    feature_type::FeatureType=THREED_STEP
 )
 
     # 1. Training data (same for every fold)
     output, input_feature = compute_training_io(
-        ins_traj_aligned, gt_traj_aligned, segs; ref_frame=ref_frame
+        ins_traj_aligned, gt_traj_aligned, segs;
+        ref_frame=ref_frame, feature_type=feature_type
     )
 
     n_folds = length(hyperparams_vec)
@@ -64,7 +64,7 @@ function evaluate_hyperparameter_variability(
             ins_traj_aligned,
             pred["yaw"],
             pred["pos"], segs;
-            ref_frame=ref_frame
+            ref_frame=ref_frame,
         )
         corrected_trajs[fold_idx] = gp_traj
 
@@ -72,25 +72,16 @@ function evaluate_hyperparameter_variability(
         rmse_per_fold[fold_idx] = rmse(gp_traj, gt_step_traj)[end]
     end
 
-    # 3. Outlier detection (IQR)
-    q1, q3 = quantile(rmse_per_fold, [0.25, 0.75])
-    iqr = q3 - q1
-    lower = q1 - 1.5 * iqr
-    upper = q3 + 1.5 * iqr
-    is_outlier = (rmse_per_fold .< lower) .| (rmse_per_fold .> upper)
+    # # 3. Outlier detection (IQR)
+    # q1, q3 = quantile(rmse_per_fold, [0.25, 0.75])
+    # iqr = q3 - q1
+    # lower = q1 - 1.5 * iqr
+    # upper = q3 + 1.5 * iqr
+    # is_outlier = (rmse_per_fold .< lower) .| (rmse_per_fold .> upper)
 
     # Best fold overall
-    best_idx = argmin(rmse_per_fold)
-    best_hyper = hyperparams_vec[best_idx]
+    p = zeros(Int, n_folds)
+    sortperm!(p, rmse_per_fold)
 
-    # Best non‑outlier fold
-    non_outlier_idx = findall(.!is_outlier)
-    if isempty(non_outlier_idx)
-        best_non_outlier_idx = best_idx
-    else
-        best_non_outlier_idx = non_outlier_idx[argmin(rmse_per_fold[non_outlier_idx])]
-    end
-    best_non_outlier_hyper = hyperparams_vec[best_non_outlier_idx]
-
-    return rmse_per_fold, corrected_trajs, best_hyper, best_idx, best_non_outlier_hyper, best_non_outlier_idx
+    return rmse_per_fold, p, corrected_trajs
 end

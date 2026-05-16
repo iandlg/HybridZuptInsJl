@@ -93,20 +93,20 @@ function state_matrix(
     length(u) == 6 || throw(DimensionMismatch("u must have length 6"))
 
     # Rotation matrix (body-to-navigation) from quaternion
-    Rb2t = quat_to_matrix(q)   # 3x3
+    R_nb = quat_to_matrix(q)   # 3x3
 
     # Specific force in navigation frame
-    f_t = Rb2t * u[1:3]        # 3-element vector
+    # f_t = Rb2t * u[1:3]        # 3-element vector
 
     # Skew-symmetric matrix of f_t
-    St = -Rb2t * skew(u[1:3])
+    S_n = -R_nb * skew(u[1:3])
 
     Omat = zeros(T, 3, 3)
     Imat = Matrix{T}(I, 3, 3)
 
     # Continuous-time state transition matrix (9x9)
     Fc = [Omat Imat Omat;
-        Omat Omat St;
+        Omat Omat S_n;
         Omat Omat Omat]
 
     # Continuous-time process noise gain matrix (9x6)

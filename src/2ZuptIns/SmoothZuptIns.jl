@@ -63,7 +63,6 @@ function smoothed_zupt_aided_ins(
     else
         collect(simdata.g)
     end
-    display(g_vec)
 
     # Zero-velocity detection (assume external function)
     zupt, _ = detect_zupt(u, simdata)   # returns Vector{Bool} of length N
@@ -124,9 +123,7 @@ function smoothed_zupt_aided_ins(
                 dx[:, n] = dx[:, n] - K * (dx[4:6, n] - x[4:6, n])
                 P[:, :, n] = (I9 - K * H) * P[:, :, n]
             end
-            if n == 3
-                display(dx[:, n])
-            end
+
             # Enforce symmetry
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
 

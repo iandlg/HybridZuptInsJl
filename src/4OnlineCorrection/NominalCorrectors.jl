@@ -1,11 +1,11 @@
 abstract type AbstractNominalCorrector end
 
-function update_corrector!(::AbstractNominalCorrector, input, y)
-    error("update_corrector! not implemented for $(typeof(corrector))")
+function update_corrector!(c::AbstractNominalCorrector, input, y)
+    error("update_corrector! not implemented for $(typeof(c))")
 end
 
-function predict_correction(::AbstractNominalCorrector, input)
-    error("predict_correction not implemented for $(typeof(corrector))")
+function predict_correction(c::AbstractNominalCorrector, input)
+    error("predict_correction not implemented for $(typeof(c))")
 end
 
 
@@ -97,7 +97,6 @@ end
 
 function update_corrector!(c::StaticMeanCorrector, input::Vector{Float64}, y::Vector{Float64})
     @assert length(y) == 4 "y must have length 4 (yaw, pos_x, pos_y, pos_z)"
-    @show y
     c.sum .+= y
     c.count += 1
     return nothing
@@ -198,11 +197,8 @@ function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
         y_out = Y_norm[idx, :]
 
         # Build GP (training inputs: X_norm', size (n_train, d))
-        @show size(X_norm)
-        @show size(y_out)
         gp = GaussianProcesses.GP(X_norm, y_out, GaussianProcesses.MeanZero(), kernel, log(σ_n))
 
-        @show size(x_norm)
         μ, _ = GaussianProcesses.predict_y(gp, x_norm)
         preds[idx] = μ[1]
     end

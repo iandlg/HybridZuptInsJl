@@ -4,7 +4,9 @@ function hybrid_nominal_zupt_aided_ins(
     gt_traj::Trajectory;
     corrector::Union{Nothing,AbstractNominalCorrector}=nothing,
     x_init::Vector{Float64}=zeros(9),
-    train_ratio::Float64=0.5
+    train_ratio::Float64=0.5,
+    ref_frame::ReferenceFrame=BODY,
+    feature_type::FeatureType=THREED_STEP,
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -103,6 +105,16 @@ function hybrid_nominal_zupt_aided_ins(
             pos_ins_seg = x[1:3, [prev_step, curr_step]]
             ins_step = R_nb_ins_0' * (pos_ins_seg[:, 2] - pos_ins_seg[:, 1])
 
+            # Time difference between consecutive step indices
+            Δt = inertial.t[curr_step] - inertial.t[prev_step]
+            # Feature selectors based on the enum
+            feature_selectors = Dict(
+                THREED_STEP => () -> [ins_step[1], ins_step[2], ins_step[3]],                             # 3 × N
+                TWOD_STEP_DT => () -> [ins_step[1], ins_step[2], Δt],
+                THREED_STEP_DT => () -> [ins_step[1], ins_step[2], ins_step[3], Δt],
+            )
+            input_feature = feature_selectors[feature_type]()
+
             euler_ins_seg = matrix_to_euler(R_nb[:, :, prev_step:curr_step])
             yaw_ins_seg = euler_ins_seg[3, :]
             unwrap!(yaw_ins_seg)
@@ -124,13 +136,13 @@ function hybrid_nominal_zupt_aided_ins(
 
             push!(true_outputs["yaw"], y_yaw)
             push!(true_outputs["pos"], y_pos)
-            push!(true_outputs["t"], prev_step * Ts)
+            push!(true_outputs["t"], inertial.t[prev_step])
 
             # Update with training data when gt is supposedly available
             if gt_available[prev_step] && gt_available[curr_step]
 
                 if !isnothing(corrector)
-                    update_corrector!(corrector, ins_step, y)
+                    update_corrector!(corrector, input_feature, y)
                 end
 
                 # Update the Position and orientation using ground truth
@@ -139,11 +151,13 @@ function hybrid_nominal_zupt_aided_ins(
             end
 
             if !gt_available[curr_step] && !isnothing(corrector)
-                preds = predict_correction(corrector, ins_step)
-
+                preds = predict_correction(corrector, input_feature)
+                if feature_type == TWOD_STEP_DT
+                    preds[4] = 0.0
+                end
                 push!(pred_outputs["yaw"], preds[1])
                 push!(pred_outputs["pos"], preds[2:4])
-                push!(pred_outputs["t"], prev_step * Ts)
+                push!(pred_outputs["t"], inertial.t[prev_step])
 
                 x[9, curr_step] = yaw_ins_seg[end] + preds[1]
                 x[1:3, curr_step] = pos_ins_seg[:, 2] + R_nb_ins_0 * preds[2:4]
