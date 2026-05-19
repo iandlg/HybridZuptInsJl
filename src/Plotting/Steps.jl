@@ -15,15 +15,15 @@ trajectories and the ground truth.
 # Returns
 - A `Figure` object with a single axis showing step lengths over time.
 """
-function plot_step_lengths(trajs::Union{Vector{Trajectory},Trajectory},
-    gt_traj::Trajectory, segs::Vector{Int})
+function plot_step_lengths(
+    trajs::Union{Vector{Trajectory},Trajectory},
+    gt_traj::Union{Nothing,Trajectory},
+    segs::Vector{Int}
+)
     if trajs isa Trajectory
         trajs = [trajs]
     end
 
-    # Compute ground‑truth step lengths (dashed black line)
-    gt_lengths = step_lengths(gt_traj, segs)
-    gt_times = gt_traj.t[segs[1:end-1]]   # time of each step start (or end? Python uses segs[:-1])
 
     fig = Figure(size=(800, 600))
     ax = Axis(fig[1, 1];
@@ -33,8 +33,14 @@ function plot_step_lengths(trajs::Union{Vector{Trajectory},Trajectory},
         xgridvisible=true)
 
     # Plot ground truth
-    lines!(ax, gt_times, gt_lengths;
-        color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+    if !isnothing(gt_traj)
+        # Compute ground‑truth step lengths (dashed black line)
+        gt_lengths = step_lengths(gt_traj, segs)
+
+        gt_times = gt_traj.t[segs[1:end-1]]   # time of each step start (or end? Python uses segs[:-1])
+        lines!(ax, gt_times, gt_lengths;
+            color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+    end
 
     # Plot each estimated trajectory
     for (i, traj) in enumerate(trajs)
@@ -45,6 +51,36 @@ function plot_step_lengths(trajs::Union{Vector{Trajectory},Trajectory},
     end
 
     axislegend(ax; position=:rt)   # legend at right top
+    return fig
+end
+
+function plot_inertialdata_and_stepsegm(
+    inertial::InertialData,
+    segs::Vector{Int};
+    zupt::Union{Nothing,BitVector}=nothing
+)
+    # Compute squared sum of the first three channels
+    y = vec(sum(inertial.u[1:3, :] .^ 2, dims=1))   # shape: (n_samples,)
+
+    # Create figure and axis
+    fig = Figure()
+    ax = Axis(fig[1, 1]; xlabel="Time", ylabel="Squared sum", title="Inertial Data")
+    ax.xgridvisible = true
+    ax.ygridvisible = true
+
+    # Plot the continuous signal
+    lines!(ax, inertial.t, y; linewidth=0.5)
+
+    # Overlay scatter markers at the given segment indices
+    if !isempty(segs)
+        scatter!(ax, inertial.t[segs], fill(100.0, length(segs));
+            marker=:x, color=:red, markersize=15)
+    end
+    if !isnothing(zupt)
+        scatter!(ax, inertial.t, zupt .* 50;
+            color=:green, markersize=5)
+    end
+
     return fig
 end
 

@@ -10,21 +10,16 @@ Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories
 # Returns
 - A `Figure` object (Makie figure).
 """
-function plot_groundtruth_vs_inertial_positions(trajs::Trajectory, gt_traj::Trajectory; samples::Int=20)
+function plot_groundtruth_vs_inertial_positions(
+    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory}; samples::Int=20)
     plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
 end
 
 function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
-    gt_traj::Trajectory;
+    gt_traj::Union{Nothing,Trajectory};
     samples::Int=20
 )
-    # Find common length (shortest trajectory)
-    n = size(gt_traj.pos, 2)
-    for traj in values(trajs)
-        n = min(n, size(traj.pos, 2))
-    end
-    n = min(n, samples)
 
     # Create figure and axis
     fig = Figure(size=(800, 600))
@@ -35,15 +30,18 @@ function plot_groundtruth_vs_inertial_positions(
         aspect=DataAspect(),
         xgridvisible=true)
 
-    # Ground truth line (dashed black)
-    lines!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
-        color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+    if !isnothing(gt_traj)
+        n = min(length(gt_traj.t), samples)
+        # Ground truth line (dashed black)
+        lines!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
+            color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
 
-    # Ground truth start (circle) and end (square)
-    scatter!(ax, [gt_traj.pos[1, 1]], [gt_traj.pos[2, 1]];
-        color=:black, marker=:circle, markersize=12, label="Start")
-    scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
-        color=:black, marker=:rect, markersize=12, label="End")
+        # Ground truth start (circle) and end (square)
+        scatter!(ax, [gt_traj.pos[1, 1]], [gt_traj.pos[2, 1]];
+            color=:black, marker=:circle, markersize=12, label="Start")
+        scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
+            color=:black, marker=:rect, markersize=12, label="End")
+    end
 
     # Colour palette for the estimated trajectories (tab10 equivalent)
     colors = Makie.wong_colors()   # gives 9 distinct colours (or use ColorSchemes.tab10)
@@ -53,6 +51,8 @@ function plot_groundtruth_vs_inertial_positions(
     for (i, (key, traj)) in enumerate(trajs)
         c = first(color_cycle)   # get next colour
         color_cycle = Iterators.drop(color_cycle, 1)
+
+        n = min(length(traj.t), samples)
 
         # Line
         lines!(ax, traj.pos[1, 1:n], traj.pos[2, 1:n];

@@ -1,10 +1,15 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
-data_dir = "data/angermann_high_precision"
-inertial = HybridZuptInsJl.InertialData(data_dir, 15)
-gt_traj = HybridZuptInsJl.Trajectory(data_dir, 15)
-fig_gt = HybridZuptInsJl.plot_trajectory_xyz_euler(gt_traj)
+data_key = "MT"
+data_dir = Dict{String,String}(
+    "ANG" => "data/angermann_high_precision",
+    "MT" => "data/mti-100-recordings"
+)[data_key]
+trial_id = 1
+inertial = HybridZuptInsJl.InertialData(data_dir, trial_id)
+gt_traj = HybridZuptInsJl.Trajectory(data_dir, trial_id)
+# fig_gt = HybridZuptInsJl.plot_trajectory_xyz_euler(gt_traj)
 # Δt = -0.0
 # gt_traj = HybridZuptInsJl.Trajectory(
 #     (gt.t .+ Δt),

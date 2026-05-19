@@ -50,7 +50,6 @@ function hybrid_nominal_zupt_aided_ins(
     step_seg = Int[]
 
     while true
-
         for n in seg_start:seg_end
             x[:, n], quat[:, n] = navigation_equations(
                 x[:, n-1], u[:, n], quat[:, n-1], Ts, g_vec)

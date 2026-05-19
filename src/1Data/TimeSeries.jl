@@ -1,4 +1,3 @@
-# ── Base abstract type ──────────────────────────────────────────────
 abstract type AbstractTimeSeries end
 
 struct TimeSeries <: AbstractTimeSeries
