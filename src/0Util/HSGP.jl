@@ -146,3 +146,78 @@ function calc_eigenvectors(Xs::AbstractMatrix{<:Real}, L::AbstractVector{<:Real}
 
     return phi
 end
+
+"""
+    calc_eigenvectors_dx(Xs::AbstractMatrix{<:Real}, L::AbstractVector{<:Real},
+                         per_dim_eigvals::AbstractMatrix{<:Real}, di::Int) -> Matrix{Float64}
+
+Calculate the derivative of the Laplacian eigenvectors on a rectangular domain with
+Dirichlet boundary conditions with respect to input dimension `di`.
+
+Each eigenfunction is a product of 1-D sine functions:
+
+    φ(x) = ∏ⱼ (1/√Lⱼ) sin(√λⱼ (xⱼ + Lⱼ))
+
+where √λⱼ = π nⱼ / (2 Lⱼ) is recovered from `per_dim_eigvals`.
+
+Differentiating with respect to xᵢ replaces the i-th factor by its derivative:
+
+    ∂φ/∂xᵢ = (√λᵢ / √Lᵢ) cos(√λᵢ (xᵢ + Lᵢ)) · ∏ⱼ≠ᵢ (1/√Lⱼ) sin(√λⱼ (xⱼ + Lⱼ))
+
+which is equivalent to the original `calc_eigenvectors`, but with the `di`-th factor
+replaced by `(√λᵢ / √Lᵢ) cos(√λᵢ (xᵢ + Lᵢ))` instead of `(1/√Lᵢ) sin(...)`.
+
+# Arguments
+- `Xs`: Input points of size `(n_samples, d)`.
+- `L`: Domain half-widths of length `d`, i.e. domain is `[-L₁,L₁] × … × [-Lₐ,Lₐ]`.
+- `per_dim_eigvals`: Per-dimension eigenvalue components of size `(m, d)`, where each
+  entry `[k, j]` equals `(π nⱼ / (2 Lⱼ))²`. Matches the output of `calc_eigenvalues`.
+- `di`: Dimension index (1-based) with respect to which to differentiate.
+
+# Returns
+- `dphi`: Derivative basis matrix of size `(n_samples, m)`.
+"""
+function calc_eigenvectors_dx(
+    Xs::AbstractMatrix{<:Real},
+    L::AbstractVector{<:Real},
+    per_dim_eigvals::AbstractMatrix{<:Real},
+    di::Int
+)::Matrix{Float64}
+    n, d = size(Xs)
+    m = size(per_dim_eigvals, 1)
+    @assert length(L) == d "Length of L must equal number of dimensions d"
+    @assert size(per_dim_eigvals, 2) == d "per_dim_eigvals must have d columns"
+    @assert 1 <= di <= d "di must be a valid dimension index (1 to d)"
+
+    Xs_f = Float64.(Xs)
+    L_f = Float64.(L)
+    eigvals_f = Float64.(per_dim_eigvals)
+
+    sqrt_eig = sqrt.(eigvals_f)           # (m, d)  — each entry is π nⱼ / (2 Lⱼ)
+    term1 = reshape(sqrt_eig, 1, m, d)   # (1, m, d)
+    term2 = reshape(Xs_f .+ L_f', n, 1, d)  # (n, 1, d): xⱼ + Lⱼ for all j
+
+    # Base scale factor 1/√Lⱼ, shape (1, 1, d)
+    c = reshape(1.0 ./ sqrt.(L_f), 1, 1, d)
+
+    # Build (n, m, d) factor array:
+    #   - sine  factor for j ≠ di
+    #   - cosine factor (with extra √λᵢ) for j == di
+    angles = term1 .* term2               # (n, m, d)
+
+    phi_raw = c .* sin.(angles)           # default: sine factors for all dims
+
+    # Overwrite dimension di with the cosine derivative factor:
+    #   (√λᵢ / √Lᵢ) cos(√λᵢ (xᵢ + Lᵢ))
+    #   = sqrt_eig[:, di] * c[:, :, di] * cos(angles[:, :, di])
+    phi_raw[:, :, di] .= (
+        reshape(sqrt_eig[:, di], 1, m) .*   # √λᵢ, broadcast over n
+        c[1, 1, di] .*                       # 1/√Lᵢ
+        cos.(angles[:, :, di])               # cos(√λᵢ (xᵢ + Lᵢ))
+    )
+
+    # Product over dimensions -> (n, m)
+    dphi = dropdims(prod(phi_raw, dims=3), dims=3)
+
+    return dphi
+end
