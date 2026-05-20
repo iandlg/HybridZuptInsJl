@@ -120,11 +120,16 @@ pos_stats = normalize_output ? [
     std(true_outputs["pos"], dims=2)[:]
 ] : [fill(0.0, 3), fill(1.0, 3)]
 
+output_stats = normalize_output ? [
+    vcat(pos_stats[1], yaw_stats[1]),
+    vcat(pos_stats[2], yaw_stats[2])
+] : [vcat(fill(0.0, 3), 0.0), vcat(fill(1.0, 3), 1.0)]
+
 feature_scaled = (input_feature .- input_stats[1]) ./ input_stats[2]
 LL = margin * maximum(abs, feature_scaled, dims=2)[:]
 p = HybridZuptInsJl.HsgpParameters(
     hp, size(input_feature, 1), m, LL;
-    input_stats=input_stats, yaw_stats=yaw_stats, pos_stats=pos_stats
+    input_stats=input_stats, output_stats=output_stats
 )
 HybridZuptInsJl.to_json(joinpath(outdir, filename), p;
     metadata=Dict(

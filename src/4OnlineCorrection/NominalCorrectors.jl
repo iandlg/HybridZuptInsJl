@@ -48,8 +48,8 @@ end
 
 function _normalize_output(c::HsgpCorrector, y::Vector{Float64})
     y_norm = copy(y)
-    y_norm[1] = (y[1] - c.params.yaw_stats[1]) / c.params.yaw_stats[2]
-    y_norm[2:4] = (y[2:4] .- c.params.pos_stats[1]) ./ c.params.pos_stats[2]
+    y_norm[1] = (y[1] - c.params.output_stats[1][4]) / c.params.output_stats[2][4]
+    y_norm[2:4] = (y[2:4] .- c.params.output_stats[1][1:3]) ./ c.params.output_stats[2][1:3]
     return y_norm
 end
 
@@ -79,8 +79,8 @@ function predict_correction(c::HsgpCorrector, input::Vector{Float64})
         preds[idx] = (eigvect*c.beta[outpt])[1]
     end
     # Denormalize
-    preds[1] = preds[1] * c.params.yaw_stats[2] + c.params.yaw_stats[1]
-    preds[2:4] = preds[2:4] .* c.params.pos_stats[2] .+ c.params.pos_stats[1]
+    preds[1] = preds[1] * c.params.output_stats[2][4] + c.params.output_stats[1][4]
+    preds[2:4] = preds[2:4] .* c.params.output_stats[2][1:3] .+ c.params.output_stats[1][1:3]
     return preds
 end
 
@@ -121,7 +121,7 @@ prediction using all stored data.
 # Fields
 - `params`: `HsgpParameters` containing hyperparameters (`SeHyperparams`),
   input dimension, number of basis functions (unused here), normalization statistics
-  for inputs (`input_stats`), yaw (`yaw_stats`), and positions (`pos_stats`), and
+  for inputs (`input_stats`) and outputs (`output_stats` combining yaw and position stats), and
   domain bounds `LL` (unused).
 - `X_train`: Vector of stored input vectors (each length `d`).
 - `Y_train`: Vector of stored output 4‑vectors (yaw, x, y, z).
@@ -158,7 +158,7 @@ exists, returns zero correction. Otherwise:
 - Normalizes all stored training inputs and outputs using the same statistics.
 - For each of the 4 outputs, builds a GP with fixed hyperparameters (`σ_f`, `ℓ`, `σ_n`)
   from `c.params.hp` and computes the posterior mean at the test point.
-- Denormalises the predictions using `c.params.yaw_stats` and `c.params.pos_stats`.
+- Denormalises the predictions using `c.params.output_stats`.
 """
 function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
     if isempty(c.X_train)
@@ -168,8 +168,8 @@ function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
 
     # Unpack statistics
     input_mean, input_std = c.params.input_stats[1], c.params.input_stats[2]
-    yaw_mean, yaw_std = c.params.yaw_stats[1], c.params.yaw_stats[2]
-    pos_mean, pos_std = c.params.pos_stats[1], c.params.pos_stats[2]
+    yaw_mean, yaw_std = c.params.output_stats[1][4], c.params.output_stats[2][4]
+    pos_mean, pos_std = c.params.output_stats[1][1:3], c.params.output_stats[2][1:3]
     d = c.params.d
 
     # Normalise test input

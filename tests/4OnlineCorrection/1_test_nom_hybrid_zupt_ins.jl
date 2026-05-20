@@ -45,8 +45,7 @@ pred_outputs = Dict{String,Any}()
 hsgp_p = HybridZuptInsJl.HsgpParameters(
     hsgp_p.hp, hsgp_p.d, 1000, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
-    yaw_stats=hsgp_p.yaw_stats,
-    pos_stats=hsgp_p.pos_stats
+    output_stats=hsgp_p.output_stats
 )
 hsgp_corrector = HybridZuptInsJl.HsgpCorrector(hsgp_p)
 zupt, hsgp_ins_traj, step_seg, true_outputs["hsgp"], pred_outputs["hsgp"] = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(

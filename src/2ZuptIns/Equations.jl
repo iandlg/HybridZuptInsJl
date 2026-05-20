@@ -140,7 +140,7 @@ function comp_internal_states(
     x_in::AbstractVector{T},
     dx::AbstractVector{T},
     q_in::AbstractVector{T}
-) where T<:Real
+)::Tuple{AbstractVector{T},AbstractVector{T}} where T<:Real
 
     # Convert quaternion to rotation matrix (body-to-navigation)
     R = quat_to_matrix(q_in)
@@ -174,9 +174,11 @@ end
 Apply corrections `dx` (negative of the smoothing error) to the state vectors
 `x` (9xN) and quaternions `quat` (4xN) in‑place.
 """
-function compensate_internal_states!(x::AbstractMatrix{T},
+function compensate_internal_states!(
+    x::AbstractMatrix{T},
     dx::AbstractMatrix{T},
-    quat::AbstractMatrix{T}) where T
+    quat::AbstractMatrix{T}
+) where T
     for k in axes(x, 2)
         x_corr, q_corr = comp_internal_states(x[:, k], dx[:, k], quat[:, k])
         x[:, k] .= x_corr

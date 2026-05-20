@@ -57,10 +57,9 @@ struct HsgpParameters
     hp::SeHyperparams
     d::Int
     m::Int
-    input_stats::Vector{Vector{Float64}}   # [mean(d,), std(d,)]
-    yaw_stats::Vector{Float64}             # [mean, std]
-    pos_stats::Vector{Vector{Float64}}     # [mean(3,), std(3,)]
     LL::Vector{Float64}
+    input_stats::Vector{Vector{Float64}}   # [mean(d,), std(d,)]
+    output_stats::Vector{Vector{Float64}}  # [[mean_pos(3,), mean_yaw], [std_pos(3,), std_yaw]]
 
     function HsgpParameters(
         hp::SeHyperparams,
@@ -68,8 +67,7 @@ struct HsgpParameters
         m::Int,
         LL::Union{Float64,Vector{Float64}};
         input_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
-        yaw_stats::Union{Nothing,Vector{Float64}}=nothing,
-        pos_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing
+        output_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing
     )
         LL_vec = LL isa Float64 ? fill(LL, d) : copy(LL)
         length(LL_vec) == d ||
@@ -78,47 +76,42 @@ struct HsgpParameters
             throw(ArgumentError("All LL must be positive, got $LL_vec"))
 
         _safe_std(v) = map(x -> abs(x) < eps(Float64) ? 1.0 : x, v)
-        _safe_std_scalar(x) = abs(x) < eps(Float64) ? 1.0 : x
 
         input_stats_ = isnothing(input_stats) ? [zeros(d), ones(d)] :
                        [input_stats[1], _safe_std(input_stats[2])]
         length(input_stats_[1]) == d && length(input_stats_[2]) == d ||
             throw(ArgumentError("input_stats vectors must have length d=$d"))
 
-        yaw_stats_ = isnothing(yaw_stats) ? [0.0, 1.0] :
-                     [yaw_stats[1], _safe_std_scalar(yaw_stats[2])]
-        length(yaw_stats_) == 2 ||
-            throw(ArgumentError("yaw_stats must have 2 elements [mean, std]"))
+        if isnothing(output_stats)
+            output_stats_ = [zeros(4), ones(4)]
+        else
+            mean_vec = convert(Vector{Float64}, output_stats[1])
+            std_vec = convert(Vector{Float64}, output_stats[2])
+            length(mean_vec) == 4 && length(std_vec) == 4 ||
+                throw(ArgumentError("output_stats vectors must have length 4 (3 pos + 1 yaw)"))
+            output_stats_ = [mean_vec, _safe_std(std_vec)]
+        end
 
-        pos_stats_ = isnothing(pos_stats) ? [zeros(3), ones(3)] :
-                     [pos_stats[1], _safe_std(pos_stats[2])]
-        length(pos_stats_[1]) == 3 && length(pos_stats_[2]) == 3 ||
-            throw(ArgumentError("pos_stats vectors must have length 3"))
-
-        new(hp, d, m, input_stats_, yaw_stats_, pos_stats_, LL_vec)
+        new(hp, d, m, LL_vec, input_stats_, output_stats_)
     end
 end
 
-function HsgpParameters(d::Dict{String,Any})
+function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
     hp = SeHyperparams(Dict(d["hp"]))
 
     input_stats = haskey(d, "input_stats") && !isnothing(d["input_stats"]) ?
                   [Float64.(d["input_stats"][1]), Float64.(d["input_stats"][2])] : nothing
 
-    yaw_stats = haskey(d, "yaw_stats") && !isnothing(d["yaw_stats"]) ?
-                Float64.(d["yaw_stats"]) : nothing
-
-    pos_stats = haskey(d, "pos_stats") && !isnothing(d["pos_stats"]) ?
-                [Float64.(d["pos_stats"][1]), Float64.(d["pos_stats"][2])] : nothing
-
+    output_stats = haskey(d, "output_stats") && !isnothing(d["output_stats"]) ?
+                   [Float64.(d["output_stats"][1]), Float64.(d["output_stats"][2])] : nothing
+    @show output_stats
     HsgpParameters(
         hp,
         d["d"],
         d["m"],
         Float64.(d["LL"]);
         input_stats=input_stats,
-        yaw_stats=yaw_stats,
-        pos_stats=pos_stats
+        output_stats=output_stats
     )
 end
 
