@@ -18,7 +18,7 @@ mutable struct HsgpCorrector <: AbstractNominalCorrector
     outputs_keys::Vector{String}
 end
 
-function HsgpCorrector(params::HsgpParameters)
+function HsgpCorrector(params::HsgpParameters)::HsgpCorrector
     outputs_keys = ["yaw", "pos_1", "pos_2", "pos_3"]
     eigvals = calc_eigenvalues(params.LL, params.m, params.d)
     omega = sqrt.(eigvals)

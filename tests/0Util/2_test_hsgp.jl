@@ -15,6 +15,9 @@ x = [1 2 3; 4 5 6]
 eig_vects = HybridZuptInsJl.calc_eigenvectors(x, L, eig_per_dim)
 display(eig_vects)
 
+eig_vects_dx1 = HybridZuptInsJl.calc_eigenvectors_dx(x, L, eig_per_dim, 1)
+display(eig_vects_dx1)
+
 ##
 ls = 0.1
 var_f = 2^2

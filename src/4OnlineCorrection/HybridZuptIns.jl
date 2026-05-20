@@ -1,7 +1,8 @@
 function hybrid_zupt_aided_ins(
     inertial::InertialData,
     simdata::InsConfig,
-    gt_traj::Trajectory;
+    gt_traj::Trajectory,
+    params::HsgpParameters;
     x_init::Vector{Float64}=zeros(9),
     train_ratio::Float64=0.5,
     ref_frame::ReferenceFrame=BODY,
@@ -47,6 +48,28 @@ function hybrid_zupt_aided_ins(
     seg_end = N
     step_detector = StepDetector()
     step_seg = Int[]
+
+    # HSGP variables
+    outputs_keys = ["yaw", "pos_1", "pos_2", "pos_3"]
+    eigvals = calc_eigenvalues(params.LL, params.m, params.d)
+    eigvecs_dx = zeros(params.d, params.m)
+    omega = sqrt.(eigvals)
+    psd = Dict(
+        k => power_spectral_density(
+            omega,
+            getfield(params.hp, Symbol(k))[2],
+            getfield(params.hp, Symbol(k))[1]
+        )
+        for k in outputs_keys
+    )
+    beta = Dict(k => zeros(params.m) for k in outputs_keys)
+    P_beta = Dict(k => Matrix(Diagonal(psd[k])) for k in outputs_keys)
+
+    # define parameters 
+    sigma_gt_pos = 1e-3
+    sigma_gt_yaw = 1e-3
+    sigma_dt = 1e-1
+
 
     while true
         for n in seg_start:seg_end
@@ -102,21 +125,36 @@ function hybrid_zupt_aided_ins(
             R_nb_ins_0 = R_nb[:, :, prev_step]
             pos_ins_seg = x[1:3, [prev_step, curr_step]]
             ins_step = R_nb_ins_0' * (pos_ins_seg[:, 2] - pos_ins_seg[:, 1])
+            P_step = R_nb_ins_0' * P_smooth[1:3, 1:3, curr_step] * R_nb_ins_0
+            P_step_gt = I(3) .* sigma_gt_pos^2
 
             # Time difference between consecutive step indices
             Δt = inertial.t[curr_step] - inertial.t[prev_step]
             # Feature selectors based on the enum
-            feature_selectors = Dict(
+            feature_estimate_selector = Dict{FeatureType,Vector{Float64}}(
                 THREED_STEP => () -> [ins_step[1], ins_step[2], ins_step[3]],                             # 3 × N
                 TWOD_STEP_DT => () -> [ins_step[1], ins_step[2], Δt],
                 THREED_STEP_DT => () -> [ins_step[1], ins_step[2], ins_step[3], Δt],
             )
-            input_feature = feature_selectors[feature_type]()
+            feature_covariance_selector = Dict{FeatureType,Matrix{Float64}}(
+                THREED_STEP => () -> P_step,
+                TWOD_STEP_DT => () -> [
+                    P_step[1:2, 1:2] zeros(Float64, (2, 1));
+                    zeros(Float64, (1, 2)) sigma_dt^2
+                ],
+                THREED_STEP_DT => () -> [
+                    P_step zeros(Float64, (3, 1));
+                    zeros(Float64, (1, 3)) sigma_dt^2
+                ],
+            )
+            feature_estimate = feature_estimate_selector[feature_type]()
+            feature_covariance = feature_covariance_selector[feature_type]()
 
             euler_ins_seg = matrix_to_euler(R_nb[:, :, prev_step:curr_step])
             yaw_ins_seg = euler_ins_seg[3, :]
             unwrap!(yaw_ins_seg)
             unwrapped_yaw_diff = yaw_ins_seg[end] - yaw_ins_seg[1]
+            var_yaw_curr = P_smooth[9, 9, curr_step]
 
             # Compute training data 
             R_nb_gt_0 = gt_traj.R_nb[:, :, prev_step]
@@ -138,9 +176,38 @@ function hybrid_zupt_aided_ins(
 
             # Update with training data when gt is supposedly available
             if gt_available[prev_step] && gt_available[curr_step]
+                # Normalise output
+                y_norm = copy(y)
+                y_norm[2:4] = (y[2:4] .- params.pos_stats[1]) ./ params.pos_stats[2]
+                y_norm[1] = (y[1] - params.yaw_stats[1]) / params.yaw_stats[2]
 
-                if !isnothing(corrector)
-                    update_corrector!(corrector, input_feature, y)
+                # Normalize uncertainty
+                cov_y_pos_norm = Diagonal(1 ./ params.pos_stats[2]) *
+                                 (P_step + P_step_gt) * Diagonal(1 ./ params.pos_stats[2])
+                cov_y_yaw_norm = (var_yaw_curr + sigma_gt_yaw^2) / params.yaw_stats[2]^2
+
+                # Normalize input
+                feat_estim_norm = (feature_estimate .- params.input_stats[1]) ./ params.input_stats[2]
+                feat_cov_norm = Diagonal(1 ./ params.input_stats[2]) *
+                                (feature_covariance) * Diagonal(1 ./ params.input_stats[2])
+
+                # Usefull quantities
+                for d in 1:params.d
+                    eigvecs_dx[d, :] = calc_eigenvectors_dx(feat_estim_norm, params.LL, eigvals, d)
+                end
+
+                # Compute input uncertainty
+
+                eigvect = _build_eigvect(c, input)
+                for (idx, outpt) in enumerate(c.outputs_keys)
+                    sigma_n = getfield(c.params.hp, Symbol(outpt))[3]
+                    c.beta[outpt], c.P_beta[outpt] = measurement_update(
+                        c.beta[outpt],
+                        c.P_beta[outpt],
+                        [y_normalized[idx]],
+                        eigvect,
+                        fill(sigma_n^2, 1, 1)
+                    )
                 end
 
                 # Update the Position and orientation using ground truth

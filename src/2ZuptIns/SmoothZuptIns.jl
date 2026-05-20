@@ -1,6 +1,3 @@
-# --------------------------------------------------------------------------
-# Step detector – simplified without unused return value
-# --------------------------------------------------------------------------
 mutable struct StepDetector
     zupt_counter::Int
     no_zupt_counter::Int
@@ -34,9 +31,6 @@ function update!(det::StepDetector, zupt::Bool)
     return false
 end
 
-# --------------------------------------------------------------------------
-# Main smoothed ZUPT-aided INS
-# --------------------------------------------------------------------------
 """
     smoothed_zupt_aided_ins(inertial, simdata)
 
