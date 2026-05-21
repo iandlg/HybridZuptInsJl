@@ -221,6 +221,7 @@ Plot 3D positions (x, y, z) from one or more trajectories using an interactive G
 function plot_trajectory_3d(
     trajs::Union{Trajectory,AbstractDict{String,Trajectory}},
     gt_traj::Union{Nothing,Trajectory}=nothing;
+    samples::Int=1000000000,
     start_marker::Bool=true,
     end_marker::Bool=true)
     if trajs isa Trajectory
@@ -237,10 +238,9 @@ function plot_trajectory_3d(
 
     for (i, (label, traj)) in enumerate(trajs)
         pos = traj.pos
-        N = size(pos, 2)
         colour = colours[(i-1)%length(colours)+1]
-
-        lines!(ax, pos[1, :], pos[2, :], pos[3, :];
+        n = min(samples, size(pos, 2))
+        lines!(ax, pos[1, 1:n], pos[2, 1:n], pos[3, 1:n];
             color=colour, linewidth=2, label=label)
 
         if start_marker
@@ -249,7 +249,7 @@ function plot_trajectory_3d(
                 label=i == 1 ? "Start" : "")
         end
         if end_marker
-            scatter!(ax, [pos[1, end]], [pos[2, end]], [pos[3, end]];
+            scatter!(ax, [pos[1, n]], [pos[2, n]], [pos[3, n]];
                 color=:red, markersize=12, marker=:circle,
                 label=i == 1 ? "End" : "")
         end
@@ -257,7 +257,8 @@ function plot_trajectory_3d(
 
     if gt_traj !== nothing
         pos_gt = gt_traj.pos
-        lines!(ax, pos_gt[1, :], pos_gt[2, :], pos_gt[3, :];
+        n = min(samples, size(pos_gt, 2))
+        lines!(ax, pos_gt[1, 1:n], pos_gt[2, 1:n], pos_gt[3, 1:n];
             color=:black, linewidth=1.5, linestyle=:dash, label="Ground truth")
     end
 
