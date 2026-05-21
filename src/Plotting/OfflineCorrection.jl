@@ -150,6 +150,20 @@ function plot_regression_results_no_rmse(
         lines!(axes[dim+1], t, pos_true[dim, :]; color=:black, linewidth=1.5, label="True")
     end
 
+    # ---- Plot ground truth uncertainty bands if available ----
+    if haskey(true_data, "yaw_std")
+        yaw_std_true = true_data["yaw_std"]
+        band!(axes[1], t, yaw_true .- 1 .* yaw_std_true, yaw_true .+ 1 .* yaw_std_true;
+            color=(:black, 0.1), label="True σ uncertainty")
+    end
+    if haskey(true_data, "pos_std")
+        pos_std_true = true_data["pos_std"]
+        for dim in 1:3
+            band!(axes[dim+1], t, pos_true[dim, :] .- 1 .* pos_std_true[dim, :], pos_true[dim, :] .+ 1 .* pos_std_true[dim, :];
+                color=(:black, 0.1), label="True σ uncertainty")
+        end
+    end
+
     if !isnothing(pred_data)
         colors = [:red, :blue, :green, :orange, :purple]
         method_names = collect(keys(pred_data))
@@ -166,12 +180,26 @@ function plot_regression_results_no_rmse(
             label_yaw = "$method_name"
             lines!(axes[1], t, yaw_pred; color=color, linestyle=:dash, linewidth=1.2, label=label_yaw)
 
+            # Add yaw uncertainty band if available
+            if haskey(pred_dict, "yaw_std")
+                yaw_std = pred_dict["yaw_std"]
+                band!(axes[1], t, yaw_pred .- 1 .* yaw_std, yaw_pred .+ 1 .* yaw_std;
+                    color=(color, 0.2), label="σ uncertainty")
+            end
+
             # Position predictions
             pos_pred = pred_dict["pos"]
             for dim in 1:3
                 label_pos = "$method_name"
                 lines!(axes[dim+1], t, pos_pred[dim, :]; color=color, linestyle=:dash,
                     linewidth=1.2, label=label_pos)
+
+                # Add position uncertainty band if available
+                if haskey(pred_dict, "pos_std")
+                    pos_std = pred_dict["pos_std"]
+                    band!(axes[dim+1], t, pos_pred[dim, :] .- 1 .* pos_std[dim, :], pos_pred[dim, :] .+ 1 .* pos_std[dim, :];
+                        color=(color, 0.2), label="σ uncertainty")
+                end
             end
         end
     end
