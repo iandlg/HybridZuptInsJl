@@ -27,9 +27,7 @@ function InertialData(path::AbstractString)
     df = CSV.read(path, DataFrame, comment="//")
     rows_to_remove = ["PacketCounter", "", "SystemTimestamp", "Column2"] # add more if needed
     cols_to_drop = intersect(names(df), (rows_to_remove))
-    @show names(df)
     select!(df, Not(cols_to_drop))
-    @show cols_to_drop
 
     # Now the collumns should be t, acc_x, acc_y, acc_z, rot_x, rot_y, rot_z ....
     t = df[:, 1] |> Vector{Float64}
@@ -60,7 +58,3 @@ function InertialData(dir::DataDirectory, trial_id::Int)
     gyro = Matrix(df[:, 5:7])'       # (3, N)
     return InertialData(t .* to_seconds, [accel; gyro])
 end
-
-# Convenience accessors
-accel(id::InertialData) = id.u[1:3, :]
-gyro(id::InertialData) = id.u[4:6, :]

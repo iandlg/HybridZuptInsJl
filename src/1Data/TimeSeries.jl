@@ -20,8 +20,8 @@ function truncate_to_overlap(series::AbstractTimeSeries...)
     end
     t_start = maximum(s.t[begin] for s in series)
     t_end = minimum(s.t[end] for s in series)
-    @info "Start time $t_start s"
-    @info "End time $t_end s"
+    # @info "Start time $t_start s"
+    # @info "End time $t_end s"
     t_start < t_end || throw(ArgumentError("no overlapping interval"))
     return Tuple(getindex(s, (s.t .>= t_start) .& (s.t .<= t_end)) for s in series)
 end

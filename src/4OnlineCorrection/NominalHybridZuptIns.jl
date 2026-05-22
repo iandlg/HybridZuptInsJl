@@ -41,8 +41,12 @@ function hybrid_nominal_zupt_aided_ins(
     n_train_cutoff = floor(Int, train_ratio * N)
     gt_available = [n <= n_train_cutoff for n in 1:N]
 
-    true_outputs = Dict{String,Any}("yaw" => Float64[], "pos" => Vector{Float64}[], "t" => Float64[])
-    pred_outputs = Dict{String,Any}("yaw" => Float64[], "pos" => Vector{Float64}[], "t" => Float64[])
+    true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+    pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
 
     seg_start = 2
     seg_end = N
@@ -104,13 +108,11 @@ function hybrid_nominal_zupt_aided_ins(
             pos_ins_seg = x[1:3, [prev_step, curr_step]]
             ins_step = R_nb_ins_0' * (pos_ins_seg[:, 2] - pos_ins_seg[:, 1])
 
-            # Time difference between consecutive step indices
-            Δt = inertial.t[curr_step] - inertial.t[prev_step]
             # Feature selectors based on the enum
             feature_selectors = Dict(
                 THREED_STEP => () -> [ins_step[1], ins_step[2], ins_step[3]],                             # 3 × N
-                TWOD_STEP_DT => () -> [ins_step[1], ins_step[2], Δt],
-                THREED_STEP_DT => () -> [ins_step[1], ins_step[2], ins_step[3], Δt],
+                TWOD_STEP_DT => () -> [ins_step[1], ins_step[2], inertial.t[curr_step] - inertial.t[prev_step]],
+                THREED_STEP_DT => () -> [ins_step[1], ins_step[2], ins_step[3], inertial.t[curr_step] - inertial.t[prev_step]],
             )
             input_feature = feature_selectors[feature_type]()
 
@@ -131,12 +133,10 @@ function hybrid_nominal_zupt_aided_ins(
 
             y_yaw = unwrapped_yaw_diff_gt - unwrapped_yaw_diff
             y_pos = gt_step - ins_step
-            y = vcat([y_yaw], y_pos)
+            y = vcat(y_pos, y_yaw)
 
-            push!(true_outputs["yaw"], y_yaw)
-            push!(true_outputs["pos"], y_pos)
+            push!(true_outputs["output"], y)
             push!(true_outputs["t"], inertial.t[prev_step])
-
             # Update with training data when gt is supposedly available
             if gt_available[prev_step] && gt_available[curr_step]
 
@@ -150,16 +150,21 @@ function hybrid_nominal_zupt_aided_ins(
             end
 
             if !gt_available[curr_step] && !isnothing(corrector)
-                preds = predict_correction(corrector, input_feature)
+                preds, preds_std = predict_correction(corrector, input_feature)
                 if feature_type == TWOD_STEP_DT
-                    preds[4] = 0.0
+                    preds[3] = 0.0
                 end
-                push!(pred_outputs["yaw"], preds[1])
-                push!(pred_outputs["pos"], preds[2:4])
+                if !haskey(pred_outputs, "output_std") && !isnothing(preds_std)
+                    pred_outputs["output_std"] = Vector{Float64}[]
+                end
+                if !isnothing(preds_std)
+                    push!(pred_outputs["output_std"], preds_std)
+                end
+                push!(pred_outputs["output"], preds)
                 push!(pred_outputs["t"], inertial.t[prev_step])
 
-                x[9, curr_step] = yaw_ins_seg[end] + preds[1]
-                x[1:3, curr_step] = pos_ins_seg[:, 2] + R_nb_ins_0 * preds[2:4]
+                x[9, curr_step] = yaw_ins_seg[end] + preds[4]
+                x[1:3, curr_step] = pos_ins_seg[:, 2] + R_nb_ins_0 * preds[1:3]
                 quat[:, curr_step] = matrix_to_quat(euler_to_matrix(x[7:9, curr_step]))
             end
         end
@@ -182,17 +187,16 @@ function hybrid_nominal_zupt_aided_ins(
     R_nb_final = euler_to_matrix(x[7:9, :])
     zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
-    # Convert outputs to Dict{String,VecOrMat{Float64}}
-    true_outputs_typed = Dict{String,VecOrMat{Float64}}(
-        "yaw" => true_outputs["yaw"],
-        "pos" => isempty(true_outputs["pos"]) ? Matrix{Float64}(undef, 3, 0) : hcat(true_outputs["pos"]...),
-        "t" => true_outputs["t"]
-    )
-    pred_outputs_typed = Dict{String,VecOrMat{Float64}}(
-        "yaw" => pred_outputs["yaw"],
-        "pos" => isempty(pred_outputs["pos"]) ? Matrix{Float64}(undef, 3, 0) : hcat(pred_outputs["pos"]...),
-        "t" => pred_outputs["t"]
-    )
+    # Remove last incorrect output
+    true_outputs["output"] = true_outputs["output"][1:end-1]
+    true_outputs["t"] = true_outputs["t"][1:end-1]
+    pred_outputs["output"] = pred_outputs["output"][1:end-1]
+    if haskey(pred_outputs, "output_std")
+        pred_outputs["output_std"] = pred_outputs["output_std"][1:end-1]
+    end
+    pred_outputs["t"] = pred_outputs["t"][1:end-1]
+    true_outputs = CorrectionOutput(true_outputs)
+    pred_outputs = CorrectionOutput(pred_outputs)
 
-    return zupt, zupt_ins_traj, step_seg, true_outputs_typed, pred_outputs_typed
+    return zupt, zupt_ins_traj, step_seg, true_outputs, pred_outputs
 end

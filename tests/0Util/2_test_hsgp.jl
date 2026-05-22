@@ -1,6 +1,5 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-
 m = 5
 d = 3
 ls = 0.5
@@ -33,7 +32,7 @@ n_dim = 1
 
 L = [1]
 m = 30
-margin = 2
+margin = 1.6
 L_extended = [Li * margin for Li in L]
 
 ## 
@@ -63,7 +62,7 @@ K_ff = var_f * exp_kernel(x_plot, x_plot, ls)
 std_f = sqrt.(diag(K_ff))
 
 # ---------- Plot ----------
-plot(x_plot, f_plot, linewidth=2, label="True function", color=:black)
+plot!(x_plot, f_plot, linewidth=2, label="True function", color=:black)
 scatter!(x_train, y_train, markersize=4, label="Noisy observations", color=:red)
 plot!(x_plot, f_plot .+ 2 * std_f, linewidth=0, fillrange=f_plot .- 2 * std_f,
     fillalpha=0.3, color=:gray, label="±2σ of f")
@@ -120,6 +119,9 @@ hsgp_cov = var_n * phi_star * W                                  # (N_test, N_te
 
 # (Optional) marginal variances for confidence bands
 hsgp_std = sqrt.(diag(hsgp_cov))
+
+hsgp_var = var_n .* vec(sum(phi_star .* W', dims=2))   # (N_test,)  ✓
+hsgp_std = sqrt.(hsgp_var)
 
 ## 
 using Plots

@@ -37,8 +37,8 @@ x_init = vcat(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
-true_outputs = Dict{String,Any}()
-pred_outputs = Dict{String,Any}()
+true_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
+pred_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
@@ -47,12 +47,12 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
     output_stats=hsgp_p.output_stats
 )
 
-zupt, hsgp_ins_traj, step_seg, true_outputs["hsgp"], pred_outputs["hsgp"] = HybridZuptInsJl.hybrid_zupt_aided_ins(
+zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"] = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
-zupt, classic_ins_traj, step_seg, true_outputs["model"], pred_outputs["model"] = HybridZuptInsJl.hybrid_zupt_aided_ins(
+zupt, classic_ins_traj, step_seg, pred_outputs["model"], _ = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE, correct=false
 )
@@ -68,13 +68,10 @@ trajs = OrderedDict(
     "model + online HSGP" => hsgp_ins_traj,
 )
 
-pred_outputs = OrderedDict{String,Dict{String,VecOrMat{Float64}}}(
-    "model + HSGP" => pred_outputs["hsgp"]
-)
-
-fig_pred_out = HybridZuptInsJl.plot_regression_results_no_rmse(pred_outputs, true_outputs["model"])
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned)
+
+fig_out_hsgp = HybridZuptInsJl.plot_regression_results(pred_outputs, true_outputs["model + HSGP"])
 
 fig_2D = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(hsgp_ins_traj, gt_traj_aligned; samples=2000)
 fig_3d = HybridZuptInsJl.plot_trajectory_3d(hsgp_ins_traj, gt_traj_aligned; samples=2000)

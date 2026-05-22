@@ -50,7 +50,7 @@ function evaluate_hyperparameter_variability(
     for fold_idx in 1:n_folds
         hp = hyperparams_vec[fold_idx]
 
-        # GP predictions
+        # GP predictions (returns CorrectionOutput)
         pred, _ = compute_corrections(
             input_feature,
             output,
@@ -62,8 +62,8 @@ function evaluate_hyperparameter_variability(
         # Apply corrections to obtain step‑level trajectory
         gp_traj = apply_corrections(
             ins_traj_aligned,
-            pred["yaw"],
-            pred["pos"], segs;
+            pred,
+            segs;
             ref_frame=ref_frame,
         )
         corrected_trajs[fold_idx] = gp_traj

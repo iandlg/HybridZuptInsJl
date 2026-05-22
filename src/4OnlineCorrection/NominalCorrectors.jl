@@ -19,7 +19,7 @@ mutable struct HsgpCorrector <: AbstractNominalCorrector
 end
 
 function HsgpCorrector(params::HsgpParameters)::HsgpCorrector
-    outputs_keys = ["yaw", "pos_1", "pos_2", "pos_3"]
+    outputs_keys = ["pos_1", "pos_2", "pos_3", "yaw"]
     eigvals = calc_eigenvalues(params.LL, params.m, params.d)
     omega = sqrt.(eigvals)
     psd = Dict(
@@ -48,8 +48,7 @@ end
 
 function _normalize_output(c::HsgpCorrector, y::Vector{Float64})
     y_norm = copy(y)
-    y_norm[1] = (y[1] - c.params.output_stats[1][4]) / c.params.output_stats[2][4]
-    y_norm[2:4] = (y[2:4] .- c.params.output_stats[1][1:3]) ./ c.params.output_stats[2][1:3]
+    y_norm = (y .- c.params.output_stats[1]) ./ c.params.output_stats[2]
     return y_norm
 end
 
@@ -72,16 +71,19 @@ function update_corrector!(
     end
 end
 
-function predict_correction(c::HsgpCorrector, input::Vector{Float64})
+function predict_correction(c::HsgpCorrector, input::Vector{Float64})::Tuple{Vector{Float64},Vector{Float64}}
     eigvect = _build_eigvect(c, input)
     preds = Vector{Float64}(undef, 4)
+    preds_std = Vector{Float64}(undef, 4)
     for (idx, outpt) in enumerate(c.outputs_keys)
+        sigma_n = getfield(c.params.hp, Symbol(outpt))[3]
         preds[idx] = (eigvect*c.beta[outpt])[1]
+        preds_std[idx] = sqrt((sigma_n^2 .* eigvect * c.P_beta[outpt] * eigvect')[1])
     end
     # Denormalize
-    preds[1] = preds[1] * c.params.output_stats[2][4] + c.params.output_stats[1][4]
-    preds[2:4] = preds[2:4] .* c.params.output_stats[2][1:3] .+ c.params.output_stats[1][1:3]
-    return preds
+    preds = preds .* c.params.output_stats[2] .+ c.params.output_stats[1]
+    preds_std = preds_std .* c.params.output_stats[2]
+    return preds, preds_std
 end
 
 
@@ -96,7 +98,7 @@ function StaticMeanCorrector()
 end
 
 function update_corrector!(c::StaticMeanCorrector, input::Vector{Float64}, y::Vector{Float64})
-    @assert length(y) == 4 "y must have length 4 (yaw, pos_x, pos_y, pos_z)"
+    @assert length(y) == 4 "y must have length 4 (pos_x, pos_y, pos_z, yaw)"
     c.sum .+= y
     c.count += 1
     return nothing
@@ -104,9 +106,9 @@ end
 
 function predict_correction(c::StaticMeanCorrector, input::Vector{Float64})
     if c.count == 0
-        return zeros(4)   # no data yet, return zero correction
+        return zeros(Float64, 4)   # no data yet, return zero correction
     else
-        return c.sum ./ c.count
+        return c.sum ./ c.count, nothing
     end
 end
 
@@ -114,7 +116,7 @@ end
     ExactGpCorrector(params::HsgpParameters)
 
 Mutable corrector that stores all training inputs and outputs, then on prediction
-fits an exact GP for each of the 4 outputs (yaw, x, y, z) using the hyperparameters
+fits an exact GP for each of the 4 outputs (x, y, z, yaw) using the hyperparameters
 and normalization statistics from `params`. The GP is built from scratch on every
 prediction using all stored data.
 
@@ -124,7 +126,7 @@ prediction using all stored data.
   for inputs (`input_stats`) and outputs (`output_stats` combining yaw and position stats), and
   domain bounds `LL` (unused).
 - `X_train`: Vector of stored input vectors (each length `d`).
-- `Y_train`: Vector of stored output 4‑vectors (yaw, x, y, z).
+- `Y_train`: Vector of stored output 4‑vectors (x, y, z, yaw).
 """
 mutable struct ExactGpCorrector <: AbstractNominalCorrector
     params::HsgpParameters
@@ -163,13 +165,12 @@ exists, returns zero correction. Otherwise:
 function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
     if isempty(c.X_train)
         @warn "No training data for ExactGpCorrector, returning zero correction"
-        return zeros(4)
+        return zeros(Float64, 4), zeros(Float64, 4)
     end
 
     # Unpack statistics
     input_mean, input_std = c.params.input_stats[1], c.params.input_stats[2]
-    yaw_mean, yaw_std = c.params.output_stats[1][4], c.params.output_stats[2][4]
-    pos_mean, pos_std = c.params.output_stats[1][1:3], c.params.output_stats[2][1:3]
+    output_mean, output_std = c.params.output_stats[1], c.params.output_stats[2]
     d = c.params.d
 
     # Normalise test input
@@ -182,12 +183,12 @@ function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
 
     # Normalise stored outputs
     Y_norm = hcat(c.Y_train...)
-    Y_norm[1, :] = (Y_norm[1, :] .- yaw_mean) ./ yaw_std
-    Y_norm[2:4, :] = (Y_norm[2:4, :] .- pos_mean) ./ pos_std
+    Y_norm = (Y_norm .- output_mean) ./ output_std
 
     # Predict each output
     preds = Vector{Float64}(undef, 4)
-    output_keys = ["yaw", "pos_1", "pos_2", "pos_3"]
+    preds_std = Vector{Float64}(undef, 4)
+    output_keys = ["pos_1", "pos_2", "pos_3", "yaw"]
 
     for (idx, key) in enumerate(output_keys)
         hp_vec = getfield(c.params.hp, Symbol(key))
@@ -199,12 +200,13 @@ function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
         # Build GP (training inputs: X_norm', size (n_train, d))
         gp = GaussianProcesses.GP(X_norm, y_out, GaussianProcesses.MeanZero(), kernel, log(σ_n))
 
-        μ, _ = GaussianProcesses.predict_y(gp, x_norm)
+        μ, var = GaussianProcesses.predict_y(gp, x_norm)
         preds[idx] = μ[1]
+        preds_std[idx] = sqrt(var[1])
     end
 
     # Denormalise predictions
-    preds[1] = preds[1] * yaw_std + yaw_mean
-    preds[2:4] = preds[2:4] .* pos_std .+ pos_mean
-    return preds
+    preds = preds .* output_std .+ output_mean
+    preds_std = preds_std .* output_std
+    return preds, preds_std
 end

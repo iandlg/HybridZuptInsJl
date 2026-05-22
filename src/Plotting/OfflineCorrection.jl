@@ -1,17 +1,16 @@
 """
     plot_regression_results(
-        pred_data::Union{Nothing,AbstractDict{String,Dict{String,VecOrMat{Float64}}}},
-        true_data::AbstractDict{String,VecOrMat{Float64}})
+        pred_data::Union{Nothing,AbstractDict{String,Union{CorrectionOutput, Dict}}},
+        true_data::Union{CorrectionOutput, Matrix{Float64}})
 
 Plot regression results for yaw and position components (X, Y, Z) with RMSE annotations.
-The true_data dictionary may contain a key `"t"` (Vector{Float64}) for the time axis;
-otherwise the x-axis is sample indices.
+Supports both CorrectionOutput objects and traditional dictionary/matrix formats.
 
 # Arguments
-- `pred_data`: Dictionary mapping method names (e.g., `"static"`, `"gp"`) to sub‑dicts:
+- `pred_data`: Dictionary mapping method names to CorrectionOutput or dict with:
     - `"yaw"` → predicted yaw (Vector{Float64}, length N)
     - `"pos"` → predicted positions (Matrix{Float64}, size 3×N)
-- `true_data`: Dictionary with keys:
+- `true_data`: CorrectionOutput or dict/matrix with:
     - `"yaw"` → true yaw (Vector{Float64}, length N)
     - `"pos"` → true positions (Matrix{Float64}, size 3×N)
     - `"t"`   → (optional) time vector (Vector{Float64}, length N)
@@ -20,68 +19,88 @@ otherwise the x-axis is sample indices.
 - `Figure` object.
 """
 function plot_regression_results(
-    pred_data::Union{Nothing,AbstractDict{String,Dict{String,VecOrMat{Float64}}}},
-    true_data::AbstractDict{String,VecOrMat{Float64}})
+    pred_data::Union{Nothing,AbstractDict{String,CorrectionOutput}},
+    true_data::Union{Nothing,CorrectionOutput}=nothing
+)
+    # ── Time axis: prefer true_data, else first pred ──────────────────
+    ref = isnothing(true_data) ? first(values(pred_data)) : true_data
+    t = ref.t
+    N = length(t)
 
-    # Unpack true data
-    yaw_true = true_data["yaw"]
-    pos_true = true_data["pos"]
-    N = length(yaw_true)
-    @assert size(pos_true, 2) == N
+    titles = ["X correction (m)", "Y correction (m)", "Z correction (m)", "Yaw correction (rad)"]
+    row_idx = [1, 2, 3, 4]   # output row indices
 
-    # Time axis: use true_data["t"] if present, otherwise indices
-    t = haskey(true_data, "t") ? true_data["t"] : collect(1:N)
-
-    # Create figure: 2×2 grid
-    fig = Figure(size=(1200, 800))
-    titles = ["Yaw", "X position", "Y position", "Z position"]
-    axes = Vector{Any}(undef, 4)
+    fig = Figure(size=(1200, 900))
+    axes = Vector{Axis}(undef, 4)
     for idx in 1:4
-        ax = Axis(fig[(idx-1)÷2+1, (idx-1)%2+1]; title=titles[idx], ylabel="Value")
-        axes[idx] = ax
-    end
-    # Set xlabel only for bottom row
-    for idx in 3:4
-        axes[idx].xlabel = "Time (s)"   # if we have time, otherwise "Sample index"
-    end
-    if !haskey(true_data, "t")
-        # if no time, indicate that x-axis is sample index
-        for idx in 3:4
-            axes[idx].xlabel = "Sample index"
-        end
+        axes[idx] = Axis(fig[(idx-1)÷2+1, (idx-1)%2+1];
+            title=titles[idx],
+            ylabel=idx <= 3 ? "meters" : "radians",
+            xlabel=idx >= 3 ? "Time (s)" : "")
     end
 
-    # ---- Plot ground truth (black solid line) ----
-    lines!(axes[1], t, yaw_true; color=:black, linewidth=1.5, label="True")
-    for dim in 1:3
-        lines!(axes[dim+1], t, pos_true[dim, :]; color=:black, linewidth=1.5, label="True")
-    end
+    # ── Ground truth ──────────────────────────────────────────────────
+    if !isnothing(true_data)
+        for (plot_idx, row) in enumerate(row_idx)
+            lines!(axes[plot_idx], true_data.t, true_data.output[row, :];
+                color=:black, linewidth=0.9, label="True")
 
-    if !isnothing(pred_data)
-        colors = [:red, :blue, :green, :orange, :purple]
-        method_names = collect(keys(pred_data))
-        for (method_idx, method_name) in enumerate(method_names)
-            color = colors[(method_idx-1)%length(colors)+1]
-            pred_dict = pred_data[method_name]
-
-            # Yaw predictions
-            yaw_pred = pred_dict["yaw"]
-            rmse_yaw = sqrt(mean((yaw_pred .- yaw_true) .^ 2))
-            label_yaw = "$method_name (RMSE = $(round(rmse_yaw, digits=4)))"
-            lines!(axes[1], t, yaw_pred; color=color, linestyle=:dash, linewidth=1.2, label=label_yaw)
-
-            # Position predictions
-            pos_pred = pred_dict["pos"]
-            for dim in 1:3
-                rmse_pos = sqrt(mean((pos_pred[dim, :] .- pos_true[dim, :]) .^ 2))
-                label_pos = "$method_name (RMSE = $(round(rmse_pos, digits=4)))"
-                lines!(axes[dim+1], t, pos_pred[dim, :]; color=color, linestyle=:dash,
-                    linewidth=1.2, label=label_pos)
+            if !isnothing(true_data.output_std)
+                μ = true_data.output[row, :]
+                σ = true_data.output_std[row, :]
+                label = "True ±σ"
+                band!(axes[plot_idx], true_data.t, μ .- σ, μ .+ σ;
+                    color=(:black, 0.15), label=label)
             end
         end
     end
 
-    # Add legends and grids
+    # ── Predictions ───────────────────────────────────────────────────
+    if !isnothing(pred_data)
+        colors = [:red, :blue, :green, :orange, :purple]
+
+        for (method_idx, (method_name, pred)) in enumerate(pred_data)
+            color = colors[(method_idx-1)%length(colors)+1]
+
+            # ── RMSE on overlapping interval ──────────────────────────
+            rmse = fill(NaN, 4)
+            if !isnothing(true_data)
+                gt_trim, pred_trim = truncate_to_overlap(true_data, pred)
+                is_compatible(gt_trim, pred_trim) ||
+                    throw(ArgumentError(
+                        "Series '$method_name' is not compatible with ground truth " *
+                        "(different lengths or timestamps differ > 1e-9). " *
+                        "Truncate first or resample."))
+
+                for (plot_idx, row) in enumerate(row_idx)
+                    rmse[plot_idx] = sqrt(mean(
+                        (pred_trim.output[row, :] .- gt_trim.output[row, :]) .^ 2))
+                end
+            end
+
+            for (plot_idx, row) in enumerate(row_idx)
+                rmse_str = isnan(rmse[plot_idx]) ? "" :
+                           " (RMSE=$(round(rmse[plot_idx]; digits=4)))"
+                label = "$method_name$rmse_str"
+
+                lines!(axes[plot_idx], pred.t, pred.output[row, :];
+                    color=color,
+                    linewidth=1.4,
+                    label=label)
+
+                # ── Confidence band (±1 std) ──────────────────────────
+                if !isnothing(pred.output_std)
+                    μ = pred.output[row, :]
+                    σ = pred.output_std[row, :]
+                    label = "$method_name ±σ"
+                    band!(axes[plot_idx], pred.t, μ .- σ, μ .+ σ;
+                        color=(color, 0.15), label=label)
+                end
+            end
+        end
+    end
+
+    # ── Legends / grid ────────────────────────────────────────────────
     for ax in axes
         axislegend(ax; position=:rt, framevisible=true)
         ax.xgridvisible = true
@@ -91,127 +110,15 @@ function plot_regression_results(
     return fig
 end
 
-"""
-    plot_regression_results(
-        pred_data::Union{Nothing,AbstractDict{String,Dict{String,VecOrMat{Float64}}}},
-        true_data::AbstractDict{String,VecOrMat{Float64}})
+function plot_regression_results(
+    pred_data::CorrectionOutput,
+    true_data::CorrectionOutput
+)
 
-Plot regression results for yaw and position components (X, Y, Z) with RMSE annotations.
-The true_data dictionary may contain a key `"t"` (Vector{Float64}) for the time axis;
-otherwise the x-axis is sample indices.
-
-# Arguments
-- `pred_data`: Dictionary mapping method names (e.g., `"static"`, `"gp"`) to sub‑dicts:
-    - `"yaw"` → predicted yaw (Vector{Float64}, length N)
-    - `"pos"` → predicted positions (Matrix{Float64}, size 3×N)
-- `true_data`: Dictionary with keys:
-    - `"yaw"` → true yaw (Vector{Float64}, length N)
-    - `"pos"` → true positions (Matrix{Float64}, size 3×N)
-    - `"t"`   → (optional) time vector (Vector{Float64}, length N)
-
-# Returns
-- `Figure` object.
-"""
-function plot_regression_results_no_rmse(
-    pred_data::Union{Nothing,AbstractDict{String,Dict{String,VecOrMat{Float64}}}},
-    true_data::AbstractDict{String,VecOrMat{Float64}})
-
-    # Unpack true data
-    yaw_true = true_data["yaw"]
-    pos_true = true_data["pos"]
-    N = length(yaw_true)
-    @assert size(pos_true, 2) == N
-
-    # Time axis: use true_data["t"] if present, otherwise indices
-    t = haskey(true_data, "t") ? true_data["t"] : collect(1:N)
-
-    # Create figure: 2×2 grid
-    fig = Figure(size=(1200, 800))
-    titles = ["Yaw", "X position", "Y position", "Z position"]
-    axes = Vector{Any}(undef, 4)
-    for idx in 1:4
-        ax = Axis(fig[(idx-1)÷2+1, (idx-1)%2+1]; title=titles[idx], ylabel="Value")
-        axes[idx] = ax
-    end
-    # Set xlabel only for bottom row
-    for idx in 3:4
-        axes[idx].xlabel = "Time (s)"   # if we have time, otherwise "Sample index"
-    end
-    if !haskey(true_data, "t")
-        # if no time, indicate that x-axis is sample index
-        for idx in 3:4
-            axes[idx].xlabel = "Sample index"
-        end
-    end
-
-    # ---- Plot ground truth (black solid line) ----
-    lines!(axes[1], t, yaw_true; color=:black, linewidth=1.5, label="True")
-    for dim in 1:3
-        lines!(axes[dim+1], t, pos_true[dim, :]; color=:black, linewidth=1.5, label="True")
-    end
-
-    # ---- Plot ground truth uncertainty bands if available ----
-    if haskey(true_data, "yaw_std")
-        yaw_std_true = true_data["yaw_std"]
-        band!(axes[1], t, yaw_true .- 1 .* yaw_std_true, yaw_true .+ 1 .* yaw_std_true;
-            color=(:black, 0.1), label="True σ uncertainty")
-    end
-    if haskey(true_data, "pos_std")
-        pos_std_true = true_data["pos_std"]
-        for dim in 1:3
-            band!(axes[dim+1], t, pos_true[dim, :] .- 1 .* pos_std_true[dim, :], pos_true[dim, :] .+ 1 .* pos_std_true[dim, :];
-                color=(:black, 0.1), label="True σ uncertainty")
-        end
-    end
-
-    if !isnothing(pred_data)
-        colors = [:red, :blue, :green, :orange, :purple]
-        method_names = collect(keys(pred_data))
-        for (method_idx, method_name) in enumerate(method_names)
-            color = colors[(method_idx-1)%length(colors)+1]
-            pred_dict = pred_data[method_name]
-
-            # Yaw predictions
-            yaw_pred = pred_dict["yaw"]
-            t = collect(1:length(yaw_pred))
-            if haskey(pred_dict, "t")
-                t = pred_dict["t"]
-            end
-            label_yaw = "$method_name"
-            lines!(axes[1], t, yaw_pred; color=color, linestyle=:dash, linewidth=1.2, label=label_yaw)
-
-            # Add yaw uncertainty band if available
-            if haskey(pred_dict, "yaw_std")
-                yaw_std = pred_dict["yaw_std"]
-                band!(axes[1], t, yaw_pred .- 1 .* yaw_std, yaw_pred .+ 1 .* yaw_std;
-                    color=(color, 0.2), label="σ uncertainty")
-            end
-
-            # Position predictions
-            pos_pred = pred_dict["pos"]
-            for dim in 1:3
-                label_pos = "$method_name"
-                lines!(axes[dim+1], t, pos_pred[dim, :]; color=color, linestyle=:dash,
-                    linewidth=1.2, label=label_pos)
-
-                # Add position uncertainty band if available
-                if haskey(pred_dict, "pos_std")
-                    pos_std = pred_dict["pos_std"]
-                    band!(axes[dim+1], t, pos_pred[dim, :] .- 1 .* pos_std[dim, :], pos_pred[dim, :] .+ 1 .* pos_std[dim, :];
-                        color=(color, 0.2), label="σ uncertainty")
-                end
-            end
-        end
-    end
-
-    # Add legends and grids
-    for ax in axes
-        axislegend(ax; position=:rt, framevisible=true)
-        ax.xgridvisible = true
-        ax.ygridvisible = true
-    end
-
-    return fig
+    pred_data = Dict(
+        "Prediction" => pred_data
+    )
+    return plot_regression_results(pred_data, true_data)
 end
 """
     plot_input_features(
@@ -220,7 +127,7 @@ end
         title::String="Input Features"
     )
 
-Plot three‑dimensional input features over time.
+Plot three-dimensional input features over time.
 
 # Arguments
 - `features`: Feature matrix of size `(3, N)`.

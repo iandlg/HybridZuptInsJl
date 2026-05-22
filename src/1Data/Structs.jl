@@ -1,3 +1,73 @@
+"""
+    CorrectionOutput <: AbstractTimeSeries
+
+Struct for storing correction outputs from GP, HSGP, or online correction methods.
+Contains position and yaw corrections with optional standard deviations.
+
+# Fields
+- `t::Vector{Float64}`: Time stamps (strictly increasing)
+- `output::Matrix{Float64}`: Correction outputs, size (4, n_steps) where:
+  - rows 1-3: position corrections (x, y, z) in meters
+  - row 4: yaw correction in radians
+- `output_std::Union{Nothing, Matrix{Float64}}`: Optional standard deviations with same shape as output
+"""
+struct CorrectionOutput <: AbstractTimeSeries
+    t::Vector{Float64}
+    output::Matrix{Float64}           # 4 x n_steps: [pos1, pos2, pos3, yaw]
+    output_std::Union{Nothing,Matrix{Float64}}
+
+    function CorrectionOutput(
+        t::Vector{Float64},
+        output::Matrix{Float64},
+        output_std::Union{Nothing,Matrix{Float64}}=nothing
+    )
+        length(size(t)) == 1 || throw(ArgumentError("t must be 1-D"))
+        all(diff(t) .> 0) || throw(ArgumentError("t must be strictly increasing"))
+        size(output, 1) == 4 || throw(ArgumentError("output must have 4 rows (pos1,pos2,pos3,yaw)"))
+        length(t) == size(output, 2) || throw(ArgumentError("length(t) must match size(output,2)"))
+
+        if !isnothing(output_std)
+            size(output_std) == size(output) ||
+                throw(ArgumentError("output_std must have same shape as output"))
+        end
+
+        new(t, output, output_std)
+    end
+end
+
+function CorrectionOutput(d::Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}})
+    t = d["t"]
+    output = d["output"]
+    output_std = get(d, "output_std", nothing)
+
+    # Handle flat vector case: treat as single time step or single output row
+    output_mat = output isa Vector ? hcat(output...) : output
+    output_std_mat = isnothing(output_std) ? nothing :
+                     output_std isa Vector ? hcat(output_std...) : output_std
+
+    if isempty(output_mat)
+        return nothing
+    end
+
+    return CorrectionOutput(t, output_mat, output_std_mat)
+end
+
+function Base.getindex(s::CorrectionOutput, mask::AbstractVector{Bool})
+    CorrectionOutput(
+        s.t[mask],
+        s.output[:, mask],
+        isnothing(s.output_std) ? nothing : s.output_std[:, mask]
+    )
+end
+
+function Base.getindex(s::CorrectionOutput, idx::AbstractVector{<:Integer})
+    CorrectionOutput(
+        s.t[idx],
+        s.output[:, idx],
+        isnothing(s.output_std) ? nothing : s.output_std[:, idx]
+    )
+end
+
 struct SeHyperparams
     yaw::Vector{Float64}    # [σ_f, length_scale, σ_n] for yaw
     pos_1::Vector{Float64}  # for x position

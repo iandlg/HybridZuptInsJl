@@ -3,12 +3,13 @@ using .HybridZuptInsJl;
 using Statistics
 using OrderedCollections, Dates
 
-hyp_key = 40
+hyp_key = 41
 hyp_path = Dict{Int,String}(
     10 => "out/3OfflineCorrection/2_VariabilityResults/PY_ANG15_BODY_THREED_STEP.json",
     20 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_THREED_STEP_2026-05-13T14:14:24.485.json",
     30 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:06:28.867.json",
     40 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:03.913.json",
+    41 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-22T11:18:28.679.json"
 )[hyp_key]
 
 hp, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.SeHyperparams, hyp_path)
@@ -21,8 +22,8 @@ normalize_output = meta["normalize_output"]
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-m = 1100
-margin = 1.5
+m = 1200
+margin = 1.7
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, meta["trial_id"]
@@ -46,32 +47,28 @@ hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
     m=m, margin=margin, feature_type=FEATURE_TYPE
 )
 
-# Apply corrections
+# Apply corrections (using CorrectionOutput objects)
 true_output_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    true_outputs["yaw"],
-    true_outputs["pos"],
+    true_outputs,
     segs; ref_frame=FRAME
 )
 
 gp_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    gp_corrections["yaw"],
-    gp_corrections["pos"],
+    gp_corrections,
     segs; ref_frame=FRAME
 )
 
 hsgp_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    hsgp_corrections["yaw"],
-    hsgp_corrections["pos"],
+    hsgp_corrections,
     segs; ref_frame=FRAME
 )
 
 static_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    static_corrections["yaw"],
-    static_corrections["pos"],
+    static_corrections,
     segs; ref_frame=FRAME
 )
 

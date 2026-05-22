@@ -42,10 +42,12 @@ function hybrid_zupt_aided_ins(
     n_train_cutoff = floor(Int, train_ratio * N)
     gt_available = [n <= n_train_cutoff for n in 1:N]
 
-    true_outputs = Dict{String,Any}(
-        "yaw" => Float64[], "pos" => Vector{Float64}[], "t" => Float64[], "yaw_std" => Float64[], "pos_std" => Vector{Float64}[])
-    pred_outputs = Dict{String,Any}(
-        "yaw" => Float64[], "pos" => Vector{Float64}[], "t" => Float64[], "yaw_std" => Float64[], "pos_std" => Vector{Float64}[])
+    true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+    pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
 
     seg_start = 2
     seg_end = N
@@ -219,11 +221,13 @@ function hybrid_zupt_aided_ins(
             for i in 1:p
                 marg_std[i] = sqrt(target_cov[i, i])
             end
-            push!(true_outputs["pos"], target[1:3])
-            push!(true_outputs["pos_std"], marg_std[1:3])
-            push!(true_outputs["yaw"], target[4])
-            push!(true_outputs["yaw_std"], marg_std[4])
             push!(true_outputs["t"], inertial.t[prev_step])
+            push!(true_outputs["output"], target)
+            if !haskey(true_outputs, "output_std")
+                true_outputs["output_std"] = Vector{Float64}[]
+            end
+            push!(true_outputs["output_std"], marg_std)
+
 
             # ------------- Update the Position and orientation from GT ---------------
             # Construct Measurement matrix H_gt 
@@ -354,11 +358,13 @@ function hybrid_zupt_aided_ins(
                 for i in 1:p
                     pred_marg_std[i] = sqrt(y_cov[i, i])
                 end
-                push!(pred_outputs["pos"], y_estim[1:3])
-                push!(pred_outputs["pos_std"], pred_marg_std[1:3])
-                push!(pred_outputs["yaw"], y_estim[4])
-                push!(pred_outputs["yaw_std"], pred_marg_std[4])
                 push!(pred_outputs["t"], inertial.t[prev_step])
+                push!(pred_outputs["output"], y_estim)
+                if !haskey(pred_outputs, "output_std")
+                    pred_outputs["output_std"] = Vector{Float64}[]
+                end
+                push!(pred_outputs["output_std"], pred_marg_std)
+
             end
         end
 
@@ -381,20 +387,17 @@ function hybrid_zupt_aided_ins(
     zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
     # Convert outputs to Dict{String,VecOrMat{Float64}}
-    true_outputs_typed = Dict{String,VecOrMat{Float64}}(
-        "yaw" => true_outputs["yaw"],
-        "pos" => isempty(true_outputs["pos"]) ? Matrix{Float64}(undef, 3, 0) : hcat(true_outputs["pos"]...),
-        "yaw_std" => true_outputs["yaw_std"],
-        "pos_std" => isempty(true_outputs["pos_std"]) ? Matrix{Float64}(undef, 3, 0) : hcat(true_outputs["pos_std"]...),
-        "t" => true_outputs["t"]
-    )
-    pred_outputs_typed = Dict{String,VecOrMat{Float64}}(
-        "yaw" => pred_outputs["yaw"],
-        "pos" => isempty(pred_outputs["pos"]) ? Matrix{Float64}(undef, 3, 0) : hcat(pred_outputs["pos"]...),
-        "yaw_std" => pred_outputs["yaw_std"],
-        "pos_std" => isempty(pred_outputs["pos_std"]) ? Matrix{Float64}(undef, 3, 0) : hcat(pred_outputs["pos_std"]...),
-        "t" => pred_outputs["t"]
-    )
+    # Remove last incorrect output
+    true_outputs["output"] = true_outputs["output"][1:end-1]
+    true_outputs["t"] = true_outputs["t"][1:end-1]
+    if haskey(true_outputs, "output_std")
+        true_outputs["output_std"] = true_outputs["output_std"][1:end-1]
+    end
+    pred_outputs["output"] = pred_outputs["output"][1:end-1]
+    if haskey(pred_outputs, "output_std")
+        pred_outputs["output_std"] = pred_outputs["output_std"][1:end-1]
+    end
+    pred_outputs["t"] = pred_outputs["t"][1:end-1]
 
-    return zupt, zupt_ins_traj, step_seg, true_outputs_typed, pred_outputs_typed
+    return zupt, zupt_ins_traj, step_seg, CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs)
 end

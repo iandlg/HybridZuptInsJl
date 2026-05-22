@@ -5,8 +5,8 @@ import Dates, Optim
 
 data_key = "ANG"
 trial_id = 15
-FRAME = HybridZuptInsJl.HEADING
-FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_DT
+FRAME = HybridZuptInsJl.BODY
+FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
 n_restarts_optimizer = 5
 kern_lo = [-6.0, -6.0]
 kern_hi = [6.0, 6.0]
@@ -47,23 +47,19 @@ static_corrections, _ = HybridZuptInsJl.compute_corrections(
 
 true_output_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    true_outputs["yaw"],
-    true_outputs["pos"],
+    true_outputs,
     segs; ref_frame=FRAME
 )
 
-
 gp_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    gp_corrections["yaw"],
-    gp_corrections["pos"],
+    gp_corrections,
     segs; ref_frame=FRAME
 )
 
 static_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    static_corrections["yaw"],
-    static_corrections["pos"],
+    static_corrections,
     segs; ref_frame=FRAME
 )
 
