@@ -127,6 +127,30 @@ hsgp_std = sqrt.(diag(hsgp_cov))
 hsgp_var = var_n .* vec(sum(phi_star .* W', dims=2))   # (N_test,) 
 hsgp_std = sqrt.(hsgp_var)
 
+## Sequential fit HSGP
+per_dim_eigvals = HybridZuptInsJl.calc_eigenvalues(L_extended, m, d)
+omega = sqrt.(per_dim_eigvals)
+psd = HybridZuptInsJl.power_spectral_density(omega, ls, sqrt(var_f))
+beta = zeros(Float64, m)
+P_beta = Matrix(Diagonal(psd))
+
+for i in 1:size(x_train_mat, 1)
+    eigvect = HybridZuptInsJl.calc_eigenvectors(
+        fill(x_train[i], (1, 1)), L_extended, per_dim_eigvals)
+    beta, P_beta = HybridZuptInsJl.measurement_update(
+        beta, P_beta, [y_train[i]], eigvect, fill(var_n, (1, 1))
+    )
+
+end
+
+eigvect = HybridZuptInsJl.calc_eigenvectors(
+    x_test_mat, L_extended, per_dim_eigvals
+)
+hsgp_seq_mean = eigvect * beta
+hsgp_seq_cov = eigvect * P_beta * eigvect'
+
+hsgp_seq_std = sqrt.(diag(hsgp_seq_cov))
+
 ## 
 using Plots
 
@@ -162,14 +186,26 @@ plot!(p3, x_test, gpjl_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
 plot!(p3, x_test, gpjl_mean .- 2 .* sqrt.(gpjl_var), fillrange=gpjl_mean .+ 2 .* sqrt.(gpjl_var),
     fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
 scatter!(p3, x_train, y_train; color=:red, markersize=2, label="Observations")
-title!(p3, "")
+title!(p3, "GaussianProcesses.jl package")
 xlabel!(p3, "x")
 ylabel!(p3, "f(x)")
+
+# Right subplot: HSGP
+p4 = plot(x_test, true_fun.(x_test);
+    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+plot!(p4, x_test, hsgp_seq_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
+plot!(p4, x_test, hsgp_seq_mean .- 2 .* hsgp_seq_std, fillrange=hsgp_seq_mean .+ 2 .* hsgp_seq_std,
+    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+scatter!(p4, x_train, y_train; color=:red, markersize=2, label="Observations")
+title!(p4, "Sequential Fit HSGP")
+xlabel!(p4, "x")
+ylabel!(p4, "f(x)")
 # Combine both subplots side by side
-plot(p1, p2, p3; layout=(2, 2), size=(1000, 900))
+plot(p1, p2, p3, p4; layout=(2, 2), size=(1000, 900))
 
 ## Compute difference between options
 rmse = sqrt.(mean((gp_mean - gpjl_mean) .^ 2))
 rmse_var = sqrt.(mean((gp_mean .- 2 .* gp_std - (gpjl_mean .- 2 .* sqrt.(gpjl_var))) .^ 2))
 rmse_hsgp = sqrt.(mean((gp_mean - hsgp_mean) .^ 2))
 rmse_var = sqrt.(mean((gp_mean.-2 .* gp_std-(hsgp_mean.-2 .* hsgp_std))[50:450] .^ 2))
+rmse_var = sqrt.(mean(((hsgp_mean .- 2 .* hsgp_std) - (hsgp_seq_mean .- 2 .* hsgp_seq_std)) .^ 2))

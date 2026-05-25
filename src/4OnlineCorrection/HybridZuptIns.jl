@@ -48,6 +48,13 @@ function hybrid_zupt_aided_ins(
     pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
         "output" => Vector{Float64}[], "t" => Float64[]
     )
+    training_inputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "input" => Vector{Float64}[], "t" => Float64[]
+    )
+    training_targets = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+
 
     seg_start = 2
     seg_end = N
@@ -211,7 +218,7 @@ function hybrid_zupt_aided_ins(
                 reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals)
             H_update = kron(I(p), eigvect)
 
-            if correct
+            if correct && gt_available[prev_step] && gt_available[curr_step]
                 noise_vect = Vector{Float64}(undef, p)
                 for (idx, key) in enumerate(output_names)
                     noise_vect[idx] = getfield(params.hp, Symbol(key))[3]
@@ -220,6 +227,11 @@ function hybrid_zupt_aided_ins(
                     beta, P_beta, target_norm, H_update, Diagonal(noise_vect .^ 2)
                 )
                 push!(beta_hist, beta)
+                push!(training_targets["output"], target_norm)
+                push!(training_targets["t"], inertial.t[prev_step])
+                push!(training_inputs["input"], feature_estimate_norm)
+                push!(training_inputs["t"], inertial.t[prev_step])
+
             end
             # @info "Marginal noise during weight update : $(sqrt.(Diagonal(target_cov_norm + input_cov_norm)))"
 
@@ -345,7 +357,7 @@ function hybrid_zupt_aided_ins(
                 pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm * Diagonal(params.output_stats[2])
 
                 # Compute combined uncertainty from GP and input
-                y_cov = R_aug_nb * (pred_cov + input_cov_norm) * R_aug_nb'
+                y_cov = R_aug_nb * (pred_cov) * R_aug_nb'
 
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
@@ -353,7 +365,7 @@ function hybrid_zupt_aided_ins(
                     P[:, :, curr_step],
                     y_estim,
                     H_correction,
-                    y_cov .* 1e-4
+                    Diagonal(y_cov) .* 1e-4
                 )
 
                 # -------- Compensate error -------------
@@ -408,5 +420,5 @@ function hybrid_zupt_aided_ins(
 
     beta_hist = hcat(beta_hist...)
 
-    return zupt, zupt_ins_traj, step_seg, CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs), beta_hist, P_beta
+    return zupt, zupt_ins_traj, step_seg, CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs), beta_hist, training_inputs, training_targets
 end

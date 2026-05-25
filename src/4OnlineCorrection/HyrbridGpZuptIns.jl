@@ -1,5 +1,3 @@
-using GaussianProcesses
-
 function hybrid_zupt_aided_ins_gp(
     inertial::InertialData,
     simdata::InsConfig,
@@ -193,7 +191,7 @@ function hybrid_zupt_aided_ins_gp(
             push!(true_outputs["output_std"], marg_std)
 
             # ── GP training update (replaces beta/P_beta measurement_update) ─
-            if correct
+            if correct && gt_available[prev_step] && gt_available[curr_step]
                 # Accumulate normalised observations
                 X_train = hcat(X_train, feature_norm)       # d_feat × n
                 Y_train = hcat(Y_train, target_norm)        # p      × n
@@ -264,10 +262,13 @@ function hybrid_zupt_aided_ins_gp(
                     P[:, :, curr_step],
                     y_estim,
                     H_correction,
-                    y_cov .* 1e-5
+                    y_cov .* 1e-4
                 )
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(
-                    x[:, curr_step], dx[:, curr_step], quat[:, curr_step])
+                    x[:, curr_step],
+                    dx[:, curr_step],
+                    quat[:, curr_step]
+                )
 
                 # Save prediction
                 push!(pred_outputs["t"], inertial.t[prev_step])

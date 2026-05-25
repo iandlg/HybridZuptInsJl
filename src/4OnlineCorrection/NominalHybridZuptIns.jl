@@ -44,6 +44,12 @@ function hybrid_nominal_zupt_aided_ins(
     true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
         "output" => Vector{Float64}[], "t" => Float64[]
     )
+    training_inputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "input" => Vector{Float64}[], "t" => Float64[]
+    )
+    training_targets = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
     pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
         "output" => Vector{Float64}[], "t" => Float64[]
     )
@@ -151,6 +157,10 @@ function hybrid_nominal_zupt_aided_ins(
                         end
                         @info "saved β : " beta
                         push!(beta_hist, beta)
+                        push!(training_targets["output"], _normalize_output(corrector, y))
+                        push!(training_targets["t"], inertial.t[prev_step])
+                        push!(training_inputs["input"], vec(_normalize_input(corrector, input_feature)))
+                        push!(training_inputs["t"], inertial.t[prev_step])
                     end
                 end
 
@@ -210,5 +220,5 @@ function hybrid_nominal_zupt_aided_ins(
 
     beta_hist = hcat(beta_hist...)
 
-    return zupt, zupt_ins_traj, step_seg, true_outputs, pred_outputs, beta_hist
+    return zupt, zupt_ins_traj, step_seg, true_outputs, pred_outputs, beta_hist, training_inputs, training_targets
 end

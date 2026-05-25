@@ -112,7 +112,7 @@ end
 
 function plot_regression_results(
     pred_data::CorrectionOutput,
-    true_data::CorrectionOutput
+    true_data::Union{Nothing,CorrectionOutput}=nothing
 )
 
     pred_data = Dict(

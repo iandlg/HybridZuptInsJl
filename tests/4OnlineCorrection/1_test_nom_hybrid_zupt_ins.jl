@@ -3,7 +3,8 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 11
+hsgp_p_key = 20
+
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
@@ -43,31 +44,31 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 500, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 200, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )
 hsgp_corrector = HybridZuptInsJl.HsgpCorrector(hsgp_p)
-zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"], beta_hist = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"], beta_hist, tr_input, tr_target = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
     corrector=hsgp_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
 # Run static mean correction
 static_corrector = HybridZuptInsJl.StaticMeanCorrector()
-zupt, static_ins_traj, step_seg, true_outputs["model + static"], pred_outputs["model + static"], _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+zupt, static_ins_traj, step_seg, true_outputs["model + static"], pred_outputs["model + static"], _, _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
     corrector=static_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
 
-zupt, classic_ins_traj, step_seg, true_outputs["model"], _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+zupt, classic_ins_traj, step_seg, true_outputs["model"], _, _, _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
 gp_corrector = HybridZuptInsJl.ExactGpCorrector(hsgp_p)
-zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], _, _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned;
     x_init=x_init, train_ratio=train_ratio, corrector=gp_corrector, feature_type=FEATURE_TYPE
 )
@@ -100,6 +101,12 @@ step_trajs = OrderedDict(
 fig_train_out = HybridZuptInsJl.plot_regression_results(true_outputs, true_outputs["model"])
 fig_out_hspg = HybridZuptInsJl.plot_regression_results(pred_outputs["model + HSGP"], true_outputs["model + HSGP"])
 fig_out_gp = HybridZuptInsJl.plot_regression_results(pred_outputs["model + GP"], true_outputs["model + GP"])
+
+fig_in = HybridZuptInsJl.plot_input_features(hcat(tr_input["input"]...), tr_input["t"])
+tr_correctiondata = HybridZuptInsJl.CorrectionOutput(
+    tr_target["t"], hcat(tr_target["output"]...)
+)
+fig_out = HybridZuptInsJl.plot_regression_results(tr_correctiondata)
 
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned)
 fig_dist_step = HybridZuptInsJl.plot_position_distance_error(step_trajs, gt_traj_aligned[segs])
