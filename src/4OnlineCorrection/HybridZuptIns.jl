@@ -196,7 +196,8 @@ function hybrid_zupt_aided_ins(
                 ],
             )
             # Normalise covariance of input feature
-            feature_cov_norm = Diagonal(1 ./ params.input_stats[2]) * feature_cov_selector[feature_type]() * Diagonal(1 ./ params.input_stats[2])
+            feature_cov_norm = Diagonal(1 ./ params.input_stats[2]) *
+                               feature_cov_selector[feature_type]() * Diagonal(1 ./ params.input_stats[2])
 
             for d in 1:params.d
                 J_ϕ[d, :] = calc_eigenvectors_dx(
