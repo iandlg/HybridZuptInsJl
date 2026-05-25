@@ -31,12 +31,12 @@ N_plot = 500
 n_dim = 1
 
 L = [1]
-m = 30
+m = 100
 margin = 1.6
 L_extended = [Li * margin for Li in L]
 
 ## 
-using LinearAlgebra, Distributions, Random, Plots
+using LinearAlgebra, Distributions, Random, Plots, GaussianProcesses
 
 # ---------- Squared exponential kernel ----------
 exp_kernel(x, y, ls) = exp.(-0.5 * ((x .- y') .^ 2) / ls^2)
@@ -88,7 +88,11 @@ gp_cov = K_ss - K_sx * K_yy_inv * K_xs
 # To get marginal variances (for confidence bands)
 gp_std = sqrt.(diag(gp_cov))
 
-## 
+## GP posterior with GaussianProcesses.jl
+gp = GP(x_train, y_train, MeanZero(), SE(log(ls), log(sqrt(var_f))), log(sqrt(var_n)))
+gpjl_mean, gpjl_var = predict_f(gp, x_test)
+
+##
 
 # ---------- HSGP posterior ----------
 # 1. Eigenvalues and basis matrices
@@ -120,7 +124,7 @@ hsgp_cov = var_n * phi_star * W                                  # (N_test, N_te
 # (Optional) marginal variances for confidence bands
 hsgp_std = sqrt.(diag(hsgp_cov))
 
-hsgp_var = var_n .* vec(sum(phi_star .* W', dims=2))   # (N_test,)  ✓
+hsgp_var = var_n .* vec(sum(phi_star .* W', dims=2))   # (N_test,) 
 hsgp_std = sqrt.(hsgp_var)
 
 ## 
@@ -151,5 +155,21 @@ title!(p2, "HSGP")
 xlabel!(p2, "x")
 ylabel!(p2, "f(x)")
 
+# Right subplot: HSGP
+p3 = plot(x_test, true_fun.(x_test);
+    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+plot!(p3, x_test, gpjl_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
+plot!(p3, x_test, gpjl_mean .- 2 .* sqrt.(gpjl_var), fillrange=gpjl_mean .+ 2 .* sqrt.(gpjl_var),
+    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+scatter!(p3, x_train, y_train; color=:red, markersize=2, label="Observations")
+title!(p3, "")
+xlabel!(p3, "x")
+ylabel!(p3, "f(x)")
 # Combine both subplots side by side
-plot(p1, p2; layout=(1, 2), size=(1000, 400))
+plot(p1, p2, p3; layout=(2, 2), size=(1000, 900))
+
+## Compute difference between options
+rmse = sqrt.(mean((gp_mean - gpjl_mean) .^ 2))
+rmse_var = sqrt.(mean((gp_mean .- 2 .* gp_std - (gpjl_mean .- 2 .* sqrt.(gpjl_var))) .^ 2))
+rmse_hsgp = sqrt.(mean((gp_mean - hsgp_mean) .^ 2))
+rmse_var = sqrt.(mean((gp_mean.-2 .* gp_std-(hsgp_mean.-2 .* hsgp_std))[50:450] .^ 2))

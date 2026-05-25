@@ -48,6 +48,8 @@ function hybrid_nominal_zupt_aided_ins(
         "output" => Vector{Float64}[], "t" => Float64[]
     )
 
+    beta_hist = Vector{Float64}[]
+
     seg_start = 2
     seg_end = N
     step_detector = StepDetector()
@@ -142,6 +144,14 @@ function hybrid_nominal_zupt_aided_ins(
 
                 if !isnothing(corrector)
                     update_corrector!(corrector, input_feature, y)
+                    beta = Float64[]
+                    if typeof(corrector) == HsgpCorrector
+                        for (idx, key) in enumerate(corrector.outputs_keys)
+                            beta = vcat(beta, corrector.beta[key])
+                        end
+                        @info "saved β : " beta
+                        push!(beta_hist, beta)
+                    end
                 end
 
                 # Update the Position and orientation using ground truth
@@ -198,5 +208,7 @@ function hybrid_nominal_zupt_aided_ins(
     true_outputs = CorrectionOutput(true_outputs)
     pred_outputs = CorrectionOutput(pred_outputs)
 
-    return zupt, zupt_ins_traj, step_seg, true_outputs, pred_outputs
+    beta_hist = hcat(beta_hist...)
+
+    return zupt, zupt_ins_traj, step_seg, true_outputs, pred_outputs, beta_hist
 end

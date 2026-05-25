@@ -60,6 +60,7 @@ function hybrid_zupt_aided_ins(
     J_ϕ = zeros(params.d, params.m)
     omega = sqrt.(per_dim_eigvals)
     psd = zeros(Float64, p * params.m)
+
     for (idx, field) in enumerate(fieldnames(SeHyperparams))
         psd[((idx-1)*params.m+1):(idx*params.m)] = power_spectral_density(
             omega,
@@ -67,10 +68,11 @@ function hybrid_zupt_aided_ins(
             getfield(params.hp, field)[1]
         )
     end
-
+    output_names = ["pos_1", "pos_2", "pos_3", "yaw"]
     beta = zeros(Float64, p * params.m)
+    beta_hist = Vector{Float64}[]
     P_beta = Matrix(Diagonal(psd))
-
+    # P_beta = I(p * params.m) .* 1e-3
     # Allocate memory
     R_aug_GT_nb = zeros(Float64, (p, p))
     R_aug_nb = zeros(Float64, (p, p))
@@ -78,7 +80,7 @@ function hybrid_zupt_aided_ins(
     R_aug_nb[p, p] = 1.0
 
     # Define parameters 
-    sigma_pos_gt = 1e-3
+    sigma_pos_gt = 1e-2
     sigma_ψ_gt = 1e-3
     sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt) # σ_GTx σ_GTy σ_GT_z σ_GTψ
     sigma_dt = 1e-5
@@ -209,9 +211,14 @@ function hybrid_zupt_aided_ins(
             H_update = kron(I(p), eigvect)
 
             if correct
+                noise_vect = Vector{Float64}(undef, p)
+                for (idx, key) in enumerate(output_names)
+                    noise_vect[idx] = getfield(params.hp, Symbol(key))[3]
+                end
                 beta, P_beta = measurement_update(
-                    beta, P_beta, target_norm, H_update, target_cov_norm + input_cov_norm
+                    beta, P_beta, target_norm, H_update, Diagonal(noise_vect .^ 2)
                 )
+                push!(beta_hist, beta)
             end
             # @info "Marginal noise during weight update : $(sqrt.(Diagonal(target_cov_norm + input_cov_norm)))"
 
@@ -219,7 +226,7 @@ function hybrid_zupt_aided_ins(
             marg_std = zeros(Float64, p)
             target_cov = target_cov_norm + input_cov_norm
             for i in 1:p
-                marg_std[i] = sqrt(target_cov[i, i])
+                marg_std[i] = sqrt(target_cov_norm[i, i])
             end
             push!(true_outputs["t"], inertial.t[prev_step])
             push!(true_outputs["output"], target)
@@ -241,7 +248,8 @@ function hybrid_zupt_aided_ins(
             # @info "difference $(vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]))"
             # Update with training data when gt is supposedly available
             if gt_available[prev_step] && gt_available[curr_step]
-
+                @info "step_ins_aug before GT update" step_ins_aug
+                @info "target" target
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
@@ -258,6 +266,9 @@ function hybrid_zupt_aided_ins(
                     dx[:, curr_step],
                     quat[:, curr_step]
                 )
+                # x[1:3, curr_step] = gt_traj.pos[:, curr_step]
+                # quat[:, curr_step] = matrix_to_quat(gt_traj.R_nb[:, :, curr_step])
+
 
                 # @info "x after update $(x[[1,2,3,9], curr_step])"
 
@@ -335,15 +346,13 @@ function hybrid_zupt_aided_ins(
                 # Compute combined uncertainty from GP and input
                 y_cov = R_aug_nb * (pred_cov + input_cov_norm) * R_aug_nb'
 
-                @info "Prediction marginal uncertainty : $(sqrt.(Diagonal(y_cov)))"
-
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
                     y_estim,
                     H_correction,
-                    y_cov
+                    y_cov .* 1e-4
                 )
 
                 # -------- Compensate error -------------
@@ -354,10 +363,7 @@ function hybrid_zupt_aided_ins(
                 )
 
                 # -------- Save prediction --------------
-                pred_marg_std = zeros(Float64, p)
-                for i in 1:p
-                    pred_marg_std[i] = sqrt(y_cov[i, i])
-                end
+                pred_marg_std = sqrt.(diag(y_cov))
                 push!(pred_outputs["t"], inertial.t[prev_step])
                 push!(pred_outputs["output"], y_estim)
                 if !haskey(pred_outputs, "output_std")
@@ -399,5 +405,7 @@ function hybrid_zupt_aided_ins(
     end
     pred_outputs["t"] = pred_outputs["t"][1:end-1]
 
-    return zupt, zupt_ins_traj, step_seg, CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs)
+    beta_hist = hcat(beta_hist...)
+
+    return zupt, zupt_ins_traj, step_seg, CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs), beta_hist, P_beta
 end
