@@ -47,8 +47,6 @@ function hybrid_zupt_aided_ins(
              feature_type == TWOD_STEP_DT ? 3 :   # 2 step dims + Δt
              feature_type == THREED_STEP_DT ? 4 : 3
 
-
-
     seg_start = 2
     seg_end = N
     step_detector = StepDetector()
@@ -83,7 +81,7 @@ function hybrid_zupt_aided_ins(
     sigma_pos_gt = 1e-2
     sigma_ψ_gt = 1e-3
     sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt) # σ_GTx σ_GTy σ_GT_z σ_GTψ
-    sigma_dt = 1e-5
+    sigma_dt = 1e-3
 
 
     true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
@@ -229,11 +227,11 @@ function hybrid_zupt_aided_ins(
                     noise_vect[idx] = getfield(params.hp, Symbol(key))[3]
                 end
                 beta, P_beta = measurement_update(
-                    beta, P_beta, target_norm, H_update, Diagonal(noise_vect .^ 2)
+                    beta, P_beta, target_norm, H_update, Diagonal(noise_vect) * tt_target_cov_norm ./ tr(tt_target_cov_norm) * Diagonal(noise_vect)
                 )
                 push!(beta_hist, beta)
                 append_io!(training_inputs, inertial.t[prev_step], feature_estimate_norm, sqrt.(diag(feature_cov_norm)))
-                append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(tt_target_cov_norm)))
+                append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(Diagonal(noise_vect) * tt_target_cov_norm ./ tr(tt_target_cov_norm) * Diagonal(noise_vect))))
 
             end
             # @info "Marginal noise during weight update : $(sqrt.(Diagonal(target_cov_norm + input_cov_norm)))"
@@ -345,7 +343,7 @@ function hybrid_zupt_aided_ins(
                 pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm * Diagonal(params.output_stats[2])
 
                 # Compute combined uncertainty from GP and input
-                y_cov = R_aug_nb * (pred_cov) * R_aug_nb'
+                y_cov = R_aug_nb * (pred_cov + input_cov_norm) * R_aug_nb'
 
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
@@ -353,7 +351,7 @@ function hybrid_zupt_aided_ins(
                     P[:, :, curr_step],
                     y_estim,
                     H_correction,
-                    Diagonal(y_cov) .* 1e-4
+                    y_cov .* 1e-4
                 )
 
                 # -------- Compensate error -------------
