@@ -42,7 +42,7 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 1000, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 200, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )
@@ -52,7 +52,7 @@ zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
 
-zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], _ = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
+zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], tr_input_gp, tr_target_gp = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
@@ -80,11 +80,19 @@ fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned)
 fig_out_hsgp = HybridZuptInsJl.plot_regression_results(pred_outputs, true_outputs["model + GP"])
 
-fig_in = HybridZuptInsJl.plot_input_features(hcat(tr_input["input"]...), tr_input["t"])
+fig_in_gp = HybridZuptInsJl.plot_input_features(hcat(tr_input_gp["input"]...), tr_input_gp["t"])
+fig_in_hsgp = HybridZuptInsJl.plot_input_features(hcat(tr_input["input"]...), tr_input["t"])
+
 tr_correctiondata = HybridZuptInsJl.CorrectionOutput(
     tr_target["t"], hcat(tr_target["output"]...)
 )
-fig_out = HybridZuptInsJl.plot_regression_results(tr_correctiondata)
+tr_correctiondata_gp = HybridZuptInsJl.CorrectionOutput(
+    tr_target_gp["t"], hcat(tr_target_gp["output"]...)
+)
+fig_out = HybridZuptInsJl.plot_regression_results(OrderedDict(
+    "GP" => tr_correctiondata_gp,
+    "HSGP" => tr_correctiondata
+))
 
 # fig_2D = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned; samples=1000000)
 # fig_3d = HybridZuptInsJl.plot_trajectory_3d(hsgp_ins_traj, gt_traj_aligned; samples=15000)

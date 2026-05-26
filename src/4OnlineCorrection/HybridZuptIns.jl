@@ -261,8 +261,6 @@ function hybrid_zupt_aided_ins(
             # @info "difference $(vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]))"
             # Update with training data when gt is supposedly available
             if gt_available[prev_step] && gt_available[curr_step]
-                @info "step_ins_aug before GT update" step_ins_aug
-                @info "target" target
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
@@ -313,7 +311,6 @@ function hybrid_zupt_aided_ins(
 
                 # Step covariance 
                 step_ins_aug_cov = R_aug_nb' * ΔP[[1, 2, 3, 9], [1, 2, 3, 9]] * R_aug_nb
-                @info "Augmented step covariance : $(sqrt.(Diagonal(step_ins_aug_cov)))"
                 # ------------ Construct Covariance from Input Feature uncertainty ---------
                 feature_cov_selector = Dict{FeatureType,Function}(
                     THREED_STEP => () -> step_ins_aug_cov[1:3, 1:3],
@@ -354,6 +351,7 @@ function hybrid_zupt_aided_ins(
 
                 # Compute prediction covariance
                 pred_cov_norm = Φ * P_beta * Φ'
+                @info "Predictive covariance : " pred_cov_norm
                 pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm * Diagonal(params.output_stats[2])
 
                 # Compute combined uncertainty from GP and input

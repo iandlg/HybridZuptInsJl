@@ -48,6 +48,12 @@ function hybrid_zupt_aided_ins_gp(
     pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
         "output" => Vector{Float64}[], "t" => Float64[]
     )
+    training_inputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "input" => Vector{Float64}[], "t" => Float64[]
+    )
+    training_targets = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
 
     seg_start = 2
     seg_end = N
@@ -195,6 +201,11 @@ function hybrid_zupt_aided_ins_gp(
                 # Accumulate normalised observations
                 X_train = hcat(X_train, feature_norm)       # d_feat × n
                 Y_train = hcat(Y_train, target_norm)        # p      × n
+                push!(training_targets["output"], target_norm)
+                push!(training_targets["t"], inertial.t[prev_step])
+                push!(training_inputs["input"], feature_norm)
+                push!(training_inputs["t"], inertial.t[prev_step])
+
 
                 # Refit all GPs on the growing dataset
                 for i in 1:p
@@ -306,5 +317,5 @@ function hybrid_zupt_aided_ins_gp(
 
     return zupt, zupt_ins_traj, step_seg,
     CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs),
-    gps   # returned instead of beta_hist/P_beta
+    training_inputs, training_targets
 end
