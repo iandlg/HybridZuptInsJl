@@ -96,7 +96,6 @@ end
 
 # --------------------------------------------------------------------------
 # Convenience accessors that return mutable vectors from the tuple fields
-# (mimicking the Python `@property` methods).
 # --------------------------------------------------------------------------
 init_pos_array(cfg::InsConfig) = collect(cfg.init_pos)
 sigma_acc_array(cfg::InsConfig) = collect(cfg.sigma_acc)

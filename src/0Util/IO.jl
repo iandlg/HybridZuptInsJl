@@ -9,7 +9,7 @@ Otherwise returns nothing.
 """
 function _convert_hyperparams_to_struct_list(
     hyperparams_dict::Dict{String,Union{Matrix{Float64},Nothing}}
-)
+)::Union{Nothing,Vector{SeHyperparams}}
     # Check if we have any hyperparams
     has_any = any(!isnothing(v) for v in values(hyperparams_dict))
     if !has_any

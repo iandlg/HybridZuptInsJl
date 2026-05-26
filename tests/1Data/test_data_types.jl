@@ -17,3 +17,6 @@ println("GT:   $(length(gt))  → $(length(gt_ov))  samples")
 display(imu.u[:, 10000])
 display(gt.R_nb[:, :, 10000])
 display(gt.pos[:, 10000])         # x
+
+fig = HybridZuptInsJl.plot_inertial_data(imu_ov)
+display(fig)   # opens an interactive window

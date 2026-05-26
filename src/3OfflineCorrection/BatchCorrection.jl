@@ -1,9 +1,12 @@
 """
-    compute_training_io(traj::Trajectory, traj_gt::Trajectory, step_seg::Vector{Int};
-                        ref_frame::ReferenceFrame = BODY) ->
-                        (output_yawdiff::Vector{Float64},
-                         output_pos::Matrix{Float64},
-                         input_feature::Matrix{Float64})
+    compute_training_io(
+    traj::Trajectory,
+    traj_gt::Trajectory,
+    step_seg::Vector{Int};
+    ref_frame::ReferenceFrame = BODY,
+    feature_type::FeatureType = THREED_STEP
+) ->
+(output::CorrectionIO, input_feature::Matrix{Float64})
 
 Compute training inputs and outputs for GP regression from a pair of trajectories.
 
@@ -15,8 +18,8 @@ Compute training inputs and outputs for GP regression from a pair of trajectorie
 - `feature_type` : Type of feature to use during the regression (`THREED_STEP` ,`TWOD_STEP_DT`, `THREED_STEP_DT`).
 
 # Returns
-- `ouputs`: Dictionnary with `yaw` and `pos` keys .
-- `input_feature`: Inertial step vectors in `ref_frame`, size `3 x (n_steps-1)`.
+- `output`: CorrectionIO with position (x,y,z) and yaw corrections at step times.
+- `input_feature`: Inertial step vectors in `ref_frame`, size varies by feature_type.
 
 # Throws
 - `ArgumentError` if trajectories are not temporally compatible (requires `TimeSeries.is_compatible`).
@@ -27,10 +30,11 @@ function compute_training_io(
     step_seg::Vector{Int};
     ref_frame::ReferenceFrame=BODY,
     feature_type::FeatureType=THREED_STEP
-)
+)::Tuple{CorrectionIO,Matrix{Float64}}
     if !is_compatible(traj, traj_gt)
         throw(ArgumentError("TimeSeries must be compatible."))
     end
+    Nsteps = length(step_seg) - 1
 
     # Unwrap yaw angles to avoid discontinuities
     euler_nb = matrix_to_euler(traj.R_nb)
@@ -39,11 +43,11 @@ function compute_training_io(
     inertial_yaw = unwrap(euler_nb[3, :])   # row 3 = yaw (since 1: roll, 2: pitch, 3: yaw)
     gt_yaw = unwrap(euler_nb_gt[3, :])
 
-    # Defin output dictionnary
-    outputs = Dict{String,Union{Vector{Float64},Matrix{Float64}}}()
+    # Create output array
+    outputs = zeros(Float64, (4, Nsteps))
 
     # Yaw difference over steps: diff(gt) - diff(inertial)
-    outputs["yaw"] = diff(gt_yaw[step_seg]) - diff(inertial_yaw[step_seg])   # length n_steps-1
+    outputs[4, :] = diff(gt_yaw[step_seg]) - diff(inertial_yaw[step_seg])
 
     # Select step‑vector function based on reference frame
     funs = Dict(
@@ -57,40 +61,36 @@ function compute_training_io(
     ins_step = funs[ref_frame](traj, step_seg)      # 3 x (n_steps-1)
     gt_steps = funs[ref_frame](traj_gt, step_seg)
 
-    outputs["pos"] = gt_steps - ins_step
-
-    # Time difference between consecutive step indices
-    Δt = diff(traj.t[step_seg])   # length (n_steps-1)
+    outputs[1:3, :] = gt_steps - ins_step
 
     # Feature selectors based on the enum
     feature_selectors = Dict(
         THREED_STEP => () -> ins_step,                             # 3 × N
-        TWOD_STEP_DT => () -> vcat(ins_step[1:2, :], Δt'),          # 3 × N (x, y, dt)
-        THREED_STEP_DT => () -> vcat(ins_step, Δt'),                  # 4 × N (x, y, z, dt)
+        TWOD_STEP_DT => () -> vcat(ins_step[1:2, :], diff(traj.t[step_seg])'),          # 3 × N (x, y, dt)
+        THREED_STEP_DT => () -> vcat(ins_step, diff(traj.t[step_seg])'),                  # 4 × N (x, y, z, dt)
     )
     input_feature = feature_selectors[feature_type]()
-    @show input_feature[:, 5]
 
-    return outputs, input_feature
+    # Create CorrectionIO at step boundaries
+    correction_output = CorrectionIO(traj.t[step_seg[1:end-1]], outputs, nothing)
+
+    return correction_output, input_feature
 end
 
 """
     apply_corrections(
         traj::Trajectory,
-        yawdiff_correction::Vector{Float64},
-        pos_correction::Matrix{Float64},
+        corrections::Union{CorrectionIO, Matrix{Float64}},
         segs::Vector{Int};
         ref_frame::ReferenceFrame = BODY
     ) -> Trajectory
 
-Apply yaw and position corrections to a full inertial trajectory, producing a corrected
+Apply position and yaw corrections to an inertial trajectory, producing a corrected
 trajectory sampled at the step segment indices.
 
 # Arguments
 - `traj`: Complete inertial trajectory to correct.
-- `yawdiff_correction`: Per‑step yaw correction (radians), length `n_steps-1`.
-- `pos_correction`: Per‑step position correction (metres) in the chosen reference frame,
-  size `3 x (n_steps-1)`.
+- `corrections`: CorrectionIO or (4 x n_steps) matrix with [pos1, pos2, pos3, yaw] corrections.
 - `segs`: Indices marking step boundaries in `traj` (length `n_steps`).
 - `ref_frame`: Reference frame for step vector computation (`BODY` or `HEADING`).
 
@@ -99,18 +99,26 @@ trajectory sampled at the step segment indices.
 """
 function apply_corrections(
     traj::Trajectory,
-    yawdiff_correction::Vector{Float64},
-    pos_correction::Matrix{Float64},
+    corrections::CorrectionIO,
     segs::Vector{Int};
     ref_frame::ReferenceFrame=BODY
-)
+)::Trajectory
+    apply_corrections(traj, corrections.data, segs; ref_frame=ref_frame)
+end
+
+function apply_corrections(
+    traj::Trajectory,
+    predictions::Matrix{Float64},
+    segs::Vector{Int};
+    ref_frame::ReferenceFrame=BODY
+)::Trajectory
     n_steps = length(segs)
     # Extract Euler angles at step boundaries (3 x n_samples)
     euler = matrix_to_euler(traj.R_nb)
     yaw = euler[3, :]
     unwrap!(yaw)
 
-    diff_yaw = diff(yaw[segs]) + yawdiff_correction
+    diff_yaw = diff(yaw[segs]) + predictions[4, :]
     # Reconstruct cumulative yaw: start with first yaw, then cumsum of diffs
     new_yaws = cumsum(vcat([yaw[segs[1]]], diff_yaw))
     new_yaws = mod.(new_yaws .+ π, 2π) .- π
@@ -145,7 +153,7 @@ function apply_corrections(
     pos_out[:, 1] = traj.pos[:, segs[1]]
 
     for k in 2:n_steps
-        pos_out[:, k] = new_R[:, :, k-1] * (steps[:, k-1] + pos_correction[:, k-1]) + pos_out[:, k-1]
+        pos_out[:, k] = new_R[:, :, k-1] * (steps[:, k-1] + predictions[1:3, k-1]) + pos_out[:, k-1]
     end
 
     # --- Build output trajectory ------------------------------------------------
@@ -263,20 +271,30 @@ function compute_gp_corrections(
     n_restarts_optimizer::Int=5,
     log_kern_bounds::Vector{Vector{Float64}}=[[-1.0, -3.0], [3.0, 2.0]],
     log_noise_bounds::Vector{Vector{Float64}}=[[-1.71], [-0.1]],
-    method::Any=Optim.LBFGS()
-)
+    method::Any=Optim.LBFGS(),
+    normalize_y::Bool=true,
+    normalize_x::Bool=true
+)::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
 
     D = 10
     y_testing_gp = zeros(n_samples)
+    y_testing_gp_std = zeros(n_samples)
     hyperparams = zeros(D, 4)
 
     # --- scale features ---------------------------------------------------
-    μ = mean(x, dims=2)[:]
-    sigma = std(x, dims=2)[:]
-    sigma[sigma.==0.0] .= 1.0
-    x_scaled = (x .- μ) ./ sigma
+    x_μ = mean(x, dims=2)[:]
+    x_σ = std(x, dims=2)[:]
+    x_σ[x_σ.==0.0] .= 1.0
+    x_scaled = normalize_x ? (x .- x_μ) ./ x_σ : x
+
+    # --- scale outptut ---------------------------------------------------
+    y_μ = mean(y)
+    y_σ = std(y)
+    y_σ = y_σ == 0.0 ? 1.0 : y_σ
+    y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
+
 
     log_ℓ, log_σ_f, log_σ_n = 0.0, 0.0, -1.0
     if !isnothing(hyperparameter)
@@ -303,7 +321,7 @@ function compute_gp_corrections(
         isempty(train_ind) && continue
 
         x_train = x_scaled[:, train_ind]
-        y_train = y[train_ind]
+        y_train = y_scaled[train_ind]
         x_test = x_scaled[:, test_ind]
 
         gp = GaussianProcesses.GP(x_train, y_train,
@@ -316,26 +334,29 @@ function compute_gp_corrections(
             # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
         end
 
-        y_pred, _ = GaussianProcesses.predict_y(gp, x_test)
-        y_testing_gp[test_ind] = y_pred
+        y_pred, y_var = GaussianProcesses.predict_f(gp, x_test)
+        if i == 1
+            @info "Predicted Variance" y_var
+        end
+
+        y_testing_gp[test_ind] = normalize_y ? y_pred .* y_σ .+ y_μ : y_pred
+        y_testing_gp_std[test_ind] = normalize_y ? sqrt.(y_var) .* y_σ : sqrt.(y_var)
 
         log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
 
         @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
         hyperparams[i, :] = [gp.target, exp(log_σ_f), exp(log_ℓ), exp(log_σ_n)]
-
-        #                     lml        sigma_f        len_scale    sigma_n
     end
 
-    return y_testing_gp, hyperparams
+    return y_testing_gp, y_testing_gp_std, hyperparams
 end
 
 """
     compute_hsgp_corrections(
-    x::Matrix{Float64}, y::Vector{Float64};
-    m::Int=25, hp::Vector{Float64},
-    margin::Float64=1.8
-)
+        x::Matrix{Float64}, y::Vector{Float64};
+        m::Int=25, hp::Vector{Float64},
+        margin::Float64=1.8
+    )
 
 Estimate output corrections using Hilbert Space Gaussian Process (HSGP) approximation
 with 10‑fold cross‑validation. Uses fixed kernel hyperparameters (no optimisation).
@@ -356,20 +377,33 @@ function compute_hsgp_corrections(
     x::Matrix{Float64}, y::Vector{Float64};
     m::Int=25,
     hyperparameter::Vector{Float64}=[0.0, 0.0, -1.0],
-    margin::Float64=1.8
-)
+    margin::Float64=1.8,
+    normalize_x::Bool=true,
+    normalize_y::Bool=true
+)::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     d, N = size(x)
     @assert length(y) == N
 
-    # 1. Scale features to zero mean, unit variance per dimension
-    μ = mean(x, dims=2)[:]
-    σ = std(x, dims=2)[:]
-    σ[σ.==0.0] .= 1.0
-    x_scaled = (x .- μ) ./ σ      # (d, N)
+    # --- scale features ---------------------------------------------------
+    x_μ = mean(x, dims=2)[:]
+    x_σ = std(x, dims=2)[:]
+    x_σ[x_σ.==0.0] .= 1.0
+    x_scaled = normalize_x ? (x .- x_μ) ./ x_σ : x
+
+    # --- scale outptut ---------------------------------------------------
+    y_μ = mean(y)
+    y_σ = std(y)
+    y_σ = y_σ == 0.0 ? 1.0 : y_σ
+    y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
 
     # 2. Domain bounds L = margin * max(|x_scaled|) per dimension
     L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
-    @show L_vec
+
+    z_thresh = 10.0
+    mask = all(x_scaled .<= z_thresh, dims=1)[:]   # (n,)
+    L_vec = margin * maximum(abs, x_scaled[:, mask], dims=2)[:] # (d,)
+
+    @info "HSGP input domain" L_vec
     # 3. Compute eigenvalues (per‑dimension components)
     eigvals = calc_eigenvalues(L_vec, m, d)   # (m, d)
 
@@ -382,6 +416,7 @@ function compute_hsgp_corrections(
     # 5. 10‑fold cross‑validation
     D_folds = 10
     predictions = zeros(N)
+    predictions_std = zeros(N)
 
     for fold in 1:D_folds
         test_start = floor(Int, (fold - 1) * N / D_folds) + 1
@@ -393,22 +428,31 @@ function compute_hsgp_corrections(
         n_train = length(train_ind)
 
         x_train = x_scaled[:, train_ind]    # (d, n_train)
-        y_train = y[train_ind]
+        y_train = y_scaled[train_ind]
         x_test = x_scaled[:, test_ind]     # (d, n_test)
 
         # 6. Basis matrices
         phi = calc_eigenvectors(x_train', L_vec, eigvals)       # (n_train, m)
         phi_star = calc_eigenvectors(x_test', L_vec, eigvals)   # (n_test, m)
 
-        # 7. Build A = ΦᵀΦ + σ_n² Λ⁻¹   where Λ = diag(psd)
+        # 3. Build matrix A = var_n * diag(1/psd) + ΦᵀΦ
         A = hyperparameter[3]^2 * Diagonal(1.0 ./ psd) + phi' * phi                    # (m, m)
 
-        # 8. Solve A α = Φᵀ y
-        rhs = phi' * y_train
-        alpha = A \ rhs   # using backslash (Cholesky will be used internally)
+        # 4. Solve A α = Φᵀ y
+        α = A \ (phi' * y_train)                                         # (m,)
 
-        # 9. Predict on test fold
-        predictions[test_ind] = phi_star * alpha
+        # 5. Posterior mean
+        hsgp_mean = phi_star * α                                         # (N_test,)
+
+        # 6. Posterior covariance: var_n * Φ_* * A^{-1} * Φ_*ᵀ
+        # Solve A * W = Φ_*ᵀ  => W = A \ phi_star'
+        W = A \ phi_star'                                                # (m, N_test)
+
+        hsgp_var = hyperparameter[3]^2 * vec(sum(phi_star .* W', dims=2))         # (N_test,)
+        hsgp_std = sqrt.(hsgp_var)
+
+        predictions[test_ind] = normalize_y ? hsgp_mean .* y_σ .+ y_μ : hsgp_mean
+        predictions_std[test_ind] = normalize_y ? hsgp_std .* y_σ : hsgp_std
     end
 
     # 10. Dummy hyperparameter matrix (for interface compatibility)
@@ -417,7 +461,7 @@ function compute_hsgp_corrections(
         dummy_hyper[i, :] = vcat([0.0], hyperparameter[:])
     end
 
-    return predictions, dummy_hyper
+    return predictions, predictions_std, dummy_hyper
 end
 
 function compute_static_corrections(
@@ -425,76 +469,106 @@ function compute_static_corrections(
     y::Vector{Float64};
     hyperparameter::Union{Nothing,Vector{Float64}}=nothing,
     n_restarts_optimizer::Int=5
-)
+)::Tuple{Vector{Float64},Nothing,Nothing}
     D = 10
     _, n_samples = size(x)
-    y_pred = fill(0.0, n_samples)
-    for i in 1:D
-        test_start = floor(Int, (i - 1) * n_samples / D) + 1
-        test_end = floor(Int, i * n_samples / D)
-        train_ind = vcat(1:test_start-1, test_end+1:n_samples)
-        test_ind = test_start:test_end
-        y_pred[test_ind] = fill(mean(y[train_ind]), length(test_ind))
-    end
-    return y_pred, nothing
+    # y_pred = fill(0.0, n_samples)
+    # for i in 1:D
+    #     test_start = floor(Int, (i - 1) * n_samples / D) + 1
+    #     test_end = floor(Int, i * n_samples / D)
+    #     train_ind = vcat(1:test_start-1, test_end+1:n_samples)
+    #     test_ind = test_start:test_end
+    #     y_pred[test_ind] = fill(mean(y[train_ind]), length(test_ind))
+    # end
+    y_pred = fill(mean(y), n_samples)
+    return y_pred, nothing, nothing
 end
 """
     compute_corrections(
-    input_feature::Matrix{Float64},
-    output_yawdiff::Vector{Float64},
-    output_pos::Matrix{Float64},
-    correction_method::Function;
-    method_kwargs...
-    ) -> Dict{String,Any}
+        input_feature::Matrix{Float64},
+        outputs::CorrectionIO,
+        correction_method::Function,
+        hyperparameters::Union{Nothing,SeHyperparams}=nothing;
+        feature_type::FeatureType=THREED_STEP,
+        kwargs...
+    ) -> Tuple{CorrectionIO, Union{Nothing, Vector{SeHyperparams}}}
 
 Apply a given correction method (e.g. GP, static mean) to the yaw and each position
-component, returning a dictionary of results.
+component, returning predictions as CorrectionIO and hyperparameters.
 
 # Arguments
 - `input_feature`: input features, size `(n_features, n_samples)`.
-- `output_yawdiff`: yaw target, length `n_samples`.
-- `output_pos`: position targets, size `(3, n_samples)`.
-- `correction_method`: function with signature `(x::Matrix{Float64}, y::Vector{Float64}; kwargs...) -> (predictions::Vector{Float64}, hyperparams::Any)`.
-- `method_kwargs`: any extra keyword arguments passed to `correction_method` (e.g. `n_restarts_optimizer`, `kernel`, etc.).
+- `outputs`: Target values, either CorrectionIO.
+- `correction_method`: function with signature `(x::Matrix{Float64}, y::Vector{Float64}; kwargs...) -> (predictions::Vector{Float64}, predictions_std, hyperparams::Any)`.
+- `hyperparameters`: Optional SeHyperparams for fixed kernel parameters.
+- `feature_type`: Type of input features (THREED_STEP, TWOD_STEP_DT, THREED_STEP_DT).
+- `kwargs`: Extra keyword arguments passed to `correction_method`.
 
 # Returns
-- `predictions`: Dictionary with keys `yaw` `pos`
-- `hyperparameters` : Dictionary with keys  `yaw` `pos_1` ...
+- `predictions`: CorrectionIO with position (x,y,z) and yaw corrections, including uncertainties if available.
+- `hyperparameters`: Vector of SeHyperparams structs (one per fold/method invocation).
 """
 function compute_corrections(
     input_feature::Matrix{Float64},
-    outputs::Dict{String,Union{Vector{Float64},Matrix{Float64}}},
+    outputs::CorrectionIO,
     correction_method::Function,
     hyperparameters::Union{Nothing,SeHyperparams}=nothing;
+    feature_type::FeatureType=THREED_STEP,
     kwargs...
-)
+)::Tuple{CorrectionIO,Union{Nothing,Vector{SeHyperparams}}}
 
     n_samples = size(input_feature, 2)
-    @assert length(outputs["yaw"]) == n_samples
-    @assert size(outputs["pos"], 2) == n_samples
+    @assert length(outputs) == n_samples
 
-    predictions = Dict{String,Union{Vector{Float64},Matrix{Float64}}}()
+    hp = hyperparameters
+    if isnothing(hyperparameters)
+        hp = SeHyperparams(
+            zeros(Float64, 3), zeros(Float64, 3), zeros(Float64, 3), zeros(Float64, 3)
+        )
+    end
+
+    predictions = zeros(Float64, size(outputs.data))
+    predictions_std = nothing
     hyperparams_dict = Dict{String,Union{Matrix{Float64},Nothing}}()
 
     # Yaw correction
-    @info "Computing Yaw corrections"
-    y_pred, hyper = correction_method(input_feature, outputs["yaw"]; hyperparameter=hyperparameters.yaw, kwargs...)
-    predictions["yaw"] = y_pred
-    hyperparams_dict["yaw"] = hyper
+    @info "------------ Computing Yaw corrections ---------------"
+    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp.yaw, kwargs...)
+    predictions[4, :] = yaw_pred
+    if !isnothing(yaw_std)
+        if isnothing(predictions_std)
+            predictions_std = zeros(Float64, size(outputs.data))
+        end
+        predictions_std[4, :] = yaw_std
+        @info "Yaw Standard deviation" yaw_std
+    end
+
     # Position corrections
-    predictions["pos"] = Matrix{Float64}(undef, 3, n_samples)
     for d in 1:3
-        @info "Computing pos_$d corrections"
-        d_hyp = getfield(hyperparameters, Symbol("pos_$d"))
-        y_pred, hyper = correction_method(input_feature, outputs["pos"][d, :]; hyperparameter=d_hyp, kwargs...)
-        predictions["pos"][d, :] = y_pred
-        hyperparams_dict["pos_$d"] = hyper
+        @info "--------------- Computing pos_$d corrections ---------------"
+        if feature_type == TWOD_STEP_DT && d == 3 # Avoid ill posed problem in x,y inputs
+            hyperparams_dict["pos_$d"] = nothing
+            @info "$feature_type , $d"
+            continue
+        end
+
+        d_hyp = getfield(hp, Symbol("pos_$d"))
+        pos_pred, pos_std, hyperparams_dict["pos_$d"] = correction_method(input_feature, outputs.data[d, :]; hyperparameter=d_hyp, kwargs...)
+        predictions[d, :] = pos_pred
+        if !isnothing(pos_std)
+            if isnothing(predictions_std)
+                predictions_std = zeros(Float64, size(outputs.data))
+            end
+            predictions_std[d, :] = pos_std
+        end
     end
 
     # Convert hyperparams to list of SeHyperparams structs per fold
     hyperparams = _convert_hyperparams_to_struct_list(hyperparams_dict)
 
-    return predictions, hyperparams
+    # Create and return CorrectionIO
+    pred_output = CorrectionIO(outputs.t, predictions, predictions_std)
+    return pred_output, hyperparams
 end
 
 

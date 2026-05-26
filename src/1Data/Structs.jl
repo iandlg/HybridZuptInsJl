@@ -1,28 +1,113 @@
+"""
+    CorrectionIO <: AbstractTimeSeries
+
+Mutable struct for storing correction inputs and outputs from GP, HSGP, or online correction methods.
+
+# Fields
+- `t::Vector{Float64}`: Time stamps (strictly increasing)
+- `data::Matrix{Float64}`: Correction IO, size (n_channels, n_steps) where:
+- `data_std::Union{Nothing, Matrix{Float64}}`: Optional standard deviations with same shape as data
+"""
+mutable struct CorrectionIO <: AbstractTimeSeries
+    t::Vector{Float64}
+    data::Matrix{Float64}
+    data_std::Union{Nothing,Matrix{Float64}}
+
+    function CorrectionIO(
+        t::Vector{Float64},
+        data::Matrix{Float64},
+        data_std::Union{Nothing,Matrix{Float64}}=nothing
+    )
+        length(size(t)) == 1 || throw(ArgumentError("t must be 1-D"))
+        all(diff(t) .> 0) || throw(ArgumentError("t must be strictly increasing"))
+        length(t) == size(data, 2) || throw(ArgumentError("length(t) must match size(output,2)"))
+
+        if !isnothing(data_std)
+            size(data_std) == size(data) ||
+                throw(ArgumentError("output_std must have same shape as output"))
+        end
+
+        new(t, data, data_std)
+    end
+end
+
+function CorrectionIO(n_channel::Int, std::Bool)
+    CorrectionIO(
+        Float64[],
+        Matrix{Float64}(undef, n_channel, 0),
+        std ? Matrix{Float64}(undef, n_channel, 0) : nothing
+    )
+end
+
+function CorrectionIO(d::Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}})
+    t = d["t"]
+    output = d["output"]
+    output_std = get(d, "output_std", nothing)
+
+    # Handle flat vector case: treat as single time step or single output row
+    output_mat = output isa Vector ? hcat(output...) : output
+    output_std_mat = isnothing(output_std) ? nothing :
+                     output_std isa Vector ? hcat(output_std...) : output_std
+
+    if isempty(output_mat)
+        return nothing
+    end
+
+    return CorrectionIO(t, output_mat, output_std_mat)
+end
+
+function Base.getindex(s::CorrectionIO, mask::AbstractVector{Bool})
+    CorrectionIO(
+        s.t[mask],
+        s.data[:, mask],
+        isnothing(s.data_std) ? nothing : s.data_std[:, mask]
+    )
+end
+
+function Base.getindex(s::CorrectionIO, idx::AbstractVector{<:Integer})
+    CorrectionIO(
+        s.t[idx],
+        s.data[:, idx],
+        isnothing(s.data_std) ? nothing : s.data_std[:, idx]
+    )
+end
+
+function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std::Union{Nothing,Vector{Float64}}=nothing)
+    n_channel = size(s.data, 1)
+    length(data) == n_channel || throw("Wrong number of data channels.")
+    isempty(s.t) || s.t[end] < t || throw("Time series must be strictly increasing.")
+    if !isnothing(data_std)
+        length(data_std) == n_channel || throw("Wrong number of std channels")
+        s.data_std = hcat(s.data_std, data_std)
+    end
+    push!(s.t, t)
+    s.data = hcat(s.data, data)
+end
+
 struct SeHyperparams
-    yaw::Vector{Float64}    # [σ_f, length_scale, σ_n] for yaw
     pos_1::Vector{Float64}  # for x position
     pos_2::Vector{Float64}  # for y position
     pos_3::Vector{Float64}  # for z position
+    yaw::Vector{Float64}    # [σ_f, length_scale, σ_n] for yaw
 
     # Inner constructor to enforce length 3
-    function SeHyperparams(yaw, pos_0, pos_1, pos_2)
-        for v in (yaw, pos_0, pos_1, pos_2)
+    function SeHyperparams(pos_0, pos_1, pos_2, yaw)
+        for v in (pos_0, pos_1, pos_2, yaw)
             if length(v) != 3
                 throw(ArgumentError("Each hyperparameter vector must have exactly 3 elements"))
             end
         end
-        new(Vector{Float64}(yaw), Vector{Float64}(pos_0),
-            Vector{Float64}(pos_1), Vector{Float64}(pos_2))
+        new(Vector{Float64}(pos_0), Vector{Float64}(pos_1), Vector{Float64}(pos_2), Vector{Float64}(yaw))
     end
 end
 
 
 function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     SeHyperparams(
-        Float64.(d["yaw"]),
         Float64.(d["pos_1"]),
         Float64.(d["pos_2"]),
-        Float64.(d["pos_3"])
+        Float64.(d["pos_3"]),
+        Float64.(d["yaw"]),
     )
 end
 
@@ -53,55 +138,65 @@ function to_json(
     end
 end
 
-
 struct HsgpParameters
-    hp::SeHyperparams          # kernel hyperparameters (σ_f, ℓ, σ_n) for each output
-    d::Int                     # input dimension
-    m::Int                     # number of basis functions
-    feature_std::Vector{Float64}   # per‑dimension standard deviation for scaling
-    feature_mean::Vector{Float64}  # per‑dimension mean for scaling
-    LL::Vector{Float64}            # domain half‑width per dimension (post‑scaling)
+    hp::SeHyperparams
+    d::Int
+    m::Int
+    LL::Vector{Float64}
+    input_stats::Vector{Vector{Float64}}   # [mean(d,), std(d,)]
+    output_stats::Vector{Vector{Float64}}  # [[mean_pos(3,), mean_yaw], [std_pos(3,), std_yaw]]
 
     function HsgpParameters(
         hp::SeHyperparams,
         d::Int,
         m::Int,
-        feature_std::Vector{Float64},
-        feature_mean::Vector{Float64},
-        LL::Union{Float64,Vector{Float64}}
+        LL::Union{Float64,Vector{Float64}};
+        input_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
+        output_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing
     )
-        # dimension checks
-        if length(feature_std) != d
-            throw(ArgumentError("length(feature_std) = $(length(feature_std)) != d = $d"))
-        end
-        if length(feature_mean) != d
-            throw(ArgumentError("length(feature_mean) = $(length(feature_mean)) != d = $d"))
-        end
-
-        # convert LL to vector of length d
         LL_vec = LL isa Float64 ? fill(LL, d) : copy(LL)
-        if length(LL_vec) != d
+        length(LL_vec) == d ||
             throw(ArgumentError("length(LL) = $(length(LL_vec)) != d = $d"))
+        any(LL_vec .<= 0) &&
+            throw(ArgumentError("All LL must be positive, got $LL_vec"))
+
+        _safe_std(v) = map(x -> abs(x) < eps(Float64) ? 1.0 : x, v)
+
+        input_stats_ = isnothing(input_stats) ? [zeros(d), ones(d)] :
+                       [input_stats[1], _safe_std(input_stats[2])]
+        length(input_stats_[1]) == d && length(input_stats_[2]) == d ||
+            throw(ArgumentError("input_stats vectors must have length d=$d"))
+
+        if isnothing(output_stats)
+            output_stats_ = [zeros(4), ones(4)]
+        else
+            mean_vec = convert(Vector{Float64}, output_stats[1])
+            std_vec = convert(Vector{Float64}, output_stats[2])
+            length(mean_vec) == 4 && length(std_vec) == 4 ||
+                throw(ArgumentError("output_stats vectors must have length 4 (3 pos + 1 yaw)"))
+            output_stats_ = [mean_vec, _safe_std(std_vec)]
         end
 
-        # optional: check positivity of LL
-        if any(LL_vec .<= 0)
-            throw(ArgumentError("All domain half‑widths (LL) must be positive, got $LL_vec"))
-        end
-
-        new(hp, d, m, feature_std, feature_mean, LL_vec)
+        new(hp, d, m, LL_vec, input_stats_, output_stats_)
     end
 end
 
-function HsgpParameters(d::Dict{String,Any})
+function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
     hp = SeHyperparams(Dict(d["hp"]))
+
+    input_stats = haskey(d, "input_stats") && !isnothing(d["input_stats"]) ?
+                  [Float64.(d["input_stats"][1]), Float64.(d["input_stats"][2])] : nothing
+
+    output_stats = haskey(d, "output_stats") && !isnothing(d["output_stats"]) ?
+                   [Float64.(d["output_stats"][1]), Float64.(d["output_stats"][2])] : nothing
+    @show output_stats
     HsgpParameters(
         hp,
         d["d"],
         d["m"],
-        Float64.(d["feature_std"]),
-        Float64.(d["feature_mean"]),
-        Float64.(d["LL"])
+        Float64.(d["LL"]);
+        input_stats=input_stats,
+        output_stats=output_stats
     )
 end
 
@@ -131,6 +226,14 @@ function from_json(::Type{T}, filename::AbstractString) where {T}
     raw = JSON.parsefile(filename)
     metadata = Dict(raw["metadata"])
     saved_at = raw["saved_at"]
-    obj = T(Dict(raw["params"]))
+
+    # Check if T is a Vector type
+    if T <: AbstractVector
+        # Extract element type and convert each element
+        ElementType = eltype(T)
+        obj = [ElementType(Dict(item)) for item in raw["params"]]
+    else
+        obj = T(Dict(raw["params"]))
+    end
     return obj, metadata, saved_at
 end

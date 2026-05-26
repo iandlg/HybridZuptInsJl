@@ -32,14 +32,16 @@ function measurement_update(state::AbstractVector{T}, stateCov::AbstractMatrix{T
     S = H * stateCov * H' + R                    # (dim_z, dim_z)
 
     # Kalman gain
-    K = stateCov * H' * inv(S)                   # (dim_x, dim_z)
+    K = stateCov * H' / S
 
     # Updated state
     updated_state = state + K * innovation        # (dim_x,)
 
-    # Updated covariance (Joseph form is stable, but here simple form)
-    Idimx = I(dim_x)
-    updated_cov = (Idimx - K * H) * stateCov          # (dim_x, dim_x)
+    # Joseph-form covariance update
+    # Idimx = Matrix{Float64}(I, dim_x, dim_x)
+    A = I - K * H
+
+    updated_cov = A * stateCov * A' + K * R * K'
 
     return updated_state, updated_cov
 end

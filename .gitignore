@@ -1,3 +1,6 @@
 data/*
+<<<<<<< HEAD
+=======
 out/3OfflineCorrection/OptimizationResults/*
+>>>>>>> id_jpl_ins_convention
 out/*

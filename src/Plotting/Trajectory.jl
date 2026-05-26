@@ -10,21 +10,16 @@ Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories
 # Returns
 - A `Figure` object (Makie figure).
 """
-function plot_groundtruth_vs_inertial_positions(trajs::Trajectory, gt_traj::Trajectory; samples::Int=20)
+function plot_groundtruth_vs_inertial_positions(
+    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory}; samples::Int=20)
     plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
 end
 
 function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
-    gt_traj::Trajectory;
+    gt_traj::Union{Nothing,Trajectory};
     samples::Int=20
 )
-    # Find common length (shortest trajectory)
-    n = size(gt_traj.pos, 2)
-    for traj in values(trajs)
-        n = min(n, size(traj.pos, 2))
-    end
-    n = min(n, samples)
 
     # Create figure and axis
     fig = Figure(size=(800, 600))
@@ -35,15 +30,18 @@ function plot_groundtruth_vs_inertial_positions(
         aspect=DataAspect(),
         xgridvisible=true)
 
-    # Ground truth line (dashed black)
-    lines!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
-        color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+    if !isnothing(gt_traj)
+        n = min(length(gt_traj.t), samples)
+        # Ground truth line (dashed black)
+        lines!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
+            color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
 
-    # Ground truth start (circle) and end (square)
-    scatter!(ax, [gt_traj.pos[1, 1]], [gt_traj.pos[2, 1]];
-        color=:black, marker=:circle, markersize=12, label="Start")
-    scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
-        color=:black, marker=:rect, markersize=12, label="End")
+        # Ground truth start (circle) and end (square)
+        scatter!(ax, [gt_traj.pos[1, 1]], [gt_traj.pos[2, 1]];
+            color=:black, marker=:circle, markersize=12, label="Start")
+        scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
+            color=:black, marker=:rect, markersize=12, label="End")
+    end
 
     # Colour palette for the estimated trajectories (tab10 equivalent)
     colors = Makie.wong_colors()   # gives 9 distinct colours (or use ColorSchemes.tab10)
@@ -53,6 +51,8 @@ function plot_groundtruth_vs_inertial_positions(
     for (i, (key, traj)) in enumerate(trajs)
         c = first(color_cycle)   # get next colour
         color_cycle = Iterators.drop(color_cycle, 1)
+
+        n = min(length(traj.t), samples)
 
         # Line
         lines!(ax, traj.pos[1, 1:n], traj.pos[2, 1:n];
@@ -114,8 +114,6 @@ function plot_position_rmse(trajs::Union{AbstractDict{String,Trajectory},Traject
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
         # Horizontal errors at each time step (squared, per sample)
         cum_rmse = rmse(traj, gt_traj)
-        @show typeof(cum_rmse)
-        @show size(cum_rmse)
 
         # Legend label: use traj.name if present, otherwise create from key
         if hasproperty(traj, :name) && !isnothing(traj.name)
@@ -221,6 +219,7 @@ Plot 3D positions (x, y, z) from one or more trajectories using an interactive G
 function plot_trajectory_3d(
     trajs::Union{Trajectory,AbstractDict{String,Trajectory}},
     gt_traj::Union{Nothing,Trajectory}=nothing;
+    samples::Int=1000000000,
     start_marker::Bool=true,
     end_marker::Bool=true)
     if trajs isa Trajectory
@@ -237,10 +236,9 @@ function plot_trajectory_3d(
 
     for (i, (label, traj)) in enumerate(trajs)
         pos = traj.pos
-        N = size(pos, 2)
         colour = colours[(i-1)%length(colours)+1]
-
-        lines!(ax, pos[1, :], pos[2, :], pos[3, :];
+        n = min(samples, size(pos, 2))
+        lines!(ax, pos[1, 1:n], pos[2, 1:n], pos[3, 1:n];
             color=colour, linewidth=2, label=label)
 
         if start_marker
@@ -249,7 +247,7 @@ function plot_trajectory_3d(
                 label=i == 1 ? "Start" : "")
         end
         if end_marker
-            scatter!(ax, [pos[1, end]], [pos[2, end]], [pos[3, end]];
+            scatter!(ax, [pos[1, n]], [pos[2, n]], [pos[3, n]];
                 color=:red, markersize=12, marker=:circle,
                 label=i == 1 ? "End" : "")
         end
@@ -257,7 +255,8 @@ function plot_trajectory_3d(
 
     if gt_traj !== nothing
         pos_gt = gt_traj.pos
-        lines!(ax, pos_gt[1, :], pos_gt[2, :], pos_gt[3, :];
+        n = min(samples, size(pos_gt, 2))
+        lines!(ax, pos_gt[1, 1:n], pos_gt[2, 1:n], pos_gt[3, 1:n];
             color=:black, linewidth=1.5, linestyle=:dash, label="Ground truth")
     end
 

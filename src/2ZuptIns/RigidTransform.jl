@@ -7,7 +7,7 @@ Compute the minimum absolute angular residual between two vectors, accounting fo
 
 # Arguments
 - `ins_vals`: Estimated angles (radians).
-- `gt_vals`: Ground‑truth angles (radians), same length as `ins_vals`.
+- `gt_vals`: Ground-truth angles (radians), same length as `ins_vals`.
 
 # Returns
 - Vector of wrapped residuals of the same length.
@@ -21,20 +21,20 @@ end
 """
     transform_position(ins_traj::Trajectory, gt_traj::Trajectory, calib_idxs::Vector{Int})
 
-Estimate a rigid transformation (rotation + translation) that aligns the inertial‑navigation
-trajectory with the ground‑truth reference frame. The rotation is constrained to a yaw change
+Estimate a rigid transformation (rotation + translation) that aligns the inertial-navigation
+trajectory with the ground-truth reference frame. The rotation is constrained to a yaw change
 plus a fixed 180° roll (to mirror the IMU mounting), and a 3D translation.
 
 # Arguments
 - `ins_traj`: Trajectory computed from inertial data.
-- `gt_traj`: Ground‑truth trajectory (already temporally aligned with `ins_traj`).
+- `gt_traj`: Ground-truth trajectory (already temporally aligned with `ins_traj`).
 - `calib_idxs`: Indices of the time window used for calibration (typically the first few metres).
 
 # Returns
 - `aligned_traj`: `Trajectory` with positions, velocities and orientations rotated/translated
-  to match the ground‑truth frame.
-- `R_opt`: 3×3 rotation matrix that maps INS‑frame coordinates to GT‑frame coordinates.
-- `t_opt`: 3‑element translation vector.
+  to match the ground-truth frame.
+- `R_opt`: 3×3 rotation matrix that maps INS-frame coordinates to GT-frame coordinates.
+- `t_opt`: 3-element translation vector.
 """
 function transform_position(ins_traj::Trajectory, gt_traj::Trajectory,
     calib_idxs::Vector{Int})
@@ -78,21 +78,21 @@ end
     euler_mse(angles::Vector{Float64}, ins_traj::Trajectory, gt_traj::Trajectory,
               zupt::BitVector, calib_idxs::Vector{Int}) -> Vector{Float64}
 
-Compute the per‑sample Euler‑angle residuals between an inertial trajectory (rotated by
-`angles`) and the ground truth. Roll and pitch residuals are evaluated only on zero‑velocity
+Compute the per-sample Euler-angle residuals between an inertial trajectory (rotated by
+`angles`) and the ground truth. Roll and pitch residuals are evaluated only on zero-velocity
 (ZUPT) frames; yaw residuals only on the calibration window. The residuals are the minimum
-absolute difference wrapped to the interval [‑π, π].
+absolute difference wrapped to the interval [-π, π].
 
 # Arguments
 - `angles`: (roll, pitch, yaw) in radians, applied as an extrinsic ZYX rotation to the
   orientation matrices of `ins_traj`.
 - `ins_traj`: Inertial trajectory (original orientation estimates).
-- `gt_traj`: Ground‑truth trajectory (reference Euler angles).
+- `gt_traj`: Ground-truth trajectory (reference Euler angles).
 - `zupt`: Boolean vector, `true` where the foot is stationary (used for roll/pitch).
 - `calib_idxs`: Indices of the calibration window (used for yaw).
 
 # Returns
-- A 1‑D vector concatenating the per‑frame roll residual (zupt length), pitch residual
+- A 1-D vector concatenating the per-frame roll residual (zupt length), pitch residual
   (zupt length) and yaw residual (length of `calib_idxs`).
 """
 function euler_mse(angles::Vector{Float64}, ins_traj::Trajectory,
@@ -121,14 +121,14 @@ end
                           initial_value::Vector{Float64}, calib_idxs::Vector{Int}) ->
                           (Trajectory, Matrix{Float64})
 
-Optimise a full 3‑axis rotation (roll, pitch, yaw) that aligns the inertial orientation
-estimates with the ground truth. The cost function minimises the wrapped Euler‑angle errors
+Optimise a full 3-axis rotation (roll, pitch, yaw) that aligns the inertial orientation
+estimates with the ground truth. The cost function minimises the wrapped Euler-angle errors
 over ZUPT frames (roll/pitch) and a calibration window (yaw).
 
 # Arguments
 - `ins_traj`: Inertial trajectory (original orientation matrices `R_nb`).
-- `gt_traj`: Ground‑truth trajectory (reference orientations).
-- `zupt`: Boolean vector, `true` at zero‑velocity frames (used for roll/pitch).
+- `gt_traj`: Ground-truth trajectory (reference orientations).
+- `zupt`: Boolean vector, `true` at zero-velocity frames (used for roll/pitch).
 - `initial_value`: Initial guess for (roll, pitch, yaw) in radians.
 - `calib_idxs`: Indices of the calibration window (used for yaw).
 
@@ -186,13 +186,13 @@ Load inertial and ground truth data, compute an INS trajectory, and align it to 
 - `data_path`: Path to the data directory (string or `AbstractString`).
 - `trial_id`: Trial/session identifier passed to the CSV loaders.
 - `sim_config`: INS configuration. Defaults to `INSConfig()`.
-- `orientation_offset`: 3‑element orientation offset for `transform_orientation`. Defaults to zeros.
+- `orientation_offset`: 3-element orientation offset for `transform_orientation`. Defaults to zeros.
 
 # Returns
 - `ins_traj_aligned`: The INS trajectory aligned to ground truth.
 - `gt_traj_aligned`: The ground truth trajectory aligned to the IMU time axis.
 - `zupt`: ZUPT detection signal (boolean vector, `true` where stationary).
-- `segs`: Segmentation output from `smoothed_zupt_aided_ins` (vector of step‑end indices).
+- `segs`: Segmentation output from `smoothed_zupt_aided_ins` (vector of step-end indices).
 - `inertial`: Updated inertial data after applying the estimated rotation.
 - `sim_config`: Updated simulation config (gravity rotated by the position alignment).
 """
@@ -213,7 +213,7 @@ function compute_aligned_ins_trajectory(
 
     # Calibration window: first point that exceeds the calibration distance from start.
     # Distances are computed from the first position (column 1) to all points,
-    # then restricted to the step‑end indices `segs`.
+    # then restricted to the step-end indices `segs`.
     pos_start = ins_traj.pos[:, 1:1]      # 3×1 matrix
     distances = sqrt.(sum((pos_start .- ins_traj.pos) .^ 2, dims=1))[:]   # length N vector
     dist_at_segs = distances[segs]        # distances only at step ends

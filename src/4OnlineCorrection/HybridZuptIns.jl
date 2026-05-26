@@ -1,32 +1,13 @@
-"""
-    hybrid_nominal_zupt_aided_ins(inertial, simdata, gt_traj, gp_params; x_init)
-
-Run the open-loop zero-velocity aided INS Kalman filter with RTS smoothing,
-augmented by an online HSGP-based GP correction when ground truth is available,
-and GP prediction when it is not.
-
-# Arguments
-- `inertial`:  `InertialData` with fields `t` and `u` (6×N).
-- `simdata`:   `InsConfig` object.
-- `gt_traj`:   `Trajectory` aligned to the same timestamps as `inertial`.
-- `gp_params`: `HsgpParameters` containing hyperparameters, basis-function count,
-               feature scaling, and domain half-widths.
-- `x_init`:    Optional initial state vector of length 9 (default: zeros).
-
-# Returns
-- `zupt`:               Boolean vector of zero-velocity flags (length N).
-- `zupt_ins_traj`:      `Trajectory` with estimated positions, orientations, velocities.
-- `step_seg`:           Vector of indices where step segments were terminated.
-- `y_train`:            Vector of training observations collected during the run.
-"""
-function hybrid_nominal_zupt_aided_ins(
+function hybrid_zupt_aided_ins(
     inertial::InertialData,
     simdata::InsConfig,
     gt_traj::Trajectory,
-    gp_params::HsgpParameters;
+    params::HsgpParameters;
     x_init::Vector{Float64}=zeros(9),
-    correction::Bool=true,
-    train_ratio::Float64=0.5
+    train_ratio::Float64=0.5,
+    ref_frame::ReferenceFrame=BODY,
+    feature_type::FeatureType=THREED_STEP,
+    correct::Bool=true
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -38,11 +19,9 @@ function hybrid_nominal_zupt_aided_ins(
 
     zupt, _ = detect_zupt(u, simdata)
 
-    # ── filter matrices ──────────────────────────────────────────────────────
     Q, R_meas, H = init_filter(simdata)
     I9 = Matrix{Float64}(I, 9, 9)
 
-    # ── allocations ──────────────────────────────────────────────────────────
     x = zeros(9, N)
     quat = zeros(4, N)
     dx = zeros(9, N)
@@ -53,80 +32,98 @@ function hybrid_nominal_zupt_aided_ins(
     P_smooth = zeros(9, 9, N)
     F_store = zeros(9, 9, N)
 
-    # ── initial covariance ───────────────────────────────────────────────────
     P[1:3, 1:3, 1] = Diagonal(sigma_initial_pos_array(simdata) .^ 2)
     P[4:6, 4:6, 1] = Diagonal(sigma_initial_vel_array(simdata) .^ 2)
     P[7:9, 7:9, 1] = Diagonal(sigma_initial_att_array(simdata) .^ 2)
 
-    # ── initial navigation state ─────────────────────────────────────────────
     x[:, 1] = x_init
     quat[:, 1] = matrix_to_quat(euler_to_matrix(x_init[7:9]))
 
-    # ── HSGP initialisation ──────────────────────────────────────────────────
-    outputs_keys = ["yaw", "pos_1", "pos_2", "pos_3"]
-
-    eigvals = calc_eigenvalues(gp_params.LL, gp_params.m, gp_params.d)   # (m, d)
-    omega = sqrt.(eigvals)                                               # (m, d)
-
-    # Per-output PSD and weight vectors
-    psd = Dict(
-        k => power_spectral_density(
-            omega,
-            getfield(gp_params.hp, Symbol(k))[2],   # length scale
-            getfield(gp_params.hp, Symbol(k))[1]    # sigma_f
-        )
-        for k in outputs_keys
-    )
-    beta = Dict(k => zeros(gp_params.m) for k in outputs_keys)
-    P_beta = Dict(k => Matrix(Diagonal(psd[k])) for k in outputs_keys)
-
-    # Ground truth availability
     n_train_cutoff = floor(Int, train_ratio * N)
-    gt_available = [n <= n_train_cutoff for n in 1:N]   # 1-based
+    gt_available = [n <= n_train_cutoff for n in 1:N]
 
-    true_outputs = Dict{String,VecOrMat{Float64}}(
-        "yaw" => Float64[],
-        "pos" => Float64[]
-    )
-    predicted_outputs = Dict{String,VecOrMat{Float64}}(
-        "yaw" => Float64[],
-        "pos" => Float64[]
-    )
+    # Feature dimensionality driven by feature_type (same as before)
+    d_feat = feature_type == THREED_STEP ? 3 :
+             feature_type == TWOD_STEP_DT ? 3 :   # 2 step dims + Δt
+             feature_type == THREED_STEP_DT ? 4 : 3
 
-    # ── segmentation bookkeeping ─────────────────────────────────────────────
-    seg_start = 2          # first index to process (1-based, history is at n-1)
+    seg_start = 2
     seg_end = N
     step_detector = StepDetector()
     step_seg = Int[]
 
-    # ═════════════════════════════════════════════════════════════════════════
+    # HSGP variables
+    p = 4
+    per_dim_eigvals = calc_eigenvalues(params.LL, params.m, params.d)
+    J_ϕ = zeros(params.d, params.m)
+    omega = sqrt.(per_dim_eigvals)
+    psd = zeros(Float64, p * params.m)
+
+    for (idx, field) in enumerate(fieldnames(SeHyperparams))
+        psd[((idx-1)*params.m+1):(idx*params.m)] = power_spectral_density(
+            omega,
+            getfield(params.hp, field)[2],
+            getfield(params.hp, field)[1]
+        )
+    end
+    output_names = ["pos_1", "pos_2", "pos_3", "yaw"]
+    beta = zeros(Float64, p * params.m)
+    beta_hist = Vector{Float64}[]
+    P_beta = Matrix(Diagonal(psd))
+    # P_beta = I(p * params.m) .* 1e-3
+    # Allocate memory
+    R_aug_GT_nb = zeros(Float64, (p, p))
+    R_aug_nb = zeros(Float64, (p, p))
+    R_aug_GT_nb[p, p] = 1.0
+    R_aug_nb[p, p] = 1.0
+
+    # Define parameters 
+    sigma_pos_gt = 1e-2
+    sigma_ψ_gt = 1e-3
+    sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt) # σ_GTx σ_GTy σ_GT_z σ_GTψ
+    sigma_dt = 1e-3
+
+
+    true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+    pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+
+    training_inputs = CorrectionIO(d_feat, true)
+    training_outputs = CorrectionIO(p, true)
+
     while true
+        ΔP = zeros(Float64, 9, 9)
+        ΔP[1:3, 1:3, 1] = Diagonal(sigma_initial_pos_array(simdata) .^ 2)
+        ΔP[4:6, 4:6, 1] = Diagonal(sigma_initial_vel_array(simdata) .^ 2)
+        ΔP[7:9, 7:9, 1] = Diagonal(sigma_initial_att_array(simdata) .^ 2)
 
-        # ── forward Kalman filter ─────────────────────────────────────────────
         for n in seg_start:seg_end
-
-            # time update
             x[:, n], quat[:, n] = navigation_equations(
-                x[:, n-1], u[:, n], quat[:, n-1], Ts, g_vec
-            )
+                x[:, n-1], u[:, n], quat[:, n-1], Ts, g_vec)
             F_store[:, :, n], G = state_matrix(quat[:, n], u[:, n], Ts)
 
             dx[:, n] = F_store[:, :, n] * dx[:, n-1]
-            P[:, :, n] = F_store[:, :, n] * P[:, :, n-1] * F_store[:, :, n]' +
-                         G * Q * G'
-
+            P[:, :, n] = F_store[:, :, n] * P[:, :, n-1] * F_store[:, :, n]' + G * Q * G'
+            ΔP = F_store[:, :, n] * ΔP * F_store[:, :, n]' + G * Q * G'
             dx_timeupd[:, n] = dx[:, n]
             P_timeupd[:, :, n] = P[:, :, n]
 
-            # zero-velocity update
             if zupt[n]
                 S = H * P[:, :, n] * H' + R_meas
+                ΔS = H * ΔP * H' + R_meas
                 K = P[:, :, n] * H' / S
+                ΔK = ΔP * H' / ΔS
                 dx[:, n] = dx[:, n] - K * (dx[4:6, n] - x[4:6, n])
                 P[:, :, n] = (I9 - K * H) * P[:, :, n]
+                ΔP = (I9 - ΔK * H) * ΔP
             end
 
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
+            ΔP = (ΔP + ΔP') / 2
+
 
             if update!(step_detector, zupt[n])
                 push!(step_seg, n)
@@ -135,112 +132,250 @@ function hybrid_nominal_zupt_aided_ins(
             end
         end
 
-        # ── RTS smoothing ─────────────────────────────────────────────────────
         dx_smooth[:, seg_end] = dx[:, seg_end]
         P_smooth[:, :, seg_end] = P[:, :, seg_end]
 
         for n in seg_end-1:-1:seg_start
             A = P[:, :, n] * F_store[:, :, n]' / P_timeupd[:, :, n+1]
-
             dx_smooth[:, n] = dx[:, n] + A * (dx_smooth[:, n+1] - dx_timeupd[:, n+1])
             P_smooth[:, :, n] = P[:, :, n] +
                                 A * (P_smooth[:, :, n+1] - P_timeupd[:, :, n+1]) * A'
             P_smooth[:, :, n] = (P_smooth[:, :, n] + P_smooth[:, :, n]') / 2
         end
 
-        # ── internal state compensation ───────────────────────────────────────
-        idx_range = seg_start:seg_end
         compensate_internal_states!(
-            view(x, :, idx_range),
-            -dx_smooth[:, idx_range],
-            view(quat, :, idx_range)
+            view(x, :, seg_start:seg_end),
+            -dx_smooth[:, seg_start:seg_end],
+            view(quat, :, seg_start:seg_end)
         )
 
-        # Rotation matrices for the full trajectory (needed for GP features)
-        R_nb = euler_to_matrix(x[7:9, :])   # (3, 3, N)
-
-        # ── GP update (online measurement update of HSGP weights) ────────────
+        # Correction
         if length(step_seg) > 1
-            prev_step = step_seg[end-1]   # seg_start - 1
-            curr_step = step_seg[end]     # seg_end
+            prev_step = step_seg[end-1]
+            curr_step = step_seg[end]
 
-            # INS step vector in body frame
-            R_nb_ins_0 = R_nb[:, :, prev_step]
-            pos_ins_seg = x[1:3, [prev_step, curr_step]]
-            ins_step = R_nb_ins_0' * (pos_ins_seg[:, 2] - pos_ins_seg[:, 1])
 
-            # INS yaw difference over the segment
-            euler_ins_seg = matrix_to_euler(R_nb[:, :, prev_step:curr_step])
-            yaw_ins_seg = euler_ins_seg[3, :]
-            unwrap!(yaw_ins_seg)
-            unwrapped_yaw_diff = yaw_ins_seg[end] - yaw_ins_seg[1]
+            R_nb = euler_to_matrix(x[7:9, :])
+            R_aug_nb[1:3, 1:3] = R_nb[:, :, prev_step]
+            R_aug_GT_nb[1:3, 1:3] = gt_traj.R_nb[:, :, prev_step]
 
-            # Scaled input feature for HSGP
-            input_feature = reshape(
-                (ins_step .- gp_params.feature_mean) ./ gp_params.feature_std,
-                1, gp_params.d          # (1, d) row vector
+            # ------------------- Construct target estimate -------------------------
+            # Unwrap INS yaw
+            yaw_ins_seg = unwrap(matrix_to_euler(R_nb[:, :, prev_step:curr_step])[3, :])
+            step_ins_ψ = yaw_ins_seg[end] - yaw_ins_seg[1]
+
+            # Unwrap GT yaw
+            yaw_gt_seg = unwrap(matrix_to_euler(gt_traj.R_nb[:, :, prev_step:curr_step])[3, :])
+            step_gt_ψ = yaw_gt_seg[end] - yaw_gt_seg[1]
+
+            # Construct target estimate
+            step_ins_aug = R_aug_nb' * vcat(x[1:3, curr_step] - x[1:3, prev_step], step_ins_ψ)
+            step_gt_aug = R_aug_GT_nb' * vcat(gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step], step_gt_ψ)
+            target = step_gt_aug - step_ins_aug
+
+            # Normalize target 
+            target_norm = (target - params.output_stats[1]) ./ params.output_stats[2]
+
+            # ---------- Construct target covariance ------------
+            step_ins_aug_cov = R_aug_nb' * ΔP[[1, 2, 3, 9], [1, 2, 3, 9]] * R_aug_nb
+            step_gt_aug_cov = R_aug_GT_nb' * Diagonal(sigma_gt .^ 2) * R_aug_GT_nb
+
+            # Normalize target covariance
+            target_cov_norm = Diagonal(1 ./ params.output_stats[2]) * (step_ins_aug_cov + step_gt_aug_cov) * Diagonal(1 ./ params.output_stats[2])
+
+            # ----------- Construct Input Feature --------------------
+            feature_estimate_selector = Dict{FeatureType,Function}(
+                THREED_STEP => () -> step_ins_aug[1:3],
+                TWOD_STEP_DT => () -> vcat(step_ins_aug[1:2], inertial.t[curr_step] - inertial.t[prev_step]),
+                THREED_STEP_DT => () -> vcat(step_ins_aug[1:3], inertial.t[curr_step] - inertial.t[prev_step]),
             )
-            eigvect = calc_eigenvectors(input_feature, gp_params.LL, eigvals)   # (1, m)
+            # Normalise estimated feature 
+            feature_estimate_norm = (feature_estimate_selector[feature_type]() .- params.input_stats[1]) ./ params.input_stats[2]
 
-            # ── measurement update when GT is available ───────────────────────
-            if gt_available[prev_step] && gt_available[curr_step]
-                R_nb_gt_0 = gt_traj.R_nb[:, :, prev_step]
-                pos_gt_seg = gt_traj.pos[:, [prev_step, curr_step]]
-                gt_step = R_nb_gt_0' * (pos_gt_seg[:, 2] - pos_gt_seg[:, 1])
+            # ------------ Construct Covariance from Input Feature uncertainty ---------
+            feature_cov_selector = Dict{FeatureType,Function}(
+                THREED_STEP => () -> step_ins_aug_cov[1:3, 1:3],
+                TWOD_STEP_DT => () -> [
+                    step_ins_aug_cov[1:2, 1:2] zeros(Float64, (2, 1));
+                    zeros(Float64, (1, 2)) sigma_dt^2
+                ],
+                THREED_STEP_DT => () -> [
+                    step_ins_aug_cov[1:3, 1:3] zeros(Float64, (3, 1));
+                    zeros(Float64, (1, 3)) sigma_dt^2
+                ],
+            )
+            # Normalise covariance of input feature
+            feature_cov_norm = Diagonal(1 ./ params.input_stats[2]) *
+                               feature_cov_selector[feature_type]() * Diagonal(1 ./ params.input_stats[2])
 
-                euler_gt_seg = matrix_to_euler(gt_traj.R_nb[:, :, prev_step:curr_step])
-                yaw_gt_seg = euler_gt_seg[3, :]
-                unwrap!(yaw_gt_seg)
-                unwrapped_yaw_diff_gt = yaw_gt_seg[end] - yaw_gt_seg[1]
+            for d in 1:params.d
+                J_ϕ[d, :] = calc_eigenvectors_dx(
+                    reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals, d)
+            end
+            B_estim = reshape(beta, (params.m, p))
+            input_cov_norm = (J_ϕ * B_estim)' * feature_cov_norm * (J_ϕ * B_estim)
+            tt_target_cov_norm = input_cov_norm + target_cov_norm
 
-                y_yaw = unwrapped_yaw_diff_gt - unwrapped_yaw_diff
-                y_pos = gt_step - ins_step
-                y = vcat([y_yaw], y_pos)   # length 4
+            # ---------- Construct measurement matrix H_update --------------
+            eigvect = calc_eigenvectors(
+                reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals)
+            H_update = kron(I(p), eigvect)
 
-                # Kalman update of HSGP weights for each output
-                for (idx, outpt) in enumerate(outputs_keys)
-                    sigma_n = getfield(gp_params.hp, Symbol(outpt))[3]
-                    beta[outpt], P_beta[outpt] = measurement_update(
-                        beta[outpt],
-                        Matrix(P_beta[outpt]),   # convert Diagonal → dense for measurement_update
-                        [y[idx]],
-                        eigvect,                 # (1, m) observation matrix
-                        fill(sigma_n^2, 1, 1)   # (1, 1) noise covariance
-                    )
+            if correct && gt_available[prev_step] && gt_available[curr_step]
+                noise_vect = Vector{Float64}(undef, p)
+                for (idx, key) in enumerate(output_names)
+                    noise_vect[idx] = getfield(params.hp, Symbol(key))[3]
                 end
+                beta, P_beta = measurement_update(
+                    beta, P_beta, target_norm, H_update, Diagonal(noise_vect) * tt_target_cov_norm ./ tr(tt_target_cov_norm) * Diagonal(noise_vect)
+                )
+                push!(beta_hist, beta)
+                append_io!(training_inputs, inertial.t[prev_step], feature_estimate_norm, sqrt.(diag(feature_cov_norm)))
+                append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(Diagonal(noise_vect) * tt_target_cov_norm ./ tr(tt_target_cov_norm) * Diagonal(noise_vect))))
 
-                # Save training data
-                push!(true_outputs["yaw"], y_yaw)
-                push!(true_outputs["pos"], y_pos)
+            end
+            # @info "Marginal noise during weight update : $(sqrt.(Diagonal(target_cov_norm + input_cov_norm)))"
 
-                # Update nominal position with ground truth position
-                x[1:3, curr_step] = gt_traj.pos[:, curr_step]
-                quat[:, curr_step] = matrix_to_quat(gt_traj.R_nb[:, :, curr_step])
+            # ----------- Save target ------------
+            marg_std = zeros(Float64, p)
+            target_cov = target_cov_norm + input_cov_norm
+            for i in 1:p
+                marg_std[i] = sqrt(target_cov_norm[i, i])
+            end
+            push!(true_outputs["t"], inertial.t[prev_step])
+            push!(true_outputs["output"], target)
+            if !haskey(true_outputs, "output_std")
+                true_outputs["output_std"] = Vector{Float64}[]
+            end
+            push!(true_outputs["output_std"], marg_std)
+
+
+            # ------------- Update the Position and orientation from GT ---------------
+            # Construct Measurement matrix H_gt 
+            H_gt = [
+                I zeros(Float64, (3, 6));
+                zeros(Float64, (1, 8)) 1.0
+            ]
+
+            if gt_available[prev_step] && gt_available[curr_step]
+                # δx is zero since has been compensated after zupts
+                dx[:, curr_step], P[:, :, curr_step] = measurement_update(
+                    zeros(Float64, 9),
+                    P[:, :, curr_step],
+                    vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]),
+                    H_gt,
+                    Diagonal(sigma_gt .^ 2)
+                )
+
+                # -------- Compensate error -------------
+                x[:, curr_step], quat[:, curr_step] = comp_internal_states(
+                    x[:, curr_step],
+                    dx[:, curr_step],
+                    quat[:, curr_step]
+                )
             end
 
-            # ── GP prediction when GT is NOT available ────────────────────────
-            if !gt_available[curr_step] && correction
-                preds = Vector{Float64}(undef, 4)
-                for (idx, outpt) in enumerate(outputs_keys)
-                    preds[idx] = (eigvect*beta[outpt])[1]
+            if !gt_available[curr_step] && correct
+
+                R_nb = euler_to_matrix(x[7:9, :])
+                R_aug_nb[1:3, 1:3] = R_nb[:, :, prev_step]
+                R_aug_GT_nb[1:3, 1:3] = gt_traj.R_nb[:, :, prev_step]
+
+                # Unwrap INS yaw
+                yaw_ins_seg = unwrap(matrix_to_euler(R_nb[:, :, prev_step:curr_step])[3, :])
+                step_ins_ψ = yaw_ins_seg[end] - yaw_ins_seg[1]
+
+                # Construct augmented step
+                step_ins_aug = R_aug_nb' * vcat(x[1:3, curr_step] - x[1:3, prev_step], step_ins_ψ)
+
+                # ----------- Construct Input Feature --------------------
+                feature_estimate_selector = Dict{FeatureType,Function}(
+                    THREED_STEP => () -> step_ins_aug[1:3],
+                    TWOD_STEP_DT => () -> vcat(step_ins_aug[1:2], inertial.t[curr_step] - inertial.t[prev_step]),
+                    THREED_STEP_DT => () -> vcat(step_ins_aug[1:3], inertial.t[curr_step] - inertial.t[prev_step]),
+                )
+                # Normalise estimated feature 
+                feature_estimate_norm = (feature_estimate_selector[feature_type]() .- params.input_stats[1]) ./ params.input_stats[2]
+
+                # Step covariance 
+                step_ins_aug_cov = R_aug_nb' * ΔP[[1, 2, 3, 9], [1, 2, 3, 9]] * R_aug_nb
+                # ------------ Construct Covariance from Input Feature uncertainty ---------
+                feature_cov_selector = Dict{FeatureType,Function}(
+                    THREED_STEP => () -> step_ins_aug_cov[1:3, 1:3],
+                    TWOD_STEP_DT => () -> [
+                        step_ins_aug_cov[1:2, 1:2] zeros(Float64, (2, 1));
+                        zeros(Float64, (1, 2)) sigma_dt^2
+                    ],
+                    THREED_STEP_DT => () -> [
+                        step_ins_aug_cov[1:3, 1:3] zeros(Float64, (3, 1));
+                        zeros(Float64, (1, 3)) sigma_dt^2
+                    ],
+                )
+                # Normalise covariance of input feature
+                feature_cov_norm = Diagonal(1 ./ params.input_stats[2]) * feature_cov_selector[feature_type]() * Diagonal(1 ./ params.input_stats[2])
+
+                for d in 1:params.d
+                    J_ϕ[d, :] = calc_eigenvectors_dx(
+                        reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals, d)
                 end
+                B_estim = reshape(beta, (params.m, p))
+                input_cov_norm = (J_ϕ * B_estim)' * feature_cov_norm * (J_ϕ * B_estim)
 
-                # Yaw correction (unwrapped yaw at seg end + predicted offset)
-                x[9, curr_step] = yaw_ins_seg[end] + preds[1]
+                # ------------- Construct measurement matrix H_correction --------------------
+                H_correction = [
+                    Matrix(I(3)) zeros(Float64, (3, 6));
+                    zeros(Float64, (1, 8)) 1
+                ]
 
-                # Position correction (body-frame offset rotated to nav frame)
-                x[1:3, curr_step] = pos_ins_seg[:, 2] + R_nb_ins_0 * preds[2:4]
+                # ------------- Predict correction -----------------
+                eigvect = calc_eigenvectors(
+                    reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals)
 
-                # Keep quaternion consistent with updated Euler angles
-                quat[:, curr_step] = matrix_to_quat(euler_to_matrix(x[7:9, curr_step]))
+                # Compute prediction estimate
+                Φ = kron(I(p), eigvect)
+                pred_estim_norm = Φ * beta
+                pred_estim = pred_estim_norm .* params.output_stats[2] .+ params.output_stats[1]
+                y_estim = R_aug_nb * pred_estim
+
+                # Compute prediction covariance
+                pred_cov_norm = Φ * P_beta * Φ'
+
+                pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm * Diagonal(params.output_stats[2])
+
+                # Compute combined uncertainty from GP and input
+                y_cov = R_aug_nb * (pred_cov + input_cov_norm) * R_aug_nb'
+
+                # δx is zero since has been compensated after zupts
+                dx[:, curr_step], P[:, :, curr_step] = measurement_update(
+                    zeros(Float64, 9),
+                    P[:, :, curr_step],
+                    y_estim,
+                    H_correction,
+                    y_cov .* 1e-4
+                )
+
+                # -------- Compensate error -------------
+                x[:, curr_step], quat[:, curr_step] = comp_internal_states(
+                    x[:, curr_step],
+                    dx[:, curr_step],
+                    quat[:, curr_step]
+                )
+
+                # -------- Save prediction --------------
+                pred_marg_std = sqrt.(diag(y_cov))
+                push!(pred_outputs["t"], inertial.t[prev_step])
+                push!(pred_outputs["output"], y_estim)
+                if !haskey(pred_outputs, "output_std")
+                    pred_outputs["output_std"] = Vector{Float64}[]
+                end
+                push!(pred_outputs["output_std"], pred_marg_std)
+
             end
         end
 
-        # ── build running trajectory (updated each segment) ───────────────────
-        R_nb_final = euler_to_matrix(x[7:9, :])
-        zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
+        # R_nb_final = euler_to_matrix(x[7:9, :])
+        # zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
-        # ── reset error state and partial covariance ──────────────────────────
         dx[:, seg_end] .= 0.0
         P[1:2, 9, seg_end] .= 0.0
         P[9, 1:2, seg_end] .= 0.0
@@ -253,9 +388,23 @@ function hybrid_nominal_zupt_aided_ins(
         end
     end
 
-    # ── final trajectory ──────────────────────────────────────────────────────
     R_nb_final = euler_to_matrix(x[7:9, :])
     zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
-    return zupt, zupt_ins_traj, step_seg, true_outputs
+    # Convert outputs to Dict{String,VecOrMat{Float64}}
+    # Remove last incorrect output
+    true_outputs["output"] = true_outputs["output"][1:end-1]
+    true_outputs["t"] = true_outputs["t"][1:end-1]
+    if haskey(true_outputs, "output_std")
+        true_outputs["output_std"] = true_outputs["output_std"][1:end-1]
+    end
+    pred_outputs["output"] = pred_outputs["output"][1:end-1]
+    if haskey(pred_outputs, "output_std")
+        pred_outputs["output_std"] = pred_outputs["output_std"][1:end-1]
+    end
+    pred_outputs["t"] = pred_outputs["t"][1:end-1]
+
+    beta_hist = hcat(beta_hist...)
+
+    return zupt, zupt_ins_traj, step_seg, CorrectionIO(true_outputs), CorrectionIO(pred_outputs), beta_hist, training_inputs, training_outputs
 end

@@ -1,6 +1,3 @@
-# --------------------------------------------------------------------------
-# Step detector – simplified without unused return value
-# --------------------------------------------------------------------------
 mutable struct StepDetector
     zupt_counter::Int
     no_zupt_counter::Int
@@ -11,7 +8,7 @@ StepDetector() = StepDetector(0, 0, false)
 """
     update!(det::StepDetector, zupt::Bool) -> Bool
 
-Update the detector state with a new zero‑velocity flag.
+Update the detector state with a new zero-velocity flag.
 Returns `true` when a segment end should be triggered.
 """
 function update!(det::StepDetector, zupt::Bool)
@@ -34,20 +31,17 @@ function update!(det::StepDetector, zupt::Bool)
     return false
 end
 
-# --------------------------------------------------------------------------
-# Main smoothed ZUPT‑aided INS
-# --------------------------------------------------------------------------
 """
     smoothed_zupt_aided_ins(inertial, simdata)
 
-Run the open‑loop zero‑velocity aided INS Kalman filter with RTS smoothing.
+Run the open-loop zero-velocity aided INS Kalman filter with RTS smoothing.
 
 # Arguments
 - `inertial`: `InertialData` with fields `t::Vector{Float64}` and `u::Matrix{Float64}` (6×N).
 - `simdata`: `InsConfig` object.
 
 # Returns
-- `zupt`: Boolean vector of zero‑velocity flags.
+- `zupt`: Boolean vector of zero-velocity flags.
 - `traj`: `Trajectory` object containing estimated positions, orientations and velocities.
 - `step_seg`: Vector of indices where step segments were terminated.
 """
@@ -64,7 +58,7 @@ function smoothed_zupt_aided_ins(
         collect(simdata.g)
     end
 
-    # Zero‑velocity detection (assume external function)
+    # Zero-velocity detection (assume external function)
     zupt, _ = detect_zupt(u, simdata)   # returns Vector{Bool} of length N
 
     # Initialise filter matrices
@@ -92,7 +86,7 @@ function smoothed_zupt_aided_ins(
         init_pos_array(simdata))
 
     # Segmentation bookkeeping
-    seg_start = 2          # first index to process (1‑based, offset for n-1)
+    seg_start = 2          # first index to process (1-based, offset for n-1)
     seg_end = N
     step_detector = StepDetector()
     step_seg = Int[]
@@ -108,6 +102,7 @@ function smoothed_zupt_aided_ins(
             )
             F[:, :, n], G = state_matrix(quat[:, n], u[:, n], Ts)
 
+
             dx[:, n] = F[:, :, n] * dx[:, n-1]
             P[:, :, n] = F[:, :, n] * P[:, :, n-1] * F[:, :, n]' +
                          G * Q * G'
@@ -115,7 +110,7 @@ function smoothed_zupt_aided_ins(
             dx_timeupd[:, n] = dx[:, n]
             P_timeupd[:, :, n] = P[:, :, n]
 
-            # Zero‑velocity update
+            # Zero-velocity update
             if zupt[n]
                 S = H * P[:, :, n] * H' + R
                 K = P[:, :, n] * H' / S   # equivalent to K = P*H'*inv(S)
@@ -163,7 +158,7 @@ function smoothed_zupt_aided_ins(
         # Prepare for next segment (reset error state and covariance)
         # ------------------------------------------------------------------
         dx[:, seg_end] .= 0.0
-        P[1:2, 9, seg_end] .= 0.0   # note: 1‑based, element (9,?) – Python indices 0:2,8
+        P[1:2, 9, seg_end] .= 0.0   # note: 1-based, element (9,?) – Python indices 0:2,8
         P[9, 1:2, seg_end] .= 0.0
 
         if seg_end != N

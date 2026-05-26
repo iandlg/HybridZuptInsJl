@@ -1,115 +1,138 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using JSON, Statistics
+using Statistics
+using OrderedCollections, Dates
 
-hsgp_hp = JSON.parsefile("out/3OfflineCorrection/VariabilityResults/handtune_hsgp.json", HybridZuptInsJl.SeHyperparams)
-gp_hp = JSON.parsefile("out/hyperparameters/py_hypers.json", HybridZuptInsJl.SeHyperparams)
+hyp_key = 10
+hyp_path = Dict{Int,String}(
+    10 => "out/3OfflineCorrection/2_VariabilityResults/PY_ANG15_BODY_THREED_STEP.json",
+    20 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_THREED_STEP_2026-05-13T14:14:24.485.json",
+    30 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:06:28.867.json",
+    40 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:03.913.json",
+    41 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-22T11:18:28.679.json"
+)[hyp_key]
 
-data_dir = "data/angermann_high_precision"
-trial_id = 15
-FRAME = HybridZuptInsJl.BODY
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-m = 300
-margin = 2.0
+hp, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.SeHyperparams, hyp_path)
 
-imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
-gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
-gt = HybridZuptInsJl.Trajectory(
-    (gt.t .- 0.05),
-    gt.pos,
-    gt.R_nb,
-    gt.vel
-)
+data_dir = Dict{String,String}(
+    "ANG" => "data/angermann_high_precision"
+)[meta["data_key"]]
+normalize_input = meta["normalize_input"]
+normalize_output = meta["normalize_output"]
+FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
+FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
+
+m = 500
+margin = 1.7
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; inertial=imu, gt_traj=gt
+    data_dir, meta["trial_id"]
 )
 
 fig_3d_traj = HybridZuptInsJl.plot_trajectory_3d(ins_traj_aligned[segs[1:20]], gt_traj_aligned[segs[1:20]])
 fig_rmse = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned[segs], gt_traj_aligned[segs])
 
-display(ins_traj_aligned.pos[:, 1])
-
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, gp_hp;
+    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hp;
     n_restarts_optimizer=0)
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, gp_hp)
+    input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hp)
 
 hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hsgp_hp;
-    m=m, margin=margin
+    input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hp;
+    m=m, margin=margin, feature_type=FEATURE_TYPE
 )
 
-## Save hsgp parameters
-μ = mean(input_feature, dims=2)[:]
-σ = std(input_feature, dims=2)[:]
-feature_scaled = (input_feature .- μ) ./ σ
-LL = margin * maximum(abs, feature_scaled, dims=2)[:]
-p = HybridZuptInsJl.HsgpParameters(
-    hsgp_hp, size(input_feature, 1), m, σ, μ, LL
-)
-HybridZuptInsJl.to_json("out/3OfflineCorrection/HsgpResults/3d_body_hsgp_params.json", p;
-    metadata=Dict(
-        "data_dir" => data_dir,
-        "trial_id" => trial_id,
-        "ref_frame" => FRAME,
-        "feature_type" => FEATURE_TYPE,
-        "margin" => margin
-    )
-)
-
-## Apply corrections
+# Apply corrections
 true_output_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    true_outputs["yaw"],
-    true_outputs["pos"],
+    true_outputs,
     segs; ref_frame=FRAME
 )
 
 gp_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    gp_corrections["yaw"],
-    gp_corrections["pos"],
+    gp_corrections,
     segs; ref_frame=FRAME
 )
 
 hsgp_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    hsgp_corrections["yaw"],
-    hsgp_corrections["pos"],
+    hsgp_corrections,
     segs; ref_frame=FRAME
 )
 
 static_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
-    static_corrections["yaw"],
-    static_corrections["pos"],
+    static_corrections,
     segs; ref_frame=FRAME
 )
 
-trajs = Dict{String,HybridZuptInsJl.Trajectory}(
+trajs = OrderedDict{String,HybridZuptInsJl.Trajectory}(
     "model" => ins_traj_aligned[segs],
     "model + static" => static_traj,
     "model + GP" => gp_traj,
     "model + HSGP" => hsgp_traj
 )
-outputs = Dict(
+outputs = OrderedDict(
     "static" => static_corrections,
     "GP" => gp_corrections,
     "HSGP" => hsgp_corrections
 )
 
 # Show output Statistics
-@info "Yaw correction standard deviation : $(std(true_outputs["yaw"]))"
-@info "Yaw correction mean : $(mean(true_outputs["yaw"]))"
+@info "Yaw correction standard deviation : $(std(true_outputs.data))"
+@info "Yaw correction mean : $(mean(true_outputs.data))"
 
-fig_rmse_hspg = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[segs])
 fig_regression = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[segs])
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
+fig_rmse_hspg = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[segs])
+
+
+## Save hsgp parameters
+outdir = "out/3OfflineCorrection/3_HsgpResults"
+time = string(Dates.now())
+filename = "$(meta["data_key"])$(meta["trial_id"])_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
+
+d = size(input_feature, 1)
+
+input_stats = normalize_input ? [
+    mean(input_feature, dims=2)[:],
+    std(input_feature, dims=2)[:]
+] : [fill(0.0, d), fill(1.0, d)]
+
+output_stats = normalize_output ? [
+    mean(true_outputs.data, dims=2)[:],
+    std(true_outputs.data, dims=2)[:]
+] : [fill(0.0, 4), fill(1.0, 4)]
+
+feature_scaled = (input_feature .- input_stats[1]) ./ input_stats[2]
+z_thresh = 4.0
+# LL = margin * maximum(abs, feature_scaled, dims=2)[:]
+
+mask = all(feature_scaled .<= z_thresh, dims=1)[:]   # (n,)
+LL = margin * maximum(abs, feature_scaled[:, mask], dims=2)[:] # (d,)
+
+p = HybridZuptInsJl.HsgpParameters(
+    hp, size(input_feature, 1), m, LL;
+    input_stats=input_stats, output_stats=output_stats
+)
+HybridZuptInsJl.to_json(joinpath(outdir, filename), p;
+    metadata=Dict(
+        "data_key" => meta["data_key"],
+        "hyp_path" => hyp_path,
+        "trial_id" => trial_id,
+        "ref_frame" => FRAME,
+        "feature_type" => FEATURE_TYPE,
+        "margin" => margin,
+        "normalize_input" => normalize_input,
+        "normalize_output" => normalize_output,
+        "z_thresh" => z_thresh
+    )
+)

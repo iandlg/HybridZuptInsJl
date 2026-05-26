@@ -1,6 +1,5 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-
 m = 5
 d = 3
 ls = 0.5
@@ -15,6 +14,13 @@ x = [1 2 3; 4 5 6]
 eig_vects = HybridZuptInsJl.calc_eigenvectors(x, L, eig_per_dim)
 display(eig_vects)
 
+omega = sqrt.(eig_per_dim)
+psd = HybridZuptInsJl.power_spectral_density(omega, ls, sqrt(var_f))
+display(psd)
+
+eig_vects_dx1 = HybridZuptInsJl.calc_eigenvectors_dx(x, L, eig_per_dim, 1)
+display(eig_vects_dx1)
+
 ##
 ls = 0.1
 var_f = 2^2
@@ -25,12 +31,12 @@ N_plot = 500
 n_dim = 1
 
 L = [1]
-m = 30
-margin = 2
+m = 100
+margin = 1.6
 L_extended = [Li * margin for Li in L]
 
 ## 
-using LinearAlgebra, Distributions, Random, Plots
+using LinearAlgebra, Distributions, Random, Plots, GaussianProcesses
 
 # ---------- Squared exponential kernel ----------
 exp_kernel(x, y, ls) = exp.(-0.5 * ((x .- y') .^ 2) / ls^2)
@@ -56,7 +62,7 @@ K_ff = var_f * exp_kernel(x_plot, x_plot, ls)
 std_f = sqrt.(diag(K_ff))
 
 # ---------- Plot ----------
-plot(x_plot, f_plot, linewidth=2, label="True function", color=:black)
+plot!(x_plot, f_plot, linewidth=2, label="True function", color=:black)
 scatter!(x_train, y_train, markersize=4, label="Noisy observations", color=:red)
 plot!(x_plot, f_plot .+ 2 * std_f, linewidth=0, fillrange=f_plot .- 2 * std_f,
     fillalpha=0.3, color=:gray, label="±2σ of f")
@@ -82,7 +88,11 @@ gp_cov = K_ss - K_sx * K_yy_inv * K_xs
 # To get marginal variances (for confidence bands)
 gp_std = sqrt.(diag(gp_cov))
 
-## 
+## GP posterior with GaussianProcesses.jl
+gp = GP(x_train, y_train, MeanZero(), SE(log(ls), log(sqrt(var_f))), log(sqrt(var_n)))
+gpjl_mean, gpjl_var = predict_f(gp, x_test)
+
+##
 
 # ---------- HSGP posterior ----------
 # 1. Eigenvalues and basis matrices
@@ -114,6 +124,33 @@ hsgp_cov = var_n * phi_star * W                                  # (N_test, N_te
 # (Optional) marginal variances for confidence bands
 hsgp_std = sqrt.(diag(hsgp_cov))
 
+hsgp_var = var_n .* vec(sum(phi_star .* W', dims=2))   # (N_test,) 
+hsgp_std = sqrt.(hsgp_var)
+
+## Sequential fit HSGP
+per_dim_eigvals = HybridZuptInsJl.calc_eigenvalues(L_extended, m, d)
+omega = sqrt.(per_dim_eigvals)
+psd = HybridZuptInsJl.power_spectral_density(omega, ls, sqrt(var_f))
+beta = zeros(Float64, m)
+P_beta = Matrix(Diagonal(psd))
+
+for i in 1:size(x_train_mat, 1)
+    eigvect = HybridZuptInsJl.calc_eigenvectors(
+        fill(x_train[i], (1, 1)), L_extended, per_dim_eigvals)
+    beta, P_beta = HybridZuptInsJl.measurement_update(
+        beta, P_beta, [y_train[i]], eigvect, fill(var_n, (1, 1))
+    )
+
+end
+
+eigvect = HybridZuptInsJl.calc_eigenvectors(
+    x_test_mat, L_extended, per_dim_eigvals
+)
+hsgp_seq_mean = eigvect * beta
+hsgp_seq_cov = eigvect * P_beta * eigvect'
+
+hsgp_seq_std = sqrt.(diag(hsgp_seq_cov))
+
 ## 
 using Plots
 
@@ -142,5 +179,33 @@ title!(p2, "HSGP")
 xlabel!(p2, "x")
 ylabel!(p2, "f(x)")
 
+# Right subplot: HSGP
+p3 = plot(x_test, true_fun.(x_test);
+    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+plot!(p3, x_test, gpjl_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
+plot!(p3, x_test, gpjl_mean .- 2 .* sqrt.(gpjl_var), fillrange=gpjl_mean .+ 2 .* sqrt.(gpjl_var),
+    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+scatter!(p3, x_train, y_train; color=:red, markersize=2, label="Observations")
+title!(p3, "GaussianProcesses.jl package")
+xlabel!(p3, "x")
+ylabel!(p3, "f(x)")
+
+# Right subplot: HSGP
+p4 = plot(x_test, true_fun.(x_test);
+    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+plot!(p4, x_test, hsgp_seq_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
+plot!(p4, x_test, hsgp_seq_mean .- 2 .* hsgp_seq_std, fillrange=hsgp_seq_mean .+ 2 .* hsgp_seq_std,
+    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+scatter!(p4, x_train, y_train; color=:red, markersize=2, label="Observations")
+title!(p4, "Sequential Fit HSGP")
+xlabel!(p4, "x")
+ylabel!(p4, "f(x)")
 # Combine both subplots side by side
-plot(p1, p2; layout=(1, 2), size=(1000, 400))
+plot(p1, p2, p3, p4; layout=(2, 2), size=(1000, 900))
+
+## Compute difference between options
+rmse = sqrt.(mean((gp_mean - gpjl_mean) .^ 2))
+rmse_var = sqrt.(mean((gp_mean .- 2 .* gp_std - (gpjl_mean .- 2 .* sqrt.(gpjl_var))) .^ 2))
+rmse_hsgp = sqrt.(mean((gp_mean - hsgp_mean) .^ 2))
+rmse_var = sqrt.(mean((gp_mean.-2 .* gp_std-(hsgp_mean.-2 .* hsgp_std))[50:450] .^ 2))
+rmse_var = sqrt.(mean(((hsgp_mean .- 2 .* hsgp_std) - (hsgp_seq_mean .- 2 .* hsgp_seq_std)) .^ 2))
