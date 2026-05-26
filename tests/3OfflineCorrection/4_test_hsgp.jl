@@ -47,7 +47,7 @@ hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
     m=m, margin=margin, feature_type=FEATURE_TYPE
 )
 
-# Apply corrections (using CorrectionOutput objects)
+# Apply corrections (using CorrectionIO objects)
 true_output_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
     true_outputs,
@@ -85,8 +85,8 @@ outputs = OrderedDict(
 )
 
 # Show output Statistics
-@info "Yaw correction standard deviation : $(std(true_outputs["yaw"]))"
-@info "Yaw correction mean : $(mean(true_outputs["yaw"]))"
+@info "Yaw correction standard deviation : $(std(true_outputs.data))"
+@info "Yaw correction mean : $(mean(true_outputs.data))"
 
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[segs])
 fig_regression = HybridZuptInsJl.plot_regression_results(outputs, true_outputs)

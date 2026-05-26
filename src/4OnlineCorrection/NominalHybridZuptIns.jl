@@ -215,8 +215,8 @@ function hybrid_nominal_zupt_aided_ins(
         pred_outputs["output_std"] = pred_outputs["output_std"][1:end-1]
     end
     pred_outputs["t"] = pred_outputs["t"][1:end-1]
-    true_outputs = CorrectionOutput(true_outputs)
-    pred_outputs = CorrectionOutput(pred_outputs)
+    true_outputs = CorrectionIO(true_outputs)
+    pred_outputs = CorrectionIO(pred_outputs)
 
     beta_hist = hcat(beta_hist...)
 

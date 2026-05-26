@@ -37,8 +37,8 @@ x_init = vcat(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
+true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
@@ -62,7 +62,6 @@ zupt, classic_ins_traj, step_seg, pred_outputs["model"], _, _ = HybridZuptInsJl.
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE, correct=false
 )
 
-
 step_trajs = OrderedDict(
     "model" => classic_ins_traj[segs],
     "model + GP" => gp_ins_traj[segs],
@@ -80,18 +79,12 @@ fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned)
 fig_out_hsgp = HybridZuptInsJl.plot_regression_results(pred_outputs, true_outputs["model + GP"])
 
-fig_in_gp = HybridZuptInsJl.plot_input_features(hcat(tr_input_gp["input"]...), tr_input_gp["t"])
-fig_in_hsgp = HybridZuptInsJl.plot_input_features(hcat(tr_input["input"]...), tr_input["t"])
+fig_in_gp = HybridZuptInsJl.plot_input_features(tr_input_gp)
+fig_in_hsgp = HybridZuptInsJl.plot_input_features(tr_input)
 
-tr_correctiondata = HybridZuptInsJl.CorrectionOutput(
-    tr_target["t"], hcat(tr_target["output"]...)
-)
-tr_correctiondata_gp = HybridZuptInsJl.CorrectionOutput(
-    tr_target_gp["t"], hcat(tr_target_gp["output"]...)
-)
-fig_out = HybridZuptInsJl.plot_regression_results(OrderedDict(
-    "GP" => tr_correctiondata_gp,
-    "HSGP" => tr_correctiondata
+fig_out = HybridZuptInsJl.plot_regression_results(OrderedDict{String,HybridZuptInsJl.CorrectionIO}(
+    "GP" => tr_target_gp,
+    "HSGP" => tr_target
 ))
 
 # fig_2D = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned; samples=1000000)

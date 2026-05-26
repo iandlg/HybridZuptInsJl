@@ -50,7 +50,7 @@ function evaluate_hyperparameter_variability(
     for fold_idx in 1:n_folds
         hp = hyperparams_vec[fold_idx]
 
-        # GP predictions (returns CorrectionOutput)
+        # GP predictions (returns CorrectionIO)
         pred, _ = compute_corrections(
             input_feature,
             output,

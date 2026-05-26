@@ -1,41 +1,45 @@
 """
-    CorrectionOutput <: AbstractTimeSeries
+    CorrectionIO <: AbstractTimeSeries
 
-Struct for storing correction outputs from GP, HSGP, or online correction methods.
-Contains position and yaw corrections with optional standard deviations.
+Mutable struct for storing correction inputs and outputs from GP, HSGP, or online correction methods.
 
 # Fields
 - `t::Vector{Float64}`: Time stamps (strictly increasing)
-- `output::Matrix{Float64}`: Correction outputs, size (4, n_steps) where:
-  - rows 1-3: position corrections (x, y, z) in meters
-  - row 4: yaw correction in radians
-- `output_std::Union{Nothing, Matrix{Float64}}`: Optional standard deviations with same shape as output
+- `data::Matrix{Float64}`: Correction IO, size (n_channels, n_steps) where:
+- `data_std::Union{Nothing, Matrix{Float64}}`: Optional standard deviations with same shape as data
 """
-struct CorrectionOutput <: AbstractTimeSeries
+mutable struct CorrectionIO <: AbstractTimeSeries
     t::Vector{Float64}
-    output::Matrix{Float64}           # 4 x n_steps: [pos1, pos2, pos3, yaw]
-    output_std::Union{Nothing,Matrix{Float64}}
+    data::Matrix{Float64}
+    data_std::Union{Nothing,Matrix{Float64}}
 
-    function CorrectionOutput(
+    function CorrectionIO(
         t::Vector{Float64},
-        output::Matrix{Float64},
-        output_std::Union{Nothing,Matrix{Float64}}=nothing
+        data::Matrix{Float64},
+        data_std::Union{Nothing,Matrix{Float64}}=nothing
     )
         length(size(t)) == 1 || throw(ArgumentError("t must be 1-D"))
         all(diff(t) .> 0) || throw(ArgumentError("t must be strictly increasing"))
-        size(output, 1) == 4 || throw(ArgumentError("output must have 4 rows (pos1,pos2,pos3,yaw)"))
-        length(t) == size(output, 2) || throw(ArgumentError("length(t) must match size(output,2)"))
+        length(t) == size(data, 2) || throw(ArgumentError("length(t) must match size(output,2)"))
 
-        if !isnothing(output_std)
-            size(output_std) == size(output) ||
+        if !isnothing(data_std)
+            size(data_std) == size(data) ||
                 throw(ArgumentError("output_std must have same shape as output"))
         end
 
-        new(t, output, output_std)
+        new(t, data, data_std)
     end
 end
 
-function CorrectionOutput(d::Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}})
+function CorrectionIO(n_channel::Int, std::Bool)
+    CorrectionIO(
+        Float64[],
+        Matrix{Float64}(undef, n_channel, 0),
+        std ? Matrix{Float64}(undef, n_channel, 0) : nothing
+    )
+end
+
+function CorrectionIO(d::Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}})
     t = d["t"]
     output = d["output"]
     output_std = get(d, "output_std", nothing)
@@ -49,23 +53,35 @@ function CorrectionOutput(d::Dict{String,Union{Vector{Vector{Float64}},Vector{Fl
         return nothing
     end
 
-    return CorrectionOutput(t, output_mat, output_std_mat)
+    return CorrectionIO(t, output_mat, output_std_mat)
 end
 
-function Base.getindex(s::CorrectionOutput, mask::AbstractVector{Bool})
-    CorrectionOutput(
+function Base.getindex(s::CorrectionIO, mask::AbstractVector{Bool})
+    CorrectionIO(
         s.t[mask],
-        s.output[:, mask],
-        isnothing(s.output_std) ? nothing : s.output_std[:, mask]
+        s.data[:, mask],
+        isnothing(s.data_std) ? nothing : s.data_std[:, mask]
     )
 end
 
-function Base.getindex(s::CorrectionOutput, idx::AbstractVector{<:Integer})
-    CorrectionOutput(
+function Base.getindex(s::CorrectionIO, idx::AbstractVector{<:Integer})
+    CorrectionIO(
         s.t[idx],
-        s.output[:, idx],
-        isnothing(s.output_std) ? nothing : s.output_std[:, idx]
+        s.data[:, idx],
+        isnothing(s.data_std) ? nothing : s.data_std[:, idx]
     )
+end
+
+function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std::Union{Nothing,Vector{Float64}}=nothing)
+    n_channel = size(s.data, 1)
+    length(data) == n_channel || throw("Wrong number of data channels.")
+    isempty(s.t) || s.t[end] < t || throw("Time series must be strictly increasing.")
+    if !isnothing(data_std)
+        length(data_std) == n_channel || throw("Wrong number of std channels")
+        s.data_std = hcat(s.data_std, data_std)
+    end
+    push!(s.t, t)
+    s.data = hcat(s.data, data)
 end
 
 struct SeHyperparams

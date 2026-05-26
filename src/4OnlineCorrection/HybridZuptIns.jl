@@ -42,18 +42,11 @@ function hybrid_zupt_aided_ins(
     n_train_cutoff = floor(Int, train_ratio * N)
     gt_available = [n <= n_train_cutoff for n in 1:N]
 
-    true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "output" => Vector{Float64}[], "t" => Float64[]
-    )
-    pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "output" => Vector{Float64}[], "t" => Float64[]
-    )
-    training_inputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "input" => Vector{Float64}[], "t" => Float64[]
-    )
-    training_targets = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "output" => Vector{Float64}[], "t" => Float64[]
-    )
+    # Feature dimensionality driven by feature_type (same as before)
+    d_feat = feature_type == THREED_STEP ? 3 :
+             feature_type == TWOD_STEP_DT ? 3 :   # 2 step dims + Δt
+             feature_type == THREED_STEP_DT ? 4 : 3
+
 
 
     seg_start = 2
@@ -91,6 +84,17 @@ function hybrid_zupt_aided_ins(
     sigma_ψ_gt = 1e-3
     sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt) # σ_GTx σ_GTy σ_GT_z σ_GTψ
     sigma_dt = 1e-5
+
+
+    true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+    pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
+        "output" => Vector{Float64}[], "t" => Float64[]
+    )
+
+    training_inputs = CorrectionIO(d_feat, true)
+    training_outputs = CorrectionIO(p, true)
 
     while true
         ΔP = zeros(Float64, 9, 9)
@@ -212,6 +216,7 @@ function hybrid_zupt_aided_ins(
             end
             B_estim = reshape(beta, (params.m, p))
             input_cov_norm = (J_ϕ * B_estim)' * feature_cov_norm * (J_ϕ * B_estim)
+            tt_target_cov_norm = input_cov_norm + target_cov_norm
 
             # ---------- Construct measurement matrix H_update --------------
             eigvect = calc_eigenvectors(
@@ -227,10 +232,8 @@ function hybrid_zupt_aided_ins(
                     beta, P_beta, target_norm, H_update, Diagonal(noise_vect .^ 2)
                 )
                 push!(beta_hist, beta)
-                push!(training_targets["output"], target_norm)
-                push!(training_targets["t"], inertial.t[prev_step])
-                push!(training_inputs["input"], feature_estimate_norm)
-                push!(training_inputs["t"], inertial.t[prev_step])
+                append_io!(training_inputs, inertial.t[prev_step], feature_estimate_norm, sqrt.(diag(feature_cov_norm)))
+                append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(tt_target_cov_norm)))
 
             end
             # @info "Marginal noise during weight update : $(sqrt.(Diagonal(target_cov_norm + input_cov_norm)))"
@@ -418,5 +421,5 @@ function hybrid_zupt_aided_ins(
 
     beta_hist = hcat(beta_hist...)
 
-    return zupt, zupt_ins_traj, step_seg, CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs), beta_hist, training_inputs, training_targets
+    return zupt, zupt_ins_traj, step_seg, CorrectionIO(true_outputs), CorrectionIO(pred_outputs), beta_hist, training_inputs, training_outputs
 end

@@ -6,7 +6,7 @@
     ref_frame::ReferenceFrame = BODY,
     feature_type::FeatureType = THREED_STEP
 ) ->
-(output::CorrectionOutput, input_feature::Matrix{Float64})
+(output::CorrectionIO, input_feature::Matrix{Float64})
 
 Compute training inputs and outputs for GP regression from a pair of trajectories.
 
@@ -18,7 +18,7 @@ Compute training inputs and outputs for GP regression from a pair of trajectorie
 - `feature_type` : Type of feature to use during the regression (`THREED_STEP` ,`TWOD_STEP_DT`, `THREED_STEP_DT`).
 
 # Returns
-- `output`: CorrectionOutput with position (x,y,z) and yaw corrections at step times.
+- `output`: CorrectionIO with position (x,y,z) and yaw corrections at step times.
 - `input_feature`: Inertial step vectors in `ref_frame`, size varies by feature_type.
 
 # Throws
@@ -30,7 +30,7 @@ function compute_training_io(
     step_seg::Vector{Int};
     ref_frame::ReferenceFrame=BODY,
     feature_type::FeatureType=THREED_STEP
-)::Tuple{CorrectionOutput,Matrix{Float64}}
+)::Tuple{CorrectionIO,Matrix{Float64}}
     if !is_compatible(traj, traj_gt)
         throw(ArgumentError("TimeSeries must be compatible."))
     end
@@ -71,8 +71,8 @@ function compute_training_io(
     )
     input_feature = feature_selectors[feature_type]()
 
-    # Create CorrectionOutput at step boundaries
-    correction_output = CorrectionOutput(traj.t[step_seg[1:end-1]], outputs, nothing)
+    # Create CorrectionIO at step boundaries
+    correction_output = CorrectionIO(traj.t[step_seg[1:end-1]], outputs, nothing)
 
     return correction_output, input_feature
 end
@@ -80,7 +80,7 @@ end
 """
     apply_corrections(
         traj::Trajectory,
-        corrections::Union{CorrectionOutput, Matrix{Float64}},
+        corrections::Union{CorrectionIO, Matrix{Float64}},
         segs::Vector{Int};
         ref_frame::ReferenceFrame = BODY
     ) -> Trajectory
@@ -90,7 +90,7 @@ trajectory sampled at the step segment indices.
 
 # Arguments
 - `traj`: Complete inertial trajectory to correct.
-- `corrections`: CorrectionOutput or (4 x n_steps) matrix with [pos1, pos2, pos3, yaw] corrections.
+- `corrections`: CorrectionIO or (4 x n_steps) matrix with [pos1, pos2, pos3, yaw] corrections.
 - `segs`: Indices marking step boundaries in `traj` (length `n_steps`).
 - `ref_frame`: Reference frame for step vector computation (`BODY` or `HEADING`).
 
@@ -99,11 +99,11 @@ trajectory sampled at the step segment indices.
 """
 function apply_corrections(
     traj::Trajectory,
-    corrections::CorrectionOutput,
+    corrections::CorrectionIO,
     segs::Vector{Int};
     ref_frame::ReferenceFrame=BODY
 )::Trajectory
-    apply_corrections(traj, corrections.output, segs; ref_frame=ref_frame)
+    apply_corrections(traj, corrections.data, segs; ref_frame=ref_frame)
 end
 
 function apply_corrections(
@@ -477,36 +477,36 @@ end
 """
     compute_corrections(
         input_feature::Matrix{Float64},
-        outputs::CorrectionOutput,
+        outputs::CorrectionIO,
         correction_method::Function,
         hyperparameters::Union{Nothing,SeHyperparams}=nothing;
         feature_type::FeatureType=THREED_STEP,
         kwargs...
-    ) -> Tuple{CorrectionOutput, Union{Nothing, Vector{SeHyperparams}}}
+    ) -> Tuple{CorrectionIO, Union{Nothing, Vector{SeHyperparams}}}
 
 Apply a given correction method (e.g. GP, static mean) to the yaw and each position
-component, returning predictions as CorrectionOutput and hyperparameters.
+component, returning predictions as CorrectionIO and hyperparameters.
 
 # Arguments
 - `input_feature`: input features, size `(n_features, n_samples)`.
-- `outputs`: Target values, either CorrectionOutput.
+- `outputs`: Target values, either CorrectionIO.
 - `correction_method`: function with signature `(x::Matrix{Float64}, y::Vector{Float64}; kwargs...) -> (predictions::Vector{Float64}, predictions_std, hyperparams::Any)`.
 - `hyperparameters`: Optional SeHyperparams for fixed kernel parameters.
 - `feature_type`: Type of input features (THREED_STEP, TWOD_STEP_DT, THREED_STEP_DT).
 - `kwargs`: Extra keyword arguments passed to `correction_method`.
 
 # Returns
-- `predictions`: CorrectionOutput with position (x,y,z) and yaw corrections, including uncertainties if available.
+- `predictions`: CorrectionIO with position (x,y,z) and yaw corrections, including uncertainties if available.
 - `hyperparameters`: Vector of SeHyperparams structs (one per fold/method invocation).
 """
 function compute_corrections(
     input_feature::Matrix{Float64},
-    outputs::CorrectionOutput,
+    outputs::CorrectionIO,
     correction_method::Function,
     hyperparameters::Union{Nothing,SeHyperparams}=nothing;
     feature_type::FeatureType=THREED_STEP,
     kwargs...
-)::Tuple{CorrectionOutput,Union{Nothing,Vector{SeHyperparams}}}
+)::Tuple{CorrectionIO,Union{Nothing,Vector{SeHyperparams}}}
 
     n_samples = size(input_feature, 2)
     @assert length(outputs) == n_samples
@@ -518,17 +518,17 @@ function compute_corrections(
         )
     end
 
-    predictions = zeros(Float64, size(outputs.output))
+    predictions = zeros(Float64, size(outputs.data))
     predictions_std = nothing
     hyperparams_dict = Dict{String,Union{Matrix{Float64},Nothing}}()
 
     # Yaw correction
     @info "Computing Yaw corrections"
-    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.output[4, :]; hyperparameter=hp.yaw, kwargs...)
+    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp.yaw, kwargs...)
     predictions[4, :] = yaw_pred
     if !isnothing(yaw_std)
         if isnothing(predictions_std)
-            predictions_std = zeros(Float64, size(outputs.output))
+            predictions_std = zeros(Float64, size(outputs.data))
         end
         predictions_std[4, :] = yaw_std
     end
@@ -543,11 +543,11 @@ function compute_corrections(
         end
 
         d_hyp = getfield(hp, Symbol("pos_$d"))
-        pos_pred, pos_std, hyperparams_dict["pos_$d"] = correction_method(input_feature, outputs.output[d, :]; hyperparameter=d_hyp, kwargs...)
+        pos_pred, pos_std, hyperparams_dict["pos_$d"] = correction_method(input_feature, outputs.data[d, :]; hyperparameter=d_hyp, kwargs...)
         predictions[d, :] = pos_pred
         if !isnothing(pos_std)
             if isnothing(predictions_std)
-                predictions_std = zeros(Float64, size(outputs.output))
+                predictions_std = zeros(Float64, size(outputs.data))
             end
             predictions_std[d, :] = pos_std
         end
@@ -556,8 +556,8 @@ function compute_corrections(
     # Convert hyperparams to list of SeHyperparams structs per fold
     hyperparams = _convert_hyperparams_to_struct_list(hyperparams_dict)
 
-    # Create and return CorrectionOutput
-    pred_output = CorrectionOutput(outputs.t, predictions, predictions_std)
+    # Create and return CorrectionIO
+    pred_output = CorrectionIO(outputs.t, predictions, predictions_std)
     return pred_output, hyperparams
 end
 

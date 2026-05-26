@@ -96,6 +96,10 @@ function hybrid_zupt_aided_ins_gp(
     R_aug_nb = zeros(Float64, (p, p))
     R_aug_nb[p, p] = 1.0
 
+    training_inputs = CorrectionIO(d_feat, false)
+    training_outputs = CorrectionIO(p, true)
+
+
     while true
         ΔP = zeros(Float64, 9, 9)
         ΔP[1:3, 1:3] = Diagonal(sigma_initial_pos_array(simdata) .^ 2)
@@ -201,11 +205,9 @@ function hybrid_zupt_aided_ins_gp(
                 # Accumulate normalised observations
                 X_train = hcat(X_train, feature_norm)       # d_feat × n
                 Y_train = hcat(Y_train, target_norm)        # p      × n
-                push!(training_targets["output"], target_norm)
-                push!(training_targets["t"], inertial.t[prev_step])
-                push!(training_inputs["input"], feature_norm)
-                push!(training_inputs["t"], inertial.t[prev_step])
 
+                append_io!(training_inputs, inertial.t[prev_step], feature_norm)
+                append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(target_cov_norm)))
 
                 # Refit all GPs on the growing dataset
                 for i in 1:p
@@ -316,6 +318,6 @@ function hybrid_zupt_aided_ins_gp(
     end
 
     return zupt, zupt_ins_traj, step_seg,
-    CorrectionOutput(true_outputs), CorrectionOutput(pred_outputs),
-    training_inputs, training_targets
+    CorrectionIO(true_outputs), CorrectionIO(pred_outputs),
+    training_inputs, training_outputs
 end

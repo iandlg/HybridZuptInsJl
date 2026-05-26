@@ -1,26 +1,21 @@
 """
     plot_regression_results(
-        pred_data::Union{Nothing,AbstractDict{String,Union{CorrectionOutput, Dict}}},
-        true_data::Union{CorrectionOutput, Matrix{Float64}})
+        pred_data::Union{Nothing,AbstractDict{String,Union{CorrectionIO, Dict}}},
+        true_data::Union{CorrectionIO, Matrix{Float64}})
 
 Plot regression results for yaw and position components (X, Y, Z) with RMSE annotations.
-Supports both CorrectionOutput objects and traditional dictionary/matrix formats.
+Supports both CorrectionIO objects and traditional dictionary/matrix formats.
 
 # Arguments
-- `pred_data`: Dictionary mapping method names to CorrectionOutput or dict with:
-    - `"yaw"` → predicted yaw (Vector{Float64}, length N)
-    - `"pos"` → predicted positions (Matrix{Float64}, size 3×N)
-- `true_data`: CorrectionOutput or dict/matrix with:
-    - `"yaw"` → true yaw (Vector{Float64}, length N)
-    - `"pos"` → true positions (Matrix{Float64}, size 3×N)
-    - `"t"`   → (optional) time vector (Vector{Float64}, length N)
+- `pred_data`: Dictionary mapping method names to CorrectionIO
+- `true_data`: CorrectionIO
 
 # Returns
 - `Figure` object.
 """
 function plot_regression_results(
-    pred_data::Union{Nothing,AbstractDict{String,CorrectionOutput}},
-    true_data::Union{Nothing,CorrectionOutput}=nothing
+    pred_data::Union{Nothing,AbstractDict{String,CorrectionIO}},
+    true_data::Union{Nothing,CorrectionIO}=nothing
 )
     # ── Time axis: prefer true_data, else first pred ──────────────────
     ref = isnothing(true_data) ? first(values(pred_data)) : true_data
@@ -28,7 +23,7 @@ function plot_regression_results(
     N = length(t)
 
     titles = ["X correction (m)", "Y correction (m)", "Z correction (m)", "Yaw correction (rad)"]
-    row_idx = [1, 2, 3, 4]   # output row indices
+    row_idx = [1, 2, 3, 4]
 
     fig = Figure(size=(1200, 900))
     axes = Vector{Axis}(undef, 4)
@@ -42,12 +37,12 @@ function plot_regression_results(
     # ── Ground truth ──────────────────────────────────────────────────
     if !isnothing(true_data)
         for (plot_idx, row) in enumerate(row_idx)
-            lines!(axes[plot_idx], true_data.t, true_data.output[row, :];
+            lines!(axes[plot_idx], true_data.t, true_data.data[row, :];
                 color=:black, linewidth=0.9, label="True")
 
-            if !isnothing(true_data.output_std)
-                μ = true_data.output[row, :]
-                σ = true_data.output_std[row, :]
+            if !isnothing(true_data.data_std)
+                μ = true_data.data[row, :]
+                σ = true_data.data_std[row, :]
                 label = "True ±σ"
                 band!(axes[plot_idx], true_data.t, μ .- σ, μ .+ σ;
                     color=(:black, 0.15), label=label)
@@ -74,7 +69,7 @@ function plot_regression_results(
 
                 for (plot_idx, row) in enumerate(row_idx)
                     rmse[plot_idx] = sqrt(mean(
-                        (pred_trim.output[row, :] .- gt_trim.output[row, :]) .^ 2))
+                        (pred_trim.data[row, :] .- gt_trim.data[row, :]) .^ 2))
                 end
             end
 
@@ -83,15 +78,15 @@ function plot_regression_results(
                            " (RMSE=$(round(rmse[plot_idx]; digits=4)))"
                 label = "$method_name$rmse_str"
 
-                lines!(axes[plot_idx], pred.t, pred.output[row, :];
+                lines!(axes[plot_idx], pred.t, pred.data[row, :];
                     color=color,
                     linewidth=1.4,
                     label=label)
 
                 # ── Confidence band (±1 std) ──────────────────────────
-                if !isnothing(pred.output_std)
-                    μ = pred.output[row, :]
-                    σ = pred.output_std[row, :]
+                if !isnothing(pred.data_std)
+                    μ = pred.data[row, :]
+                    σ = pred.data_std[row, :]
                     label = "$method_name ±σ"
                     band!(axes[plot_idx], pred.t, μ .- σ, μ .+ σ;
                         color=(color, 0.15), label=label)
@@ -111,8 +106,8 @@ function plot_regression_results(
 end
 
 function plot_regression_results(
-    pred_data::CorrectionOutput,
-    true_data::Union{Nothing,CorrectionOutput}=nothing
+    pred_data::CorrectionIO,
+    true_data::Union{Nothing,CorrectionIO}=nothing
 )
 
     pred_data = Dict(
@@ -141,27 +136,40 @@ Plot three-dimensional input features over time.
 function plot_input_features(
     features::Matrix{Float64},
     t::Union{Vector{Float64},Nothing}=nothing;
+    feature_std::Union{Nothing,Matrix{Float64}}=nothing,
     labels::Union{Vector{String},Nothing}=nothing,
     title::String="Input Features"
 )
-    @assert size(features, 1) == 3 "features must have 3 rows"
     N = size(features, 2)
+    n_channel = size(features, 1)
     if t === nothing
         t = 1:N
     end
     if labels === nothing
-        labels = ["x", "y", "z"]
+        labels = ["Feature $i" for i in 1:n_channel]
     end
-    @assert length(labels) == 3 "Must provide three labels"
 
-    colors = [:red, :green, :blue]
+    colors = [:red, :blue, :green, :orange, :purple]
     fig = Figure(size=(800, 400))
     ax = Axis(fig[1, 1]; xlabel="Time (s)", ylabel="Value", title=title,
         xgridvisible=true, ygridvisible=true)
 
     for i in 1:3
         lines!(ax, t, features[i, :]; color=colors[i], linewidth=1.2, label=labels[i])
+
+        if !isnothing(feature_std)
+            label = "Feature $i ±σ"
+            band!(ax, t, features[i, :] .- feature_std[i, :], features[i, :] .+ feature_std[i, :];
+                color=(colors[i], 0.15), label=label)
+
+        end
     end
     axislegend(ax; position=:rt)
     return fig
+end
+
+function plot_input_features(
+    features::CorrectionIO
+)
+    plot_input_features(features.data, features.t; feature_std=features.data_std)
 end

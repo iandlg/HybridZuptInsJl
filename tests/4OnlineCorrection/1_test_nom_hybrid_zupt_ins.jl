@@ -39,8 +39,8 @@ x_init = vcat(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionOutput}()
+true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
@@ -103,7 +103,7 @@ fig_out_hspg = HybridZuptInsJl.plot_regression_results(pred_outputs["model + HSG
 fig_out_gp = HybridZuptInsJl.plot_regression_results(pred_outputs["model + GP"], true_outputs["model + GP"])
 
 fig_in = HybridZuptInsJl.plot_input_features(hcat(tr_input["input"]...), tr_input["t"])
-tr_correctiondata = HybridZuptInsJl.CorrectionOutput(
+tr_correctiondata = HybridZuptInsJl.CorrectionIO(
     tr_target["t"], hcat(tr_target["output"]...)
 )
 fig_out = HybridZuptInsJl.plot_regression_results(tr_correctiondata)
