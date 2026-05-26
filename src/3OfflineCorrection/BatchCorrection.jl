@@ -334,7 +334,11 @@ function compute_gp_corrections(
             # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
         end
 
-        y_pred, y_var = GaussianProcesses.predict_y(gp, x_test)
+        y_pred, y_var = GaussianProcesses.predict_f(gp, x_test)
+        if i == 1
+            @info "Predicted Variance" y_var
+        end
+
         y_testing_gp[test_ind] = normalize_y ? y_pred .* y_σ .+ y_μ : y_pred
         y_testing_gp_std[test_ind] = normalize_y ? sqrt.(y_var) .* y_σ : sqrt.(y_var)
 
@@ -394,7 +398,12 @@ function compute_hsgp_corrections(
 
     # 2. Domain bounds L = margin * max(|x_scaled|) per dimension
     L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
-    @show L_vec
+
+    z_thresh = 10.0
+    mask = all(x_scaled .<= z_thresh, dims=1)[:]   # (n,)
+    L_vec = margin * maximum(abs, x_scaled[:, mask], dims=2)[:] # (d,)
+
+    @info "HSGP input domain" L_vec
     # 3. Compute eigenvalues (per‑dimension components)
     eigvals = calc_eigenvalues(L_vec, m, d)   # (m, d)
 
@@ -523,7 +532,7 @@ function compute_corrections(
     hyperparams_dict = Dict{String,Union{Matrix{Float64},Nothing}}()
 
     # Yaw correction
-    @info "Computing Yaw corrections"
+    @info "------------ Computing Yaw corrections ---------------"
     yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp.yaw, kwargs...)
     predictions[4, :] = yaw_pred
     if !isnothing(yaw_std)
@@ -531,11 +540,12 @@ function compute_corrections(
             predictions_std = zeros(Float64, size(outputs.data))
         end
         predictions_std[4, :] = yaw_std
+        @info "Yaw Standard deviation" yaw_std
     end
 
     # Position corrections
     for d in 1:3
-        @info "Computing pos_$d corrections"
+        @info "--------------- Computing pos_$d corrections ---------------"
         if feature_type == TWOD_STEP_DT && d == 3 # Avoid ill posed problem in x,y inputs
             hyperparams_dict["pos_$d"] = nothing
             @info "$feature_type , $d"

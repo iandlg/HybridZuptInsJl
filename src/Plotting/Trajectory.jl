@@ -114,8 +114,6 @@ function plot_position_rmse(trajs::Union{AbstractDict{String,Trajectory},Traject
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
         # Horizontal errors at each time step (squared, per sample)
         cum_rmse = rmse(traj, gt_traj)
-        @show typeof(cum_rmse)
-        @show size(cum_rmse)
 
         # Legend label: use traj.name if present, otherwise create from key
         if hasproperty(traj, :name) && !isnothing(traj.name)

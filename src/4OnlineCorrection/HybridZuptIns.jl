@@ -258,11 +258,7 @@ function hybrid_zupt_aided_ins(
                 I zeros(Float64, (3, 6));
                 zeros(Float64, (1, 8)) 1.0
             ]
-            # display(H_gt)
-            # @info "ground truth $(vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]))"
-            # @info "x before update $(vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]))"
-            # @info "difference $(vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]))"
-            # Update with training data when gt is supposedly available
+
             if gt_available[prev_step] && gt_available[curr_step]
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
@@ -272,7 +268,6 @@ function hybrid_zupt_aided_ins(
                     H_gt,
                     Diagonal(sigma_gt .^ 2)
                 )
-                # @info "δx = $(dx[:, curr_step])"
 
                 # -------- Compensate error -------------
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(
@@ -280,14 +275,6 @@ function hybrid_zupt_aided_ins(
                     dx[:, curr_step],
                     quat[:, curr_step]
                 )
-                # x[1:3, curr_step] = gt_traj.pos[:, curr_step]
-                # quat[:, curr_step] = matrix_to_quat(gt_traj.R_nb[:, :, curr_step])
-
-
-                # @info "x after update $(x[[1,2,3,9], curr_step])"
-
-                # x[1:3, curr_step] = gt_traj.pos[:, curr_step]
-                # quat[:, curr_step] = matrix_to_quat(gt_traj.R_nb[:, :, curr_step])
             end
 
             if !gt_available[curr_step] && correct
@@ -354,7 +341,7 @@ function hybrid_zupt_aided_ins(
 
                 # Compute prediction covariance
                 pred_cov_norm = Φ * P_beta * Φ'
-                @info "Predictive covariance : " pred_cov_norm
+
                 pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm * Diagonal(params.output_stats[2])
 
                 # Compute combined uncertainty from GP and input

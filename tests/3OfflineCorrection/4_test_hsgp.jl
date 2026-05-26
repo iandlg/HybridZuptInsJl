@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using Statistics
 using OrderedCollections, Dates
 
-hyp_key = 41
+hyp_key = 10
 hyp_path = Dict{Int,String}(
     10 => "out/3OfflineCorrection/2_VariabilityResults/PY_ANG15_BODY_THREED_STEP.json",
     20 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_THREED_STEP_2026-05-13T14:14:24.485.json",
@@ -22,7 +22,7 @@ normalize_output = meta["normalize_output"]
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-m = 1200
+m = 500
 margin = 1.7
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -47,7 +47,7 @@ hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
     m=m, margin=margin, feature_type=FEATURE_TYPE
 )
 
-# Apply corrections (using CorrectionIO objects)
+# Apply corrections
 true_output_traj = HybridZuptInsJl.apply_corrections(
     ins_traj_aligned,
     true_outputs,
@@ -107,23 +107,18 @@ input_stats = normalize_input ? [
     std(input_feature, dims=2)[:]
 ] : [fill(0.0, d), fill(1.0, d)]
 
-yaw_stats = normalize_output ? [
-    mean(true_outputs["yaw"]),
-    std(true_outputs["yaw"])
-] : [0.0, 1.0]
-
-pos_stats = normalize_output ? [
-    mean(true_outputs["pos"], dims=2)[:],
-    std(true_outputs["pos"], dims=2)[:]
-] : [fill(0.0, 3), fill(1.0, 3)]
-
 output_stats = normalize_output ? [
-    vcat(pos_stats[1], yaw_stats[1]),
-    vcat(pos_stats[2], yaw_stats[2])
-] : [vcat(fill(0.0, 3), 0.0), vcat(fill(1.0, 3), 1.0)]
+    mean(true_outputs.data, dims=2)[:],
+    std(true_outputs.data, dims=2)[:]
+] : [fill(0.0, 4), fill(1.0, 4)]
 
 feature_scaled = (input_feature .- input_stats[1]) ./ input_stats[2]
-LL = margin * maximum(abs, feature_scaled, dims=2)[:]
+z_thresh = 4.0
+# LL = margin * maximum(abs, feature_scaled, dims=2)[:]
+
+mask = all(feature_scaled .<= z_thresh, dims=1)[:]   # (n,)
+LL = margin * maximum(abs, feature_scaled[:, mask], dims=2)[:] # (d,)
+
 p = HybridZuptInsJl.HsgpParameters(
     hp, size(input_feature, 1), m, LL;
     input_stats=input_stats, output_stats=output_stats
@@ -137,6 +132,7 @@ HybridZuptInsJl.to_json(joinpath(outdir, filename), p;
         "feature_type" => FEATURE_TYPE,
         "margin" => margin,
         "normalize_input" => normalize_input,
-        "normalize_output" => normalize_output
+        "normalize_output" => normalize_output,
+        "z_thresh" => z_thresh
     )
 )
