@@ -12,6 +12,7 @@ import GaussianProcesses
 import PDMats
 using Distributions
 using Dates
+import MultivariateStats
 
 # Resolve ambiguity between GaussianProcesses.jl and PDMats.jl
 # function LinearAlgebra.ldiv!(
@@ -53,6 +54,7 @@ include("Plotting/Steps.jl")
 include("Plotting/OfflineCorrection.jl")
 include("Plotting/PlotHypVariability.jl")
 include("Plotting/OnlineCorrection.jl")
+include("Plotting/CorrelationAnalysis.jl")
 
 end
 
