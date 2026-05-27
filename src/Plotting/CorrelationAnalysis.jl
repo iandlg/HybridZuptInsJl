@@ -113,40 +113,11 @@ function run_correlation_analysis(
     println("\nCCA Results:")
     println("Canonical correlations: ", round.(canonical_corrs[1:n_components], digits=4))
     println("Total canonical correlation: ", round(sqrt(mean(canonical_corrs[1:n_components] .^ 2)), digits=4))
-    println("x_proj : ")
-    display(x_proj)
-    println("y_proj : ")
-    display(y_proj)
-
-    # println("="^60)
-    # println("  CCA INTERPRETATION FOR: $title")
-    # println("="^60)
-
-    # # Iterate through each canonical dimension
-    # num_dims = length(corrs)
-    # for i in 1:num_dims
-    #     @printf("\nStandard Dimension %d (Correlation: %.4f)\n", i, corrs[i])
-    #     println("-"^45)
-
-    #     # Display Input (X) Weights
-    #     println("  Input Weights (X):")
-    #     for j in 1:length(x_labels)
-    #         @printf("    %-10s : %6.3f\n", x_labels[j], x_proj[j, i])
-    #     end
-
-    #     # Display Output (Y) Weights
-    #     println("  Output Weights (Y):")
-    #     for j in 1:length(y_labels)
-    #         @printf("    %-10s : %6.3f\n", y_labels[j], y_proj[j, i])
-    #     end
-    # end
-    # println("="^60 * "\n")
 
     # Visualizations
     fig_corr = plot_canonical_correlations(canonical_corrs, n_components)
-    display(fig_corr)
 
-    return fig, corr_mat, fig_corr
+    return fig, canonical_corrs, fig_corr
 end
 
 """
