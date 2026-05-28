@@ -21,31 +21,44 @@ function plot_regression_results(
     ref = isnothing(true_data) ? first(values(pred_data)) : true_data
     t = ref.t
     N = length(t)
+    n_dim = size(ref.data, 1)
+    @assert 1 <= n_dim <= 4
 
-    titles = ["X correction (m)", "Y correction (m)", "Z correction (m)", "Yaw correction (rad)"]
-    row_idx = [1, 2, 3, 4]
-
+    # ── Determine grid layout ─────────────────────────────────────────
+    n_cols = min(2, n_dim)
+    n_rows = ceil(Int, n_dim / n_cols)
     fig = Figure(size=(1200, 900))
-    axes = Vector{Axis}(undef, 4)
-    for idx in 1:4
-        axes[idx] = Axis(fig[(idx-1)÷2+1, (idx-1)%2+1];
-            title=titles[idx],
-            ylabel=idx <= 3 ? "meters" : "radians",
-            xlabel=idx >= 3 ? "Time (s)" : "")
+    axes = Vector{Axis}(undef, n_dim)
+
+    for idx in 1:n_dim
+        row = (idx - 1) ÷ n_cols + 1
+        col = (idx - 1) % n_cols + 1
+        ax = Axis(fig[row, col])
+
+        # ylabel: meters for first 3, radians for 4th (if exists)
+        if idx <= 3
+            ax.ylabel = "meters"
+        elseif idx == 4
+            ax.ylabel = "radians"
+        end
+        # xlabel only on bottom row
+        if row == n_rows
+            ax.xlabel = "Time (s)"
+        end
+        axes[idx] = ax
     end
 
     # ── Ground truth ──────────────────────────────────────────────────
     if !isnothing(true_data)
-        for (plot_idx, row) in enumerate(row_idx)
+        for (plot_idx, row) in enumerate(1:n_dim)
             lines!(axes[plot_idx], true_data.t, true_data.data[row, :];
                 color=:black, linewidth=0.9, label="True")
 
             if !isnothing(true_data.data_std)
                 μ = true_data.data[row, :]
                 σ = true_data.data_std[row, :]
-                label = "True ±σ"
                 band!(axes[plot_idx], true_data.t, μ .- σ, μ .+ σ;
-                    color=(:black, 0.15), label=label)
+                    color=(:black, 0.15), label="True ±σ")
             end
         end
     end
@@ -67,13 +80,13 @@ function plot_regression_results(
                         "(different lengths or timestamps differ > 1e-9). " *
                         "Truncate first or resample."))
 
-                for (plot_idx, row) in enumerate(row_idx)
+                for (plot_idx, row) in enumerate(1:n_dim)
                     rmse[plot_idx] = sqrt(mean(
                         (pred_trim.data[row, :] .- gt_trim.data[row, :]) .^ 2))
                 end
             end
 
-            for (plot_idx, row) in enumerate(row_idx)
+            for (plot_idx, row) in enumerate(1:n_dim)
                 rmse_str = isnan(rmse[plot_idx]) ? "" :
                            " (RMSE=$(round(rmse[plot_idx]; digits=4)))"
                 label = "$method_name$rmse_str"
@@ -87,9 +100,8 @@ function plot_regression_results(
                 if !isnothing(pred.data_std)
                     μ = pred.data[row, :]
                     σ = pred.data_std[row, :]
-                    label = "$method_name ±σ"
                     band!(axes[plot_idx], pred.t, μ .- σ, μ .+ σ;
-                        color=(color, 0.15), label=label)
+                        color=(color, 0.15), label="$method_name ±σ")
                 end
             end
         end
