@@ -48,16 +48,16 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
     output_stats=hsgp_p.output_stats
 )
 
-zupt, classic_ins_traj, step_seg, pred_outputs["model"], _, _ = HybridZuptInsJl.hybrid_zupt_aided_ins(
+zupt, classic_ins_traj, step_seg, _, _, _ = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE, correct=false
 )
 
-zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], tr_input_gp, tr_target_gp = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
+zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], tr_input_gp = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
-zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"], betahist, tr_input, tr_target = HybridZuptInsJl.hybrid_zupt_aided_ins(
+zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"], betahist, tr_input = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
 )
@@ -77,14 +77,10 @@ trajs = OrderedDict(
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned)
+fig_out = HybridZuptInsJl.plot_regression_results(pred_outputs, true_outputs["model + HSGP"])
 
 fig_in_gp = HybridZuptInsJl.plot_input_features(tr_input_gp)
 fig_in_hsgp = HybridZuptInsJl.plot_input_features(tr_input)
-
-fig_out = HybridZuptInsJl.plot_regression_results(OrderedDict{String,HybridZuptInsJl.CorrectionIO}(
-    "GP" => tr_target_gp,
-    "HSGP" => tr_target
-))
 
 # fig_2D = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned; samples=1000000)
 # fig_3d = HybridZuptInsJl.plot_trajectory_3d(hsgp_ins_traj, gt_traj_aligned; samples=15000)
