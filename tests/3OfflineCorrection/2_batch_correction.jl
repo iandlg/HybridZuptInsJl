@@ -6,15 +6,16 @@ import Dates, Optim
 data_key = "ANG"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-n_restarts_optimizer = 5
-kern_lo = [-6.0, -6.0]
-kern_hi = [6.0, 6.0]
+FEATURE_TYPE = HybridZuptInsJl.THREED_STEP_DT
+n_restarts_optimizer = 4
+kern_lo = [-3.0, -3.0]
+kern_hi = [3.0, 3.0]
 log_kern_bounds = [kern_lo, kern_hi]
-log_noise_bounds = [[-8.0], [2.0]]
+log_noise_bounds = [[-4.0], [2.0]]
 method_key = "NM"
 normalize_input = true
 normalize_output = true
+ard = true
 
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision"
@@ -39,7 +40,8 @@ gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     log_noise_bounds=log_noise_bounds,
     method=method,
     normalize_x=normalize_input,
-    normalize_y=normalize_output
+    normalize_y=normalize_output,
+    ard=ard
 )
 
 static_corrections, _ = HybridZuptInsJl.compute_corrections(

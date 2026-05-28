@@ -40,7 +40,7 @@ function compute_training_io(
     euler_nb = matrix_to_euler(traj.R_nb)
     euler_nb_gt = matrix_to_euler(traj_gt.R_nb)
 
-    inertial_yaw = unwrap(euler_nb[3, :])   # row 3 = yaw (since 1: roll, 2: pitch, 3: yaw)
+    inertial_yaw = unwrap(euler_nb[3, :])
     gt_yaw = unwrap(euler_nb_gt[3, :])
 
     # Create output array
@@ -54,9 +54,7 @@ function compute_training_io(
         BODY => step_vectors_body,
         HEADING => step_vectors_heading,
     )
-    if !haskey(funs, ref_frame)
-        throw(ArgumentError("Unsupported reference frame: $ref_frame"))
-    end
+    @assert haskey(funs, ref_frame) "Unsupported reference frame: $ref_frame"
 
     ins_step = funs[ref_frame](traj, step_seg)      # 3 x (n_steps-1)
     gt_steps = funs[ref_frame](traj_gt, step_seg)
@@ -69,6 +67,7 @@ function compute_training_io(
         TWOD_STEP_DT => () -> vcat(ins_step[1:2, :], diff(traj.t[step_seg])'),          # 3 × N (x, y, dt)
         THREED_STEP_DT => () -> vcat(ins_step, diff(traj.t[step_seg])'),                  # 4 × N (x, y, z, dt)
     )
+    @assert haskey(feature_selectors, feature_type) "Unsupported feature type: $feature_type"
     input_feature = feature_selectors[feature_type]()
 
     # Create CorrectionIO at step boundaries
@@ -128,7 +127,7 @@ function apply_corrections(
         new_euler = copy(euler[:, segs])          # keep original roll/pitch
         new_euler[3, :] = new_yaws
     elseif ref_frame == HEADING
-        # In heading frame, we set roll/pitch to zero (as in original Python)
+        # In heading frame, we set roll/pitch to zero
         new_euler = zeros(size(euler[:, segs]))
         new_euler[3, :] = new_yaws
     else
@@ -170,23 +169,35 @@ function apply_corrections(
     )
 end
 
-function mcmc_with_priors!(gp::GaussianProcesses.GPE;
+function mcmc_with_priors!(
+    gp::GaussianProcesses.GPE,
+    log_kern_bounds::Vector{Vector{Float64}},
+    log_noise_bounds::Vector{Vector{Float64}};
     n_samples::Int=200,
     burn_in::Int=100,
-    kern_prior=Normal(0.0, 1.0),   # applied to all kernel params
-    noise_prior=Normal(-2.0, 1.0))  # applied to logNoise
-
-    # Set priors on kernel params
+)
     n_kern_params = GaussianProcesses.num_params(gp.kernel)
-    kern_priors = fill(kern_prior, n_kern_params)
+
+    # Create priors from bounds
+    kern_priors = Vector{Normal}(undef, n_kern_params)
+    for i in 1:n_kern_params
+        μ = (log_kern_bounds[2][i] + log_kern_bounds[1][i]) / 2 # μ = hi + lo /2
+        σ = (log_kern_bounds[2][i] - log_kern_bounds[1][i]) / 4 # 2σ = hi- lo /2
+        kern_priors[i] = Normal(μ, σ)
+        @info "Kernel prior μ, σ : " μ, σ
+    end
+    # Set priors on kernel params
     GaussianProcesses.set_priors!(gp.kernel, kern_priors)
 
+
     # Set prior on noise
-    GaussianProcesses.set_priors!(gp.logNoise, [noise_prior])
+    μ = (log_noise_bounds[2][1] + log_noise_bounds[1][1]) / 2
+    σ = (log_noise_bounds[2][1] - log_noise_bounds[1][1]) / 4
+    @info "Noise prior μ, σ : " μ, σ
+    GaussianProcesses.set_priors!(gp.logNoise, [Normal(μ, σ)])
 
     # Run MCMC
     chain = GaussianProcesses.mcmc(gp; nIter=n_samples + burn_in)
-    @show size(chain)
 
     # chain is (n_params × n_iterations) — drop burn-in
     chain_post = chain[:, burn_in+1:end]
@@ -207,7 +218,8 @@ function mcmc_with_priors!(gp::GaussianProcesses.GPE;
     return chain_post
 end
 
-function optimize_with_restarts!(gp::GaussianProcesses.GPE, n_restarts::Int;
+function optimize_with_restarts!(
+    gp::GaussianProcesses.GPE, n_restarts::Int;
     log_kern_bounds::Vector{Vector{Float64}}=[[-1.0, -3.0], [3.0, 2.0]],
     log_noise_bounds::Vector{Vector{Float64}}=[[-1.71], [-0.1]],
     method::Any=Optim.LBFGS()
@@ -273,15 +285,15 @@ function compute_gp_corrections(
     log_noise_bounds::Vector{Vector{Float64}}=[[-1.71], [-0.1]],
     method::Any=Optim.LBFGS(),
     normalize_y::Bool=true,
-    normalize_x::Bool=true
+    normalize_x::Bool=true,
+    ard::Bool=false,
 )::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
-
+    @show ard
     D = 10
     y_testing_gp = zeros(n_samples)
     y_testing_gp_std = zeros(n_samples)
-    hyperparams = zeros(D, 4)
 
     # --- scale features ---------------------------------------------------
     x_μ = mean(x, dims=2)[:]
@@ -296,18 +308,26 @@ function compute_gp_corrections(
     y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
 
 
-    log_ℓ, log_σ_f, log_σ_n = 0.0, 0.0, -1.0
+    log_ℓ, log_σ_f, log_σ_n = (ard ? [0.0 for _ in 1:n_features] : 0.0), 0.0, -1.0
     if !isnothing(hyperparameter)
         log_σ_f = log(hyperparameter[1])
-        log_ℓ = log(hyperparameter[2])
+        log_ℓ = log.(hyperparameter[2])
         log_σ_n = log(hyperparameter[3])
+        ard = isa(log_ℓ, Vector)
     end
-
     make_kernel() = kernel === nothing ? GaussianProcesses.SE(log_ℓ, log_σ_f) : deepcopy(kernel)
+    hyperparams = zeros(D, (ard ? 3 + n_features : 4))
+
 
     # logNoise is handled separately inside the function
     kern_lo = log_kern_bounds[1]
     kern_hi = log_kern_bounds[2]
+    if isa(log_ℓ, Vector)
+        kern_lo = vcat([kern_lo[1] for _ in 1:n_features], kern_lo[2])
+        kern_hi = vcat([kern_hi[1] for _ in 1:n_features], kern_hi[2])
+        log_kern_bounds = [kern_lo, kern_hi]
+    end
+
     noise_lo = log_noise_bounds[1]
     noise_hi = log_noise_bounds[2]
 
@@ -326,26 +346,32 @@ function compute_gp_corrections(
 
         gp = GaussianProcesses.GP(x_train, y_train,
             GaussianProcesses.MeanZero(), make_kernel(), log_σ_n)
-        log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
-        @info "hyperparameters before optim : log_σ_n = $log_σ_n, log_ℓ = $log_ℓ, log_σ_f = $log_σ_f"
+
         if n_restarts_optimizer > 0
             optimize_with_restarts!(gp, n_restarts_optimizer;
                 log_kern_bounds=log_kern_bounds, log_noise_bounds=log_noise_bounds, method=method)
-            # mcmc_with_priors!(gp, n_samples=500, burn_in=100)
+            # chain = mcmc_with_priors!(gp, log_kern_bounds, log_noise_bounds; n_samples=500, burn_in=100)
         end
 
+        # y_pred, y_var = zeros(Float64, (length(test_ind))), zeros(Float64, length(test_ind))
+        # for i in axes(chain, 2)
+        #     GaussianProcesses.set_params!(gp, chain[:, i])
+        #     temp1, temp2 = GaussianProcesses.predict_f(gp, x_test)
+        #     y_pred .+= temp1
+        #     y_var .+= temp2
+        # end
         y_pred, y_var = GaussianProcesses.predict_f(gp, x_test)
-        if i == 1
-            @info "Predicted Variance" y_var
-        end
+        # Average predictions across MCMC chain samples
+        # n_chain_samples = size(chain, 2)
+        # y_pred ./= n_chain_samples
+        # y_var ./= n_chain_samples
 
         y_testing_gp[test_ind] = normalize_y ? y_pred .* y_σ .+ y_μ : y_pred
         y_testing_gp_std[test_ind] = normalize_y ? sqrt.(y_var) .* y_σ : sqrt.(y_var)
-
-        log_σ_n, log_ℓ, log_σ_f = GaussianProcesses.get_params(gp)
-
-        @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
-        hyperparams[i, :] = [gp.target, exp(log_σ_f), exp(log_ℓ), exp(log_σ_n)]
+        @info "Optimised Hyperparameters [log_σn, log_ℓ, log_σf] : " round.(collect(GaussianProcesses.get_params(gp)); digits=3)
+        hyperparams[i, 2:end] = collect(GaussianProcesses.get_params(gp))
+        hyperparams[i, 1] = gp.target
+        # @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
     end
 
     return y_testing_gp, y_testing_gp_std, hyperparams
@@ -520,20 +546,14 @@ function compute_corrections(
     n_samples = size(input_feature, 2)
     @assert length(outputs) == n_samples
 
-    hp = hyperparameters
-    if isnothing(hyperparameters)
-        hp = SeHyperparams(
-            zeros(Float64, 3), zeros(Float64, 3), zeros(Float64, 3), zeros(Float64, 3)
-        )
-    end
-
     predictions = zeros(Float64, size(outputs.data))
     predictions_std = nothing
     hyperparams_dict = Dict{String,Union{Matrix{Float64},Nothing}}()
 
     # Yaw correction
     @info "------------ Computing Yaw corrections ---------------"
-    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp.yaw, kwargs...)
+    hp_yaw = isnothing(hyperparameters) ? nothing : hyperparameters.yaw
+    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp_yaw, kwargs...)
     predictions[4, :] = yaw_pred
     if !isnothing(yaw_std)
         if isnothing(predictions_std)
@@ -552,7 +572,7 @@ function compute_corrections(
             continue
         end
 
-        d_hyp = getfield(hp, Symbol("pos_$d"))
+        d_hyp = isnothing(hyperparameters) ? nothing : getfield(hyperparameters, Symbol("pos_$d"))
         pos_pred, pos_std, hyperparams_dict["pos_$d"] = correction_method(input_feature, outputs.data[d, :]; hyperparameter=d_hyp, kwargs...)
         predictions[d, :] = pos_pred
         if !isnothing(pos_std)
