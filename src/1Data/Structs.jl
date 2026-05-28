@@ -39,6 +39,17 @@ function CorrectionIO(n_channel::Int, std::Bool)
     )
 end
 
+function CorrectionIO(
+    t::Vector{Float64},
+    data::Vector{Float64},
+    data_std::Union{Nothing,Vector{Float64}}=nothing)
+    CorrectionIO(
+        t,
+        reshape(data, (1, length(data))),
+        isnothing(data_std) ? nothing : reshape(data_std, (1, length(data_std)))
+    )
+end
+
 function CorrectionIO(d::Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}})
     t = d["t"]
     output = d["output"]
