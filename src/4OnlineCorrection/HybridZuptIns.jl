@@ -327,12 +327,12 @@ function hybrid_zupt_aided_ins(
                 y_cov = R_aug_nb * pred_cov * R_aug_nb'
 
                 # δx is zero since has been compensated after zupts
-                dx[:, curr_step], P[:, :, curr_step] = measurement_update(
+                dx[:, curr_step], _ = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
                     y_estim,
                     H_correction,
-                    y_cov .* 1e-3
+                    y_cov # .* 1e-3
                 )
 
                 # -------- Compensate error -------------

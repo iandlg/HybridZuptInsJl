@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 20
+hsgp_p_key = 21
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     12 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-26T13:06:11.411.json",
@@ -43,7 +43,7 @@ pred_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 400, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 200, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )

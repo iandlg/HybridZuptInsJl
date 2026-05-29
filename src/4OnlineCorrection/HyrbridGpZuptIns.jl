@@ -76,7 +76,7 @@ function hybrid_zupt_aided_ins_gp(
     sigma_pos_gt = 1e-2
     sigma_ψ_gt = 1e-3
     sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt)
-    sigma_dt = 1e-5
+    sigma_dt = 1e-4
 
     R_aug_GT_nb = zeros(Float64, (p, p))
     R_aug_GT_nb[p, p] = 1.0
@@ -201,8 +201,7 @@ function hybrid_zupt_aided_ins_gp(
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
-                    vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) -
-                    vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]),
+                    vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]),
                     H_gt,
                     Diagonal(sigma_gt .^ 2)
                 )
