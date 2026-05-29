@@ -8,3 +8,9 @@ function rolling_mean(arr::Vector{T}, n::Int) where T<:Real
     end
     return out
 end
+
+function log_around(base::Float64, exp_range::Tuple{Float64,Float64}, n_steps::Int)
+    lo, hi = exp_range
+    exps = range(lo, hi, length=n_steps)
+    return base .* 10.0 .^ exps
+end

@@ -99,19 +99,18 @@ struct SeHyperparams
     pos_1::Vector{Float64}  # for x position
     pos_2::Vector{Float64}  # for y position
     pos_3::Vector{Float64}  # for z position
-    yaw::Vector{Float64}    # [σ_f, length_scale, σ_n] for yaw
+    yaw::Vector{Float64}    # [σ_f, length_scale (can be multiple elements), σ_n] for yaw
 
     # Inner constructor to enforce length 3
     function SeHyperparams(pos_0, pos_1, pos_2, yaw)
-        for v in (pos_0, pos_1, pos_2, yaw)
-            if length(v) != 3
-                throw(ArgumentError("Each hyperparameter vector must have exactly 3 elements"))
-            end
-        end
+        # for v in (pos_0, pos_1, pos_2, yaw)
+        #     # if length(v) != 3
+        #     #     throw(ArgumentError("Each hyperparameter vector must have exactly 3 elements"))
+        #     # end
+        # end
         new(Vector{Float64}(pos_0), Vector{Float64}(pos_1), Vector{Float64}(pos_2), Vector{Float64}(yaw))
     end
 end
-
 
 function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     SeHyperparams(
@@ -119,6 +118,18 @@ function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
         Float64.(d["pos_2"]),
         Float64.(d["pos_3"]),
         Float64.(d["yaw"]),
+    )
+end
+
+# Helper: create a new SeHyperparams with one element changed
+function modify_sehp(hp::SeHyperparams, group::Symbol, idx::Int, new_val::Float64)
+    new_vec = copy(getfield(hp, group))
+    new_vec[idx] = new_val
+    return SeHyperparams(
+        group == :pos_1 ? new_vec : hp.pos_1,
+        group == :pos_2 ? new_vec : hp.pos_2,
+        group == :pos_3 ? new_vec : hp.pos_3,
+        group == :yaw ? new_vec : hp.yaw
     )
 end
 
@@ -200,7 +211,6 @@ function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
 
     output_stats = haskey(d, "output_stats") && !isnothing(d["output_stats"]) ?
                    [Float64.(d["output_stats"][1]), Float64.(d["output_stats"][2])] : nothing
-    @show output_stats
     HsgpParameters(
         hp,
         d["d"],
@@ -209,6 +219,24 @@ function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
         input_stats=input_stats,
         output_stats=output_stats
     )
+end
+
+function basecopy(
+    base::HsgpParameters;
+    new_hp=nothing,
+    new_input_stats=nothing,
+    new_output_stats=nothing,
+    new_LL=nothing,
+    new_d=nothing,
+    new_m=nothing
+)
+    hp = isnothing(new_hp) ? base.hp : new_hp
+    d = isnothing(new_d) ? base.d : new_d
+    m = isnothing(new_m) ? base.m : new_m
+    LL = isnothing(new_LL) ? base.LL : new_LL
+    ins = isnothing(new_input_stats) ? base.input_stats : new_input_stats
+    outs = isnothing(new_output_stats) ? base.output_stats : new_output_stats
+    return HsgpParameters(hp, d, m, LL; input_stats=ins, output_stats=outs)
 end
 
 function to_json(
@@ -224,14 +252,6 @@ function to_json(
         JSON.print(f, envelope, 4)
     end
 end
-
-# function from_json(filename::AbstractString)
-#     raw = JSON.parsefile(filename)
-#     metadata = Dict(raw["metadata"])
-#     saved_at = raw["saved_at"]
-#     params = HsgpParameters(Dict(raw["params"]))
-#     return params, metadata, saved_at
-# end
 
 function from_json(::Type{T}, filename::AbstractString) where {T}
     raw = JSON.parsefile(filename)

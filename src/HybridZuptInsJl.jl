@@ -46,6 +46,7 @@ include("4OnlineCorrection/NominalCorrectors.jl")
 include("4OnlineCorrection/NominalHybridZuptIns.jl")
 include("4OnlineCorrection/HybridZuptIns.jl")
 include("4OnlineCorrection/HyrbridGpZuptIns.jl")
+include("4OnlineCorrection/VariabilityAnalysis.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")
@@ -54,6 +55,7 @@ include("Plotting/OfflineCorrection.jl")
 include("Plotting/PlotHypVariability.jl")
 include("Plotting/OnlineCorrection.jl")
 include("Plotting/CorrelationAnalysis.jl")
+include("Plotting/OnlineHpVariability.jl")
 
 end
 

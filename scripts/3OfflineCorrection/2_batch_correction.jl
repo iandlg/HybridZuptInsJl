@@ -5,16 +5,16 @@ import Dates, Optim
 
 data_key = "ANG"
 trial_id = 15
-FRAME = HybridZuptInsJl.BODY
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP_DT
-n_restarts_optimizer = 4
+FRAME = HybridZuptInsJl.HEADING
+FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
+n_restarts_optimizer = 6
 kern_lo = [-3.0, -3.0]
 kern_hi = [3.0, 3.0]
 log_kern_bounds = [kern_lo, kern_hi]
 log_noise_bounds = [[-4.0], [2.0]]
 method_key = "NM"
-normalize_input = true
-normalize_output = true
+normalize_input = false
+normalize_output = false
 ard = true
 
 data_dir = Dict{String,String}(
@@ -108,6 +108,7 @@ HybridZuptInsJl.to_json(joinpath(outdir, filename), hyperparameters;
         "rmse" => rmses,
         "method" => method_key,
         "normalize_input" => normalize_input,
-        "normalize_output" => normalize_output
+        "normalize_output" => normalize_output,
+        "ard" => ard
     )
 )
