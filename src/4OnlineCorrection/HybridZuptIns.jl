@@ -219,9 +219,12 @@ function hybrid_zupt_aided_ins(
                 for (idx, key) in enumerate(output_names)
                     noise_vect[idx] = getfield(params.hp, Symbol(key))[3]
                 end
+                α = tr(Diagonal(noise_vect .^ 2)) / tr(tt_target_cov_norm)
+                R = Diagonal(noise_vect .^ 2) + α * tt_target_cov_norm
                 beta, P_beta = measurement_update(
-                    beta, P_beta, target_norm, H_update, Diagonal(noise_vect .^ 2)
+                    beta, P_beta, target_norm, H_update, R # Diagonal(noise_vect .^ 2)
                 )
+                @info R
                 push!(beta_hist, beta)
             end
             # ----------- Save target & Input ------------
