@@ -34,8 +34,10 @@ groups = [:pos_1, :pos_2, :pos_3, :yaw]
 log_range = (-1.0, 1.0)
 n_steps = 3
 baseline_included = true
-specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
-stat_specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=3)
+hp_specs, hp_grid = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
+stat_specs, stat_grid = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=3)
+
+grid_dict = HybridZuptInsJl.grid_to_dict(stat_grid)
 ##
 # Now vary hyperparameters
 df = HybridZuptInsJl.vary_hsgp_hyperparameters(
