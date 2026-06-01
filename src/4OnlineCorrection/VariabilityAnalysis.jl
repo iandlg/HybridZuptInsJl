@@ -22,7 +22,7 @@ end
 function ParamGrid(groups::Vector{String}, max_indices::Vector{Int})
     max_idx = maximum(max_indices)
     n_groups = length(groups)
-    specs = Matrix{Union{Nothing,ParamSpec}}(undef, n_groups, max_idx)
+    specs = Matrix{Union{Nothing,ParamSpec}}(nothing, n_groups, max_idx)
     ParamGrid(groups, max_idx, specs)
 end
 
@@ -48,11 +48,11 @@ function grid_from_dict(data::AbstractDict)::ParamGrid
     spec_names = data["specs"]  # matrix of strings or nothing
     # Rebuild grid without the actual ParamSpec objects (only names)
     # For plotting we only need the names and layout, not the getters/setters.
-    specs = Matrix{Union{Nothing,ParamSpec}}(undef, length(group_names), max_idx)
+    specs = Matrix{Union{Nothing,ParamSpec}}(nothing, length(group_names), max_idx)
     for i in 1:size(specs, 1), j in 1:size(specs, 2)
-        if !isnothing(spec_names[i][j])
+        if !isnothing(spec_names[j][i])
             # We can create a dummy spec with just name; plotting only uses name to match DataFrame.
-            specs[i, j] = ParamSpec(spec_names[i][j], p -> 0.0, (p, v) -> p, (v) -> [v])
+            specs[i, j] = ParamSpec(spec_names[j][i], p -> 0.0, (p, v) -> p, (v) -> [v])
         end
     end
     return ParamGrid(group_names, max_idx, specs)

@@ -32,18 +32,19 @@ rmse_fun = HybridZuptInsJl.make_rmse_evaluator(data_dir, trial_id, train_ratio, 
 # Experiment variables
 groups = [:pos_1, :pos_2, :pos_3, :yaw]
 log_range = (-1.0, 1.0)
-n_steps = 3
+n_steps = 20
 baseline_included = true
-hp_specs, hp_grid = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
-stat_specs, stat_grid = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=3)
 
-grid_dict = HybridZuptInsJl.grid_to_dict(stat_grid)
+specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
+# specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps)
+
 ##
 # Now vary hyperparameters
 df = HybridZuptInsJl.vary_hsgp_hyperparameters(
     hsgp_p,
     rmse_fun,                      # <-- uses only the HSGP hyperparams
-    stat_specs
+    specs[1];
+    include_baseline=baseline_included
 )
 
 ## Save things 
@@ -66,10 +67,10 @@ metadata = Dict(
     "trial_id" => trial_id,
     "frame" => string(FRAME),
     "feature_type" => string(FEATURE_TYPE),
-    "groups" => groups,    # convert Symbols to String
     "log10_range" => log_range,
     "n_steps" => n_steps,
     "baseline_included" => baseline_included,
+    "grid" => HybridZuptInsJl.grid_to_dict(specs[2]),
     "timestamp" => time
 )
 
@@ -82,15 +83,19 @@ println("Saved JSON: $json_path")
 
 ## Plot Hp sensitivity
 outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
-basename_key = 12
+basename_key = 16
 basename = Dict(
-    10 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T12:38:13.301",
     11 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T13:47:42.748",
-    12 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T14:27:17.328"
+    16 => "ANG15_BODY_TWOD_STEP_DT_2026-06-01T10:20:18.078"
 )[basename_key]
 
 csv_file = joinpath(outdir, "$basename.csv")
 json_file = joinpath(outdir, "$basename.json")
 
 df, meta = HybridZuptInsJl.load_hp_variation_results(csv_file, json_file)
-HybridZuptInsJl.plot_hp_sensitivity(df, meta; save_path="out/4OnlineCorrection/3HpVariabilityAnalysis/sensitivity.png")
+
+grid = HybridZuptInsJl.grid_from_dict(meta["grid"])
+log_range = (
+    float(meta["log10_range"][1]), float(meta["log10_range"][2]))
+
+HybridZuptInsJl.plot_hp_sensitivity(df, grid, log_range; save_path="out/4OnlineCorrection/3HpVariabilityAnalysis/plots/$basename.png")
