@@ -1,12 +1,12 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
-data_key = "ANG"
+data_key = "ANG2"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
-    "MT" => "data/mti-100-recordings"
+    "ANG2" => "data/angermann_v2"
 )[data_key]
-trial_id = 15
+trial_id = 2
 inertial = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt_traj = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 # fig_gt = HybridZuptInsJl.plot_trajectory_xyz_euler(gt_traj)
@@ -53,7 +53,8 @@ fig_ins_align = HybridZuptInsJl.plot_trajectory_xyz_euler(ins_traj_aligned)
 
 
 ##
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj_aligned[1:1000], gt_traj_aligned[1:1000])
+fig = HybridZuptInsJl.plot_position_distance_error(ins_traj_aligned, gt_traj_aligned)
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj_aligned, gt_traj_aligned; samples=1000)
 fig_rmse = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned, gt_traj_aligned)
 fig_orientation = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
 fig_steps = HybridZuptInsJl.plot_step_lengths(ins_traj_aligned, gt_traj_aligned, segs)

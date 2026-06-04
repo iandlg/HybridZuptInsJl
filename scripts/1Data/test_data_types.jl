@@ -3,9 +3,15 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using Printf
 
-data_dir = "data/angermann_high_precision"
-imu = HybridZuptInsJl.InertialData(data_dir, 15)
-gt = HybridZuptInsJl.Trajectory(data_dir, 15)
+data_key = "ANG2"
+data_dir = Dict{String,String}(
+    "ANG" => "data/angermann_high_precision",
+    "MTI" => "data/mti-100-recordings",
+    "ANG2" => "data/angermann_v2"
+)[data_key]
+trial_id = 6
+imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
+gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 
 imu_ov, gt_ov = HybridZuptInsJl.truncate_to_overlap(imu, gt)
 

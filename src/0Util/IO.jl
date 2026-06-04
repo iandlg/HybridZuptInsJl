@@ -1,3 +1,22 @@
+# Source tag (one per file format / data origin)
+abstract type AbstractDataSource end
+struct ANG <: AbstractDataSource end
+struct MTI <: AbstractDataSource end
+struct ANG2 <: AbstractDataSource end
+
+# Resolve a directory path to its source tag
+const _DIR_TO_SOURCE = Dict{String,AbstractDataSource}(
+    "data/angermann_high_precision" => ANG(),
+    "data/mti-100-recordings" => MTI(),
+    "data/angermann_v2" => ANG2()
+)
+
+function resolve_source(dir::AbstractString)::AbstractDataSource
+    src = get(_DIR_TO_SOURCE, dir, nothing)
+    isnothing(src) && error("Unknown data directory: $dir\nKnown dirs: $(keys(_DIR_TO_SOURCE))")
+    return src
+end
+
 """
     _convert_hyperparams_to_struct_list(hyperparams_dict::Dict{String,Union{Matrix{Float64},Nothing}}) -> Union{Vector{SeHyperparams},Nothing}
 

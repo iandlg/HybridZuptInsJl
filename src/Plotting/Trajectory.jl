@@ -11,7 +11,7 @@ Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories
 - A `Figure` object (Makie figure).
 """
 function plot_groundtruth_vs_inertial_positions(
-    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory}; samples::Int=20)
+    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory}; samples::Int=typemax(Int))
     plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
 end
 

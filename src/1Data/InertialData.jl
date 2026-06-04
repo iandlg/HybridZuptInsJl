@@ -1,22 +1,3 @@
-# ── Source tag (one per file format / data origin) ────────────────────────
-abstract type AbstractDataSource end
-struct ANG <: AbstractDataSource end
-struct MT <: AbstractDataSource end
-struct ANG2 <: AbstractDataSource end
-
-# ── Resolve a directory path to its source tag ───────────────────────────
-const _DIR_TO_SOURCE = Dict{String,AbstractDataSource}(
-    "data/angermann_high_precision" => ANG(),
-    "data/mti-100-recordings" => MT(),
-    "data/angermann_v2" => ANG2()
-)
-
-function resolve_source(dir::AbstractString)::AbstractDataSource
-    src = get(_DIR_TO_SOURCE, dir, nothing)
-    isnothing(src) && error("Unknown data directory: $dir\nKnown dirs: $(keys(_DIR_TO_SOURCE))")
-    return src
-end
-
 struct InertialData <: AbstractTimeSeries
     t::Vector{Float64}    # (N,)
     u::Matrix{Float64}    # (6, N)  [accel; gyro]
@@ -34,7 +15,7 @@ Base.getindex(id::InertialData, mask) =
 
 function InertialData(dir::AbstractString, id::Int)
     src = resolve_source(dir)
-    t, u = read_raw(src, dir, id)
+    t, u = read_raw_imu(src, dir, id)
     return InertialData(t, u)
 end
 
@@ -43,11 +24,11 @@ function InertialData(path::AbstractString)
     src = resolve_source(dir)
     id_str = match(r"(\d+)_IMURaw", basename(path))
     id = isnothing(id_str) ? 0 : parse(Int, id_str.captures[1])
-    t, u = read_raw(src, dir, id)
+    t, u = read_raw_imu(src, dir, id)
     return InertialData(t, u)
 end
 
-function read_raw(::ANG, dir::AbstractString, id::Int)
+function read_raw_imu(::ANG, dir::AbstractString, id::Int)
     path = joinpath(dir, "$(id)_IMURaw.csv")
     @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
     df = CSV.read(path, DataFrame; comment="//")
@@ -59,7 +40,7 @@ function read_raw(::ANG, dir::AbstractString, id::Int)
     return t, u
 end
 
-function read_raw(::MT, dir::AbstractString, id::Int)
+function read_raw_imu(::MTI, dir::AbstractString, id::Int)
     path = joinpath(dir, "$(id)_IMURaw.csv")
     @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
     df = CSV.read(path, DataFrame; comment="//")
@@ -71,7 +52,7 @@ function read_raw(::MT, dir::AbstractString, id::Int)
     return t .* 1e-5, u
 end
 
-function read_raw(::ANG2, dir::AbstractString, id::Int)
+function read_raw_imu(::ANG2, dir::AbstractString, id::Int)
     # Find the subdirectory whose name starts with the given id
     subdirs = filter(readdir(dir)) do entry
         isdir(joinpath(dir, entry)) || return false
