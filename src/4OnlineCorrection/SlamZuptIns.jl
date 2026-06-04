@@ -1,4 +1,4 @@
-function hybrid_zupt_aided_ins(
+function slam_zupt_aided_ins(
     inertial::InertialData,
     simdata::InsConfig,
     gt_traj::Trajectory,

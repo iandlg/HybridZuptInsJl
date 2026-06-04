@@ -1,13 +1,14 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
-data_key = "MT"
+data_key = "ANG2"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
-    "MT" => "data/mti-100-recordings"
+    "MT" => "data/mti-100-recordings",
+    "ANG2" => "data/angermann_v2"
 )[data_key]
-trial_id = 2
-inertial = HybridZuptInsJl.InertialData(HybridZuptInsJl.MT, trial_id)
+trial_id = 15
+inertial = HybridZuptInsJl.InertialData(data_dir, trial_id)
 
 # fig_gt = HybridZuptInsJl.plot_trajectory_xyz_euler(gt_traj)
 # Δt = -0.0
@@ -18,7 +19,7 @@ inertial = HybridZuptInsJl.InertialData(HybridZuptInsJl.MT, trial_id)
 #     gt.vel
 # )
 
-sim_config = HybridZuptInsJl.InsConfig(gamma=5e3, Ts=1 / 400)
+sim_config = HybridZuptInsJl.InsConfig()
 
 # Compute INS trajectory from inertial data
 zupt, ins_traj, segs = HybridZuptInsJl.smoothed_zupt_aided_ins(inertial, sim_config)

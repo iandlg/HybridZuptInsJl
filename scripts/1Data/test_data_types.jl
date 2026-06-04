@@ -11,7 +11,7 @@ imu_ov, gt_ov = HybridZuptInsJl.truncate_to_overlap(imu, gt)
 
 println("IMU:  $(length(imu)) → $(length(imu_ov)) samples")
 println("GT:   $(length(gt))  → $(length(gt_ov))  samples")
-@printf("Overlap: %.3fs – %.3fs\n", imu_ov.t[begin], imu_ov.t[end])
+@printf("Overlap: %.3fs - %.3fs\n", imu_ov.t[begin], imu_ov.t[end])
 
 # Same spot-checks as Python __main__
 display(imu.u[:, 10000])
