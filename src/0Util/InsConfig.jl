@@ -81,7 +81,7 @@ function InsConfig(;
     sigma_initial_att=(100 * π / 180, 100 * π / 180, 0.1 * π / 180),
     g=nothing,
     segmentation_thrsld=0.1e-3,
-    calibration_distance_m=3.0
+    calibration_distance_m=2.0
 )
     g_val = isnothing(g) ? compute_gravity(latitude, altitude) : Float64(g)
 

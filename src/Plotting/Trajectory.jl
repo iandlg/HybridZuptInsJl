@@ -18,7 +18,7 @@ end
 function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
     gt_traj::Union{Nothing,Trajectory};
-    samples::Int=20
+    samples::Int=typemax(Int)
 )
 
     # Create figure and axis
