@@ -101,14 +101,18 @@ struct SeHyperparams
     pos_3::Vector{Float64}  # for z position
     yaw::Vector{Float64}    # [σ_f, length_scale (can be multiple elements), σ_n] for yaw
 
-    # Inner constructor to enforce length 3
     function SeHyperparams(pos_0, pos_1, pos_2, yaw)
-        # for v in (pos_0, pos_1, pos_2, yaw)
-        #     # if length(v) != 3
-        #     #     throw(ArgumentError("Each hyperparameter vector must have exactly 3 elements"))
-        #     # end
-        # end
-        new(Vector{Float64}(pos_0), Vector{Float64}(pos_1), Vector{Float64}(pos_2), Vector{Float64}(yaw))
+        p0 = Vector{Float64}(pos_0)
+        p1 = Vector{Float64}(pos_1)
+        p2 = Vector{Float64}(pos_2)
+        y = Vector{Float64}(yaw)
+
+        all(>(0), p0) || throw(ArgumentError("All elements of pos_0 must be positive, got $p0"))
+        all(>(0), p1) || throw(ArgumentError("All elements of pos_1 must be positive, got $p1"))
+        all(>(0), p2) || throw(ArgumentError("All elements of pos_2 must be positive, got $p2"))
+        all(>(0), y) || throw(ArgumentError("All elements of yaw must be positive, got $y"))
+
+        new(p0, p1, p2, y)
     end
 end
 

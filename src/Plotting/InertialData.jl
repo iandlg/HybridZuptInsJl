@@ -34,8 +34,6 @@ function plot_inertial_data(id::InertialData)
     return fig
 end
 
-using GLMakie  # or CairoMakie, depending on your backend
-
 function plot_inertialdata_and_stepsegm(inertial::InertialData, segs::Vector{Int})
     # Create figure and axis with grid
     fig = Figure()

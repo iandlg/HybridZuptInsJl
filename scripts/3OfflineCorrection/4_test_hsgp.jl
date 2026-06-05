@@ -15,8 +15,9 @@ hyp_path = Dict{Int,String}(
 hp, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.SeHyperparams, hyp_path)
 
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)[meta["data_key"]]
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
+)["ANG2"]
 normalize_input = meta["normalize_input"]
 normalize_output = meta["normalize_output"]
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
@@ -26,7 +27,7 @@ m = 500
 margin = 1.7
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, meta["trial_id"]
+    data_dir, 7
 )
 
 fig_3d_traj = HybridZuptInsJl.plot_trajectory_3d(ins_traj_aligned[segs[1:20]], gt_traj_aligned[segs[1:20]])

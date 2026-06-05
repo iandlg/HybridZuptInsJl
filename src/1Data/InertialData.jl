@@ -101,6 +101,29 @@ function read_raw_imu(::ANG2, dir::AbstractString, id::Int)
 
     t = Vector{Float64}(df[:, 1])
     u = vcat(Matrix(df[:, 2:4])', Matrix(df[:, 5:7])')   # (6, N)
-    return t, u
+
+    # Find start time
+    doc_dir = joinpath(dir, subdirs[1], "doc")
+    doc_files = filter(readdir(doc_dir)) do entry
+        startswith(entry, "doc_$id")
+    end
+    isempty(doc_files) && error("No doc_$id* file found in $doc_dir")
+    length(doc_files) > 1 && @warn "Multiple matches for doc file id=$id in $doc_dir, using first: $(doc_files[1])"
+
+    lines = readlines(joinpath(doc_dir, doc_files[1]))
+
+    t_start = nothing
+    for line in reverse(lines)
+        m = match(r"TS\s*=\s*([+-]?[0-9]*\.?[0-9]+)", line)
+        if !isnothing(m)
+            t_start = parse(Float64, m.captures[1])
+            break
+        end
+    end
+    isnothing(t_start) && error("No 'TS = <float>' pattern found in $(doc_files[1])")
+
+    mask = t .>= t_start
+
+    return t[mask], u[:, mask]
 end
 

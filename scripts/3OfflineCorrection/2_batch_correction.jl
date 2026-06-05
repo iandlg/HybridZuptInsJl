@@ -3,22 +3,23 @@ using .HybridZuptInsJl;
 using GLMakie, JSON, OrderedCollections
 import Dates, Optim
 
-data_key = "ANG"
+data_key = "ANG2"
 trial_id = 15
 FRAME = HybridZuptInsJl.HEADING
 FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
-n_restarts_optimizer = 6
+n_restarts_optimizer = 10
 kern_lo = [-3.0, -3.0]
 kern_hi = [3.0, 3.0]
 log_kern_bounds = [kern_lo, kern_hi]
 log_noise_bounds = [[-4.0], [2.0]]
 method_key = "NM"
-normalize_input = false
-normalize_output = false
-ard = true
+normalize_input = true
+normalize_output = true
+ard = false
 
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
 )[data_key]
 method = Dict{String,Any}(
     "CG" => Optim.ConjugateGradient(),

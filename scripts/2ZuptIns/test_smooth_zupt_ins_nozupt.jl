@@ -1,7 +1,7 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
-data_key = "ANG2"
+data_key = "ANG"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "MT" => "data/mti-100-recordings",

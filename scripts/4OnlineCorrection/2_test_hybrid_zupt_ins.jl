@@ -14,10 +14,12 @@ hsgp_p_path = Dict{Int,String}(
 
 # Load parameters with corresponding metatdata
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
+data_key = meta["data_key"] # "ANG2" # 
 
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)[meta["data_key"]]
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
+)[data_key]
 
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])

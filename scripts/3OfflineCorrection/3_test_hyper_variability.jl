@@ -14,7 +14,8 @@ vect_hyp, meta, _ = HybridZuptInsJl.from_json(Vector{HybridZuptInsJl.SeHyperpara
 
 # Extract run parameters
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
 )[meta["data_key"]]
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])

@@ -310,6 +310,7 @@ function compute_gp_corrections(
 
     log_ℓ, log_σ_f, log_σ_n = (ard ? [0.0 for _ in 1:n_features] : 0.0), 0.0, -1.0
     if !isnothing(hyperparameter)
+        @info "Hyp passed as parameter : " hyperparameter
         log_σ_f = log(hyperparameter[1])
         log_ℓ = log.(hyperparameter[2])
         log_σ_n = log(hyperparameter[3])
@@ -369,11 +370,11 @@ function compute_gp_corrections(
         y_testing_gp[test_ind] = normalize_y ? y_pred .* y_σ .+ y_μ : y_pred
         y_testing_gp_std[test_ind] = normalize_y ? sqrt.(y_var) .* y_σ : sqrt.(y_var)
         @info "Optimised Hyperparameters [log_σn, log_ℓ, log_σf] : " round.(collect(GaussianProcesses.get_params(gp)); digits=3)
-        hyperparams[i, 2:end] = collect(GaussianProcesses.get_params(gp))
+        hyperparams[i, 2:end] = exp.(collect(GaussianProcesses.get_params(gp)))
         hyperparams[i, 1] = gp.target
         # @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
     end
-
+    @info "----- all fold hyps : " hyperparams
     return y_testing_gp, y_testing_gp_std, hyperparams
 end
 

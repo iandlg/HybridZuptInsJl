@@ -53,7 +53,7 @@ function read_raw_trajectory(::ANG, dir::AbstractString, id::Int)
 end
 
 function read_raw_trajectory(::MTI, dir::AbstractString, id::Int)
-    error("not implemented")
+    error("Not implemented")
 end
 
 function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
@@ -70,7 +70,7 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     sync_files = filter(readdir(holodeck_dir)) do entry
         startswith(entry, "Synchronized$(id)")
     end
-    isempty(sync_files) && error("No Synchronized$id* file found in $holodeck_dir")
+    isempty(sync_files) && error("No $id* file found in $holodeck_dir")
 
     path = joinpath(holodeck_dir, sync_files[1])
     @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
@@ -78,6 +78,7 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     df = CSV.read(
         path, DataFrame;
         header=false,
+        # skipto=2,
         delim=' ',
         ignorerepeated=true,   # treat multiple spaces as one delimiter
         missingstring=""
@@ -95,37 +96,37 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     df = df[pos_ok.&rot_ok, :]
     data = Matrix(df)
     N = size(data, 1)
-    t = data[:, 1] ./ 1000
+    t = Vector{Float64}(data[:, 1] .* 1e-3)
+    @show t[1]
     pos = MM_TO_M .* data[:, 3:5]'          # (3, N)
     R = permutedims(reshape(data[:, 6:14], N, 3, 3), (3, 2, 1))  # (3,3,N)
-    return t, pos, R, nothing
+
+    # Find start time
+    doc_dir = joinpath(dir, subdirs[1], "doc")
+    doc_files = filter(readdir(doc_dir)) do entry
+        startswith(entry, "doc_$id")
+    end
+    isempty(doc_files) && error("No doc_$id* file found in $doc_dir")
+    length(doc_files) > 1 && @warn "Multiple matches for doc file id=$id in $doc_dir, using first: $(doc_files[1])"
+
+    lines = readlines(joinpath(doc_dir, doc_files[1]))
+
+    t_start = nothing
+    for line in reverse(lines)
+        m = match(r"TS\s*=\s*([+-]?[0-9]*\.?[0-9]+)", line)
+        if !isnothing(m)
+            t_start = parse(Float64, m.captures[1])
+            break
+        end
+    end
+    isnothing(t_start) && error("No 'TS = <float>' pattern found in $(doc_files[1])")
+
+    mask = t .>= t_start
+
+    return t[mask], pos[:, mask], R[:, :, mask], nothing
 end
 
-# Load from CSV (same column convention as Python)
-# function Trajectory(path::AbstractString)
-#     df = CSV.read(path, DataFrame; header=false)
-#     # Drop NaN rows
-#     df = dropmissing(df)
-#     # Strictly increasing timestamps
-#     mask = [true; df[2:end, 1] .> df[1:end-1, 1]]
-#     df = df[mask, :]
-#     # Filter zero pos/rot
-#     pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
-#     rot_ok = vec(sum(Matrix(df[:, 6:14]) .^ 2, dims=2) .!= 0)
-#     df = df[pos_ok.&rot_ok, :]
-#     data = Matrix(df)
-#     N = size(data, 1)
-#     t = data[:, 1] ./ 1000
-#     pos = MM_TO_M .* data[:, 3:5]'          # (3, N)
-#     R = permutedims(reshape(data[:, 6:14], N, 3, 3), (3, 2, 1))  # (3,3,N)
-
-#     return clean(Trajectory(t, pos, R))
-# end
-
-# Trajectory(dir::AbstractString, num::Int) =
-#     Trajectory(joinpath(dir, "$(num)_Synchronized_Reference.csv"))
-
-# Remove large Euler-angle jumps (same threshold as Python)
+# Remove large Euler-angle jumps 
 function clean(tr::Trajectory)
     eu = matrix_to_euler(tr.R_nb)
     yaw = unwrap(eu[3, :])
