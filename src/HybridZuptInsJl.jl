@@ -29,10 +29,12 @@ include("0Util/IO.jl")
 include("0Util/Util.jl")
 include("0Util/HSGP.jl")
 include("0Util/KalmanFilter.jl")
+
 include("1Data/TimeSeries.jl")
 include("1Data/Trajectory.jl")
 include("1Data/InertialData.jl")
 include("1Data/Structs.jl")
+include("1Data/CollectTrialIO.jl")
 
 include("2ZuptIns/Equations.jl")
 include("2ZuptIns/Zupt.jl")

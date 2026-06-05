@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 11
+hsgp_p_key = 20
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     12 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-26T13:06:11.411.json",
@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 14 # meta["trial_id"]
+trial_id = 16 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
 train_ratio = 0.4
@@ -55,6 +55,13 @@ zupt, classic_ins_traj, step_seg, _, _, _ = HybridZuptInsJl.hybrid_zupt_aided_in
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE, correct=false
 )
 
+# Run static mean correction
+static_corrector = HybridZuptInsJl.StaticMeanCorrector()
+zupt, static_ins_traj, step_seg, true_outputs["model + static"], pred_outputs["model + static"], _, _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+    inertial_updated, sim_config_updated, gt_traj_aligned;
+    corrector=static_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
+)
+
 zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], tr_input_gp = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
@@ -66,12 +73,14 @@ zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model
 
 step_trajs = OrderedDict(
     "model" => classic_ins_traj[segs],
+    "model + static" => static_ins_traj[segs],
     "model + GP" => gp_ins_traj[segs],
     "model + online HSGP" => hsgp_ins_traj[segs],
 )
 
 trajs = OrderedDict(
     "model" => classic_ins_traj,
+    "model + static" => static_ins_traj,
     "model + GP" => gp_ins_traj,
     "model + online HSGP" => hsgp_ins_traj,
 )

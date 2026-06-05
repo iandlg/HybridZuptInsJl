@@ -17,6 +17,49 @@ function resolve_source(dir::AbstractString)::AbstractDataSource
     return src
 end
 
+
+"""
+    list_trial_ids(data_dir::AbstractString) -> Vector{Int}
+
+Scan a data directory and return all integer trial IDs found.
+Dispatches to a source‑specific method.
+"""
+function list_trial_ids(data_dir::AbstractString)::Vector{Int}
+    src = resolve_source(data_dir)
+    return list_trial_ids(src, data_dir)
+end
+
+"""
+    list_trial_ids(::ANG2, data_dir::AbstractString)::Vector{Int}
+
+Scans the "data/angermann_v2" directory and return all integer trial IDs found.
+"""
+function list_trial_ids(::ANG2, data_dir::AbstractString)::Vector{Int}
+    ids = Int[]
+    for entry in readdir(data_dir)
+        entry_path = joinpath(data_dir, entry)
+        if isdir(entry_path)
+            m = match(r"^(\d+)\D", entry)   # capture leading digits before a non-digit
+            !isnothing(m) && push!(ids, parse(Int, m.captures[1]))
+        end
+    end
+    return sort(unique(ids))
+end
+
+"""
+    list_trial_ids(::ANG, data_dir::AbstractString)::Vector{Int}
+
+Scans the "data/angermann_high_precision" directory and return all integer trial IDs found.
+"""
+function list_trial_ids(::ANG, data_dir::AbstractString)::Vector{Int}
+    ids = Int[]
+    for entry in readdir(data_dir)
+        m = match(r"^(\d+)_IMURaw", entry)
+        !isnothing(m) && push!(ids, parse(Int, m.captures[1]))
+    end
+    return sort(unique(ids))
+end
+
 """
     _convert_hyperparams_to_struct_list(hyperparams_dict::Dict{String,Union{Matrix{Float64},Nothing}}) -> Union{Vector{SeHyperparams},Nothing}
 
