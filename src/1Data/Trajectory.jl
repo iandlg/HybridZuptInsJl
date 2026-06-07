@@ -185,6 +185,33 @@ function rmse(tr::Trajectory, gt::Trajectory)
     return sqrt.(cumsum(err_sq) ./ (1:n))
 end
 
+function total_distance(tr::Trajectory; dims=2)::Float64
+    @assert (dims == 2 || dims == 3) "Can only compute distance in 2D or 3D got: $(dims)D"
+
+    N = length(tr.t)
+    if N < 2
+        return 0.0
+    end
+
+    total = 0.0
+    if dims == 2
+        # Use only x (row 1) and y (row 2)
+        for i in 1:(N-1)
+            dx = tr.pos[1, i+1] - tr.pos[1, i]
+            dy = tr.pos[2, i+1] - tr.pos[2, i]
+            total += sqrt(dx * dx + dy * dy)
+        end
+    else # dims == 3
+        for i in 1:(N-1)
+            dx = tr.pos[1, i+1] - tr.pos[1, i]
+            dy = tr.pos[2, i+1] - tr.pos[2, i]
+            dz = tr.pos[3, i+1] - tr.pos[3, i]
+            total += sqrt(dx * dx + dy * dy + dz * dz)
+        end
+    end
+    return total
+end
+
 # Step vectors in body frame
 function step_vectors_body(tr::Trajectory, seg::Vector{Int})
     steps = zeros(3, length(seg) - 1)

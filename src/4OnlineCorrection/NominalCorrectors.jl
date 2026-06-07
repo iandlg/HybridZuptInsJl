@@ -26,7 +26,7 @@ function HsgpCorrector(params::HsgpParameters)::HsgpCorrector
         k => power_spectral_density(
             omega,
             getfield(params.hp, Symbol(k))[2],
-            getfield(params.hp, Symbol(k))[1]
+            getfield(params.hp, Symbol(k))[3]
         )
         for k in outputs_keys
     )
@@ -60,7 +60,7 @@ function update_corrector!(
     y_normalized = _normalize_output(c, y)
     eigvect = _build_eigvect(c, input)
     for (idx, outpt) in enumerate(c.outputs_keys)
-        sigma_n = getfield(c.params.hp, Symbol(outpt))[3]
+        sigma_n = getfield(c.params.hp, Symbol(outpt))[1]
         c.beta[outpt], c.P_beta[outpt] = measurement_update(
             c.beta[outpt],
             c.P_beta[outpt],
@@ -76,7 +76,7 @@ function predict_correction(c::HsgpCorrector, input::Vector{Float64})::Tuple{Vec
     preds = Vector{Float64}(undef, 4)
     preds_std = Vector{Float64}(undef, 4)
     for (idx, outpt) in enumerate(c.outputs_keys)
-        sigma_n = getfield(c.params.hp, Symbol(outpt))[3]
+        sigma_n = getfield(c.params.hp, Symbol(outpt))[1]
         preds[idx] = (eigvect*c.beta[outpt])[1]
         preds_std[idx] = sqrt((sigma_n^2 .* eigvect * c.P_beta[outpt] * eigvect')[1])
     end
@@ -192,7 +192,7 @@ function predict_correction(c::ExactGpCorrector, input::Vector{Float64})
 
     for (idx, key) in enumerate(output_keys)
         hp_vec = getfield(c.params.hp, Symbol(key))
-        σ_f, ℓ, σ_n = hp_vec
+        σ_n, ℓ, σ_f = hp_vec
 
         kernel = GaussianProcesses.SE(log(ℓ), log(σ_f))
         y_out = Y_norm[idx, :]

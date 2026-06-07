@@ -115,13 +115,8 @@ function plot_position_rmse(trajs::Union{AbstractDict{String,Trajectory},Traject
         # Horizontal errors at each time step (squared, per sample)
         cum_rmse = rmse(traj, gt_traj)
 
-        # Legend label: use traj.name if present, otherwise create from key
-        if hasproperty(traj, :name) && !isnothing(traj.name)
-            label = traj.name
-        else
-            label = "$key, RMSE: $(round(cum_rmse[end], digits=3))"
-        end
-
+        # Legend label create from key
+        label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", cum_rmse[end]/total_distance(gt_traj)))"
         lines!(ax, traj.t[1:n], cum_rmse, label=label)
     end
     axislegend()

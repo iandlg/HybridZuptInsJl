@@ -66,6 +66,9 @@ function compute_training_io(
         THREED_STEP => () -> ins_step,                             # 3 × N
         TWOD_STEP_DT => () -> vcat(ins_step[1:2, :], diff(traj.t[step_seg])'),          # 3 × N (x, y, dt)
         THREED_STEP_DT => () -> vcat(ins_step, diff(traj.t[step_seg])'),                  # 4 × N (x, y, z, dt)
+        AUG_STEP => () -> vcat(ins_step, diff(inertial_yaw[step_seg])'),
+        TWOD_STEP_YAW => () -> vcat(ins_step[1:2, :], diff(inertial_yaw[step_seg])'),
+        TWOD_STEP_DT_YAW => () -> vcat(ins_step[1:2, :], diff(traj.t[step_seg])', diff(inertial_yaw[step_seg])'),
     )
     @assert haskey(feature_selectors, feature_type) "Unsupported feature type: $feature_type"
     input_feature = feature_selectors[feature_type]()
@@ -287,11 +290,11 @@ function compute_gp_corrections(
     normalize_y::Bool=true,
     normalize_x::Bool=true,
     ard::Bool=false,
+    n_fold=10
 )::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
-    @show ard
-    D = 10
+    @assert n_fold > 0 "Number of folds must be positive"
     y_testing_gp = zeros(n_samples)
     y_testing_gp_std = zeros(n_samples)
 
@@ -308,16 +311,16 @@ function compute_gp_corrections(
     y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
 
 
-    log_ℓ, log_σ_f, log_σ_n = (ard ? [0.0 for _ in 1:n_features] : 0.0), 0.0, -1.0
+    log_σ_n, log_ℓ, log_σ_f = -1.0, (ard ? [0.0 for _ in 1:n_features] : 0.0), 0.0
     if !isnothing(hyperparameter)
         @info "Hyp passed as parameter : " hyperparameter
-        log_σ_f = log(hyperparameter[1])
+        log_σ_n = log(hyperparameter[1])
         log_ℓ = log.(hyperparameter[2])
-        log_σ_n = log(hyperparameter[3])
+        log_σ_f = log(hyperparameter[3])
         ard = isa(log_ℓ, Vector)
     end
     make_kernel() = kernel === nothing ? GaussianProcesses.SE(log_ℓ, log_σ_f) : deepcopy(kernel)
-    hyperparams = zeros(D, (ard ? 3 + n_features : 4))
+    hyperparams = zeros(n_fold, (ard ? 3 + n_features : 4))
 
 
     # logNoise is handled separately inside the function
@@ -332,10 +335,10 @@ function compute_gp_corrections(
     noise_lo = log_noise_bounds[1]
     noise_hi = log_noise_bounds[2]
 
-    for i in 1:D
+    for i in 1:n_fold
         @info "------------ Fold $i ------------"
-        test_start = floor(Int, (i - 1) * n_samples / D) + 1
-        test_end = floor(Int, i * n_samples / D)
+        test_start = floor(Int, (i - 1) * n_samples / n_fold) + 1
+        test_end = n_fold > 1 ? floor(Int, i * n_samples / n_fold) : 1
         train_ind = vcat(1:test_start-1, test_end+1:n_samples)
         test_ind = test_start:test_end
 
@@ -347,6 +350,8 @@ function compute_gp_corrections(
 
         gp = GaussianProcesses.GP(x_train, y_train,
             GaussianProcesses.MeanZero(), make_kernel(), log_σ_n)
+
+        # @info "GP hyperparams : " round.(exp.(collect(GaussianProcesses.get_params(gp))); digits=3)
 
         if n_restarts_optimizer > 0
             optimize_with_restarts!(gp, n_restarts_optimizer;
@@ -369,12 +374,11 @@ function compute_gp_corrections(
 
         y_testing_gp[test_ind] = normalize_y ? y_pred .* y_σ .+ y_μ : y_pred
         y_testing_gp_std[test_ind] = normalize_y ? sqrt.(y_var) .* y_σ : sqrt.(y_var)
-        @info "Optimised Hyperparameters [log_σn, log_ℓ, log_σf] : " round.(collect(GaussianProcesses.get_params(gp)); digits=3)
+        # @info "Optimised Hyperparameters [log_σn, log_ℓ, log_σf] : " round.(collect(GaussianProcesses.get_params(gp)); digits=3)
         hyperparams[i, 2:end] = exp.(collect(GaussianProcesses.get_params(gp)))
         hyperparams[i, 1] = gp.target
         # @info "Fold $i Parameters: lg_σ_n = $(round(log_σ_n, digits=3)), lg_ℓ = $(round(log_ℓ, digits=3)), lg_σ_f = $(round(log_σ_f, digits=3))"
     end
-    @info "----- all fold hyps : " hyperparams
     return y_testing_gp, y_testing_gp_std, hyperparams
 end
 
@@ -406,11 +410,11 @@ function compute_hsgp_corrections(
     hyperparameter::Vector{Float64}=[0.0, 0.0, -1.0],
     margin::Float64=1.8,
     normalize_x::Bool=true,
-    normalize_y::Bool=true
+    normalize_y::Bool=true,
+    z_thresh::Float64=10.0
 )::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     d, N = size(x)
     @assert length(y) == N
-
     # --- scale features ---------------------------------------------------
     x_μ = mean(x, dims=2)[:]
     x_σ = std(x, dims=2)[:]
@@ -426,11 +430,10 @@ function compute_hsgp_corrections(
     # 2. Domain bounds L = margin * max(|x_scaled|) per dimension
     L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
 
-    z_thresh = 10.0
     mask = all(x_scaled .<= z_thresh, dims=1)[:]   # (n,)
     L_vec = margin * maximum(abs, x_scaled[:, mask], dims=2)[:] # (d,)
 
-    @info "HSGP input domain" L_vec
+    # @info "HSGP input domain" L_vec
     # 3. Compute eigenvalues (per‑dimension components)
     eigvals = calc_eigenvalues(L_vec, m, d)   # (m, d)
 
@@ -438,7 +441,7 @@ function compute_hsgp_corrections(
     ω = sqrt.(eigvals)                        # (m, d)
 
     # 4. Pre‑compute PSD values (depends only on ω, ls, sigma_f)
-    psd = power_spectral_density(ω, hyperparameter[2], hyperparameter[1])   # (m,)
+    psd = power_spectral_density(ω, hyperparameter[2], hyperparameter[3])   # (m,)
 
     # 5. 10‑fold cross‑validation
     D_folds = 10
@@ -463,7 +466,7 @@ function compute_hsgp_corrections(
         phi_star = calc_eigenvectors(x_test', L_vec, eigvals)   # (n_test, m)
 
         # 3. Build matrix A = var_n * diag(1/psd) + ΦᵀΦ
-        A = hyperparameter[3]^2 * Diagonal(1.0 ./ psd) + phi' * phi                    # (m, m)
+        A = hyperparameter[1]^2 * Diagonal(1.0 ./ psd) + phi' * phi                    # (m, m)
 
         # 4. Solve A α = Φᵀ y
         α = A \ (phi' * y_train)                                         # (m,)
@@ -475,7 +478,7 @@ function compute_hsgp_corrections(
         # Solve A * W = Φ_*ᵀ  => W = A \ phi_star'
         W = A \ phi_star'                                                # (m, N_test)
 
-        hsgp_var = hyperparameter[3]^2 * vec(sum(phi_star .* W', dims=2))         # (N_test,)
+        hsgp_var = hyperparameter[1]^2 * vec(sum(phi_star .* W', dims=2))         # (N_test,)
         hsgp_std = sqrt.(hsgp_var)
 
         predictions[test_ind] = normalize_y ? hsgp_mean .* y_σ .+ y_μ : hsgp_mean
@@ -554,14 +557,17 @@ function compute_corrections(
     # Yaw correction
     @info "------------ Computing Yaw corrections ---------------"
     hp_yaw = isnothing(hyperparameters) ? nothing : hyperparameters.yaw
+    @info "Yaw hyps before : " hp_yaw
     yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp_yaw, kwargs...)
+    @info "Yaw hyps after : " hyperparams_dict["yaw"]
+
     predictions[4, :] = yaw_pred
     if !isnothing(yaw_std)
         if isnothing(predictions_std)
             predictions_std = zeros(Float64, size(outputs.data))
         end
         predictions_std[4, :] = yaw_std
-        @info "Yaw Standard deviation" yaw_std
+        # @info "Yaw Standard deviation" yaw_std
     end
 
     # Position corrections
@@ -569,7 +575,7 @@ function compute_corrections(
         @info "--------------- Computing pos_$d corrections ---------------"
         if feature_type == TWOD_STEP_DT && d == 3 # Avoid ill posed problem in x,y inputs
             hyperparams_dict["pos_$d"] = nothing
-            @info "$feature_type , $d"
+            # @info "$feature_type , $d"
             continue
         end
 

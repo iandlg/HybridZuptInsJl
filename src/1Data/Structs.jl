@@ -95,11 +95,41 @@ function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std
     s.data = hcat(s.data, data)
 end
 
+"""
+    concatenate_io(ios::Vector{CorrectionIO})::CorrectionIO
+
+Combine multiple `CorrectionIO` objects into one.
+Time stamps are replaced by a simple 1:total_steps index to guarantee
+strictly increasing order after concatenation.
+All inputs must have the same number of data channels and consistent
+`data_std` presence (all must have it or all must lack it).
+"""
+function concatenate_io(ios::Vector{CorrectionIO})
+    isempty(ios) && error("Cannot concatenate an empty vector of CorrectionIO")
+    n_chan = size(first(ios).data, 1)
+    total_steps = sum(io -> length(io.t), ios)
+    t = collect(1.0:total_steps)               # Float64 to match existing
+
+    # Check consistency
+    has_std = !isnothing(first(ios).data_std)
+    for io in ios
+        size(io.data, 1) == n_chan || error("Channel count mismatch in concatenated IO")
+        if has_std != !isnothing(io.data_std)
+            error("Inconsistent data_std: all CorrectionIO must either have or lack data_std")
+        end
+    end
+
+    all_data = reduce(hcat, [io.data for io in ios])
+    all_std = has_std ? reduce(hcat, [io.data_std for io in ios]) : nothing
+
+    return CorrectionIO(t, all_data, all_std)
+end
+
 struct SeHyperparams
     pos_1::Vector{Float64}  # for x position
     pos_2::Vector{Float64}  # for y position
     pos_3::Vector{Float64}  # for z position
-    yaw::Vector{Float64}    # [σ_f, length_scale (can be multiple elements), σ_n] for yaw
+    yaw::Vector{Float64}    # [σ_n, length_scale (can be multiple elements), σ_f] for yaw
 
     function SeHyperparams(pos_0, pos_1, pos_2, yaw)
         p0 = Vector{Float64}(pos_0)

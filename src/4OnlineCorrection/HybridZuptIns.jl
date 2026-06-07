@@ -63,7 +63,7 @@ function hybrid_zupt_aided_ins(
         psd[((idx-1)*params.m+1):(idx*params.m)] = power_spectral_density(
             omega,
             getfield(params.hp, field)[2],
-            getfield(params.hp, field)[1]
+            getfield(params.hp, field)[3]
         )
     end
     output_names = ["pos_1", "pos_2", "pos_3", "yaw"]
@@ -232,7 +232,7 @@ function hybrid_zupt_aided_ins(
             if correct && gt_available[prev_step] && gt_available[curr_step]
                 noise_vect = Vector{Float64}(undef, p)
                 for (idx, key) in enumerate(output_names)
-                    noise_vect[idx] = getfield(params.hp, Symbol(key))[3]
+                    noise_vect[idx] = getfield(params.hp, Symbol(key))[1]
                 end
                 α = tr(Diagonal(noise_vect .^ 2)) / tr(tt_target_cov_norm)
                 R = Diagonal(noise_vect .^ 2) + α * tt_target_cov_norm

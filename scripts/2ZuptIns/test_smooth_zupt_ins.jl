@@ -6,7 +6,7 @@ data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2"
 )[data_key]
-trial_id = 7
+trial_id = 4
 inertial = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt_traj = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 
@@ -28,7 +28,7 @@ fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj, nothing)
 pos_start = ins_traj.pos[:, 1:1]      # 3×1 matrix
 distances = sqrt.(sum((pos_start .- ins_traj.pos) .^ 2, dims=1))[:]   # length N vector
 dist_at_segs = distances[segs]        # distances only at step ends
-idx_in_segs = findfirst(>(sim_config.calibration_distance_m), dist_at_segs)
+idx_in_segs = findfirst(>(1.55), dist_at_segs)
 if isnothing(idx_in_segs)
     error("No step end exceeds the calibration distance of $(sim_config.calibration_distance_m) m")
 end

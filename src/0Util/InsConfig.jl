@@ -8,6 +8,9 @@ end
     THREED_STEP = 1
     TWOD_STEP_DT = 2
     THREED_STEP_DT = 3
+    AUG_STEP = 4
+    TWOD_STEP_YAW = 5
+    TWOD_STEP_DT_YAW = 6
 end
 
 function string_to_enum(::Type{T}, s::AbstractString) where T<:Enum
@@ -81,7 +84,7 @@ function InsConfig(;
     sigma_initial_att=(100 * π / 180, 100 * π / 180, 0.1 * π / 180),
     g=nothing,
     segmentation_thrsld=0.1e-3,
-    calibration_distance_m=2.0
+    calibration_distance_m=1.55
 )
     g_val = isnothing(g) ? compute_gravity(latitude, altitude) : Float64(g)
 

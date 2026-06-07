@@ -60,9 +60,9 @@ function hybrid_zupt_aided_ins_gp(
     # Noise level taken from params.hp as before (field order = output_names).
     function make_gp(out_idx::Int)
         field = Symbol(output_names[out_idx])
-        log_sf = log(getfield(params.hp, field)[1])   # signal std 
+        log_sf = log(getfield(params.hp, field)[3])   # signal std 
         log_ls = log(getfield(params.hp, field)[2])   # length scale
-        log_noise = log(getfield(params.hp, field)[3]) # noise std
+        log_noise = log(getfield(params.hp, field)[1]) # noise std
         GaussianProcesses.GPE(; mean=GaussianProcesses.MeanZero(), kernel=GaussianProcesses.SE(log_ls, log_sf), logNoise=log_noise)
     end
 

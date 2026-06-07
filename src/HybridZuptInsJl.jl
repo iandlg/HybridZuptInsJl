@@ -10,18 +10,10 @@ import Optim
 import LeastSquaresOptim
 import GaussianProcesses
 import PDMats
-using Distributions
+using Distributions, Printf
 using Dates
 import MultivariateStats
-
-# Resolve ambiguity between GaussianProcesses.jl and PDMats.jl
-# function LinearAlgebra.ldiv!(
-#     A::PDMats.PDMat{Float64,Matrix{Float64}},
-#     B::AbstractVecOrMat{Float64}
-# )
-#     LinearAlgebra.ldiv!(A.chol, B)
-#     return B
-# end
+import Random
 
 include("0Util/Orientation.jl")
 include("0Util/InsConfig.jl")

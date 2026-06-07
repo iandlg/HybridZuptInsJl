@@ -5,7 +5,7 @@ import Dates, Optim
 
 data_key = "ANG2"
 trial_id = 15
-FRAME = HybridZuptInsJl.HEADING
+FRAME = HybridZuptInsJl.BODY
 FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
 n_restarts_optimizer = 6
 kern_lo = [-3.0, -3.0]

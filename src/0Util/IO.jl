@@ -99,7 +99,7 @@ function _convert_hyperparams_to_struct_list(
         pos_2_hyp = isnothing(hyperparams_dict["pos_2"]) ? ones(3) : hyperparams_dict["pos_2"][fold, 2:end]
         pos_3_hyp = isnothing(hyperparams_dict["pos_3"]) ? ones(3) : hyperparams_dict["pos_3"][fold, 2:end]
 
-        structs[fold] = SeHyperparams(yaw_hyp, pos_1_hyp, pos_2_hyp, pos_3_hyp)
+        structs[fold] = SeHyperparams(pos_1_hyp, pos_2_hyp, pos_3_hyp, yaw_hyp)
     end
 
     return structs
