@@ -55,6 +55,7 @@ function hybrid_zupt_aided_ins(
     # HSGP variables
     p = 4
     per_dim_eigvals = calc_eigenvalues(params.LL, params.m, params.d)
+    Φ = zeros(p, p * params.m)
     J_ϕ = zeros(params.d, params.m)
     omega = sqrt.(per_dim_eigvals)
     psd = zeros(Float64, p * params.m)
@@ -239,7 +240,6 @@ function hybrid_zupt_aided_ins(
                 beta, P_beta = measurement_update(
                     beta, P_beta, target_norm, H_update, R # Diagonal(noise_vect .^ 2)
                 )
-                @info R
                 push!(beta_hist, beta)
             end
             # ----------- Save target & Input ------------
