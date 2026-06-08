@@ -228,7 +228,7 @@ function hybrid_zupt_aided_ins(
             # ---------- Construct measurement matrix H_update --------------
             eigvect = calc_eigenvectors(
                 reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals)
-            H_update = kron(I(p), eigvect)
+            kron!(Φ, I(p), eigvect)
 
             if correct && gt_available[prev_step] && gt_available[curr_step]
                 noise_vect = Vector{Float64}(undef, p)
@@ -238,7 +238,7 @@ function hybrid_zupt_aided_ins(
                 α = tr(Diagonal(noise_vect .^ 2)) / tr(tt_target_cov_norm)
                 R = Diagonal(noise_vect .^ 2) + α * tt_target_cov_norm
                 beta, P_beta = measurement_update(
-                    beta, P_beta, target_norm, H_update, R # Diagonal(noise_vect .^ 2)
+                    beta, P_beta, target_norm, Φ, R # Diagonal(noise_vect .^ 2)
                 )
                 push!(beta_hist, beta)
             end
@@ -315,6 +315,7 @@ function hybrid_zupt_aided_ins(
                         reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals, d)
                 end
                 B_estim = reshape(beta, (params.m, p))
+
                 input_cov_norm = (J_ϕ * B_estim)' * feature_cov_norm * (J_ϕ * B_estim)
 
                 # ------------- Construct measurement matrix H_correction --------------------
@@ -328,7 +329,8 @@ function hybrid_zupt_aided_ins(
                     reshape(feature_estimate_norm, 1, params.d), params.LL, per_dim_eigvals)
 
                 # Compute prediction estimate
-                Φ = kron(I(p), eigvect)
+                # Φ = kron(I(p), eigvect)
+                kron!(Φ, I(p), eigvect)
                 pred_estim_norm = Φ * beta
 
                 # Compute prediction covariance
