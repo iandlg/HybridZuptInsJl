@@ -3,14 +3,15 @@ using .HybridZuptInsJl;
 using Statistics
 using OrderedCollections, Dates
 
-hyp_key = 31
+hyp_key = 100
 hyp_path = Dict{Int,String}(
     10 => "out/3OfflineCorrection/2_VariabilityResults/PY_ANG15_BODY_THREED_STEP.json",
     20 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_THREED_STEP_2026-05-13T14:14:24.485.json",
     30 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:06:28.867.json",
     31 => "out/3OfflineCorrection/2_VariabilityResults/ANG215_BODY_THREED_STEP_2026-06-06T17:22:12.377.json",
     40 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:03.913.json",
-    41 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-22T11:18:28.679.json"
+    41 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-22T11:18:28.679.json",
+    100 => "out/3OfflineCorrection/6_HypOpt/ANG2/BODY-TWOD_STEP_DT/ANG2_BODY_TWOD_STEP_DT_best_fold3_2026-06-07T12:30:49.054.json",
 )[hyp_key]
 
 hp, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.SeHyperparams, hyp_path)
@@ -23,7 +24,7 @@ normalize_input = meta["normalize_input"]
 normalize_output = meta["normalize_output"]
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
-trial_id = 15
+trial_id = 13
 m = 200
 margin = 1.5
 z_thresh = 10.0

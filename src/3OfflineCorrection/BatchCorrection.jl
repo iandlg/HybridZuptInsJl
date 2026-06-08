@@ -290,7 +290,8 @@ function compute_gp_corrections(
     normalize_y::Bool=true,
     normalize_x::Bool=true,
     ard::Bool=false,
-    n_fold=10
+    n_fold=10,
+    output_stats::Union{Nothing,Tuple{Float64,Float64}}=nothing
 )::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     n_features, n_samples = size(x)
     @assert length(y) == n_samples "x and y must have same number of samples"
@@ -411,19 +412,22 @@ function compute_hsgp_corrections(
     margin::Float64=1.8,
     normalize_x::Bool=true,
     normalize_y::Bool=true,
-    z_thresh::Float64=10.0
+    z_thresh::Float64=10.0,
+    input_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
+    LL::Union{Nothing,Vector{Float64}}=nothing,
+    output_stats::Union{Nothing,Tuple{Float64,Float64}}=nothing
 )::Tuple{Vector{Float64},Vector{Float64},Matrix{Float64}}
     d, N = size(x)
     @assert length(y) == N
     # --- scale features ---------------------------------------------------
-    x_μ = mean(x, dims=2)[:]
-    x_σ = std(x, dims=2)[:]
+    x_μ = isnothing(input_stats) ? mean(x, dims=2)[:] : input_stats[1]
+    x_σ = isnothing(input_stats) ? std(x, dims=2)[:] : input_stats[2]
     x_σ[x_σ.==0.0] .= 1.0
     x_scaled = normalize_x ? (x .- x_μ) ./ x_σ : x
 
     # --- scale outptut ---------------------------------------------------
-    y_μ = mean(y)
-    y_σ = std(y)
+    y_μ = isnothing(output_stats) ? mean(y) : output_stats[1]
+    y_σ = isnothing(output_stats) ? std(y) : output_stats[2]
     y_σ = y_σ == 0.0 ? 1.0 : y_σ
     y_scaled = normalize_y ? (y .- y_μ) ./ y_σ : y
 
@@ -431,7 +435,7 @@ function compute_hsgp_corrections(
     L_vec = margin * maximum(abs, x_scaled, dims=2)[:]   # (d,)
 
     mask = all(x_scaled .<= z_thresh, dims=1)[:]   # (n,)
-    L_vec = margin * maximum(abs, x_scaled[:, mask], dims=2)[:] # (d,)
+    L_vec = isnothing(LL) ? margin * maximum(abs, x_scaled[:, mask], dims=2)[:] : LL # (d,)
 
     # @info "HSGP input domain" L_vec
     # 3. Compute eigenvalues (per‑dimension components)
@@ -498,7 +502,8 @@ function compute_static_corrections(
     x::Matrix{Float64},
     y::Vector{Float64};
     hyperparameter::Union{Nothing,Vector{Float64}}=nothing,
-    n_restarts_optimizer::Int=5
+    n_restarts_optimizer::Int=5,
+    output_stats::Union{Nothing,Tuple{Float64,Float64}}=nothing
 )::Tuple{Vector{Float64},Nothing,Nothing}
     D = 10
     _, n_samples = size(x)
@@ -544,6 +549,7 @@ function compute_corrections(
     correction_method::Function,
     hyperparameters::Union{Nothing,SeHyperparams}=nothing;
     feature_type::FeatureType=THREED_STEP,
+    output_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
     kwargs...
 )::Tuple{CorrectionIO,Union{Nothing,Vector{SeHyperparams}}}
 
@@ -557,9 +563,11 @@ function compute_corrections(
     # Yaw correction
     @info "------------ Computing Yaw corrections ---------------"
     hp_yaw = isnothing(hyperparameters) ? nothing : hyperparameters.yaw
-    @info "Yaw hyps before : " hp_yaw
-    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(input_feature, outputs.data[4, :]; hyperparameter=hp_yaw, kwargs...)
-    @info "Yaw hyps after : " hyperparams_dict["yaw"]
+    yaw_pred, yaw_std, hyperparams_dict["yaw"] = correction_method(
+        input_feature, outputs.data[4, :];
+        hyperparameter=hp_yaw,
+        output_stats=isnothing(output_stats) ? nothing : (output_stats[1][4], output_stats[2][4]),
+        kwargs...)
 
     predictions[4, :] = yaw_pred
     if !isnothing(yaw_std)
@@ -580,7 +588,10 @@ function compute_corrections(
         end
 
         d_hyp = isnothing(hyperparameters) ? nothing : getfield(hyperparameters, Symbol("pos_$d"))
-        pos_pred, pos_std, hyperparams_dict["pos_$d"] = correction_method(input_feature, outputs.data[d, :]; hyperparameter=d_hyp, kwargs...)
+        pos_pred, pos_std, hyperparams_dict["pos_$d"] = correction_method(
+            input_feature, outputs.data[d, :]; hyperparameter=d_hyp,
+            output_stats=isnothing(output_stats) ? nothing : (output_stats[1][d], output_stats[2][d]),
+            kwargs...)
         predictions[d, :] = pos_pred
         if !isnothing(pos_std)
             if isnothing(predictions_std)
