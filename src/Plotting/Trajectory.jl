@@ -342,6 +342,7 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     return fig
 end
+
 function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
     current_time = times[current_idx]
     ages = current_time .- times[1:current_idx]
@@ -357,14 +358,74 @@ function ring_points(center::Point3f, radius::Float32)
     )
 end
 
+function make_ring_data(
+    positions,
+    times,
+    footfall_idxs,
+    current_idx,
+    lifetime;
+    radius0::Float32=0.05f0,
+    radius_growth::Float32=0.2f0,
+    radius_scale::Float32=1f0,
+    alpha_fn=x -> 1f0 - x,
+    color_rgb=(0.2f0, 1f0, 0.2f0),
+)
+    ff = footfall_idxs[footfall_idxs.≤current_idx]
+    isempty(ff) && return (Point3f[], RGBAf[])
+
+    ages = times[current_idx] .- times[ff]
+
+    mask = ages .≤ lifetime
+    within = ff[mask]
+    within_ages = ages[mask]
+
+    isempty(within) && return (Point3f[], RGBAf[])
+
+    pts = Point3f[]
+    colors = RGBAf[]
+
+    for (j, age) in zip(within, within_ages)
+
+        frac = Float32(age / lifetime)
+
+        radius =
+            (radius0 + radius_growth * frac) * radius_scale
+
+        α = clamp(alpha_fn(frac), 0f0, 1f0)
+
+        color = RGBAf(color_rgb..., α)
+
+        ring = ring_points(
+            Point3f(positions[:, j]...),
+            radius,
+        )
+
+        append!(pts, ring)
+        append!(colors, fill(color, length(ring)))
+
+        push!(pts, Point3f(NaN, NaN, NaN))
+        push!(colors, RGBAf(0, 0, 0, 0))
+    end
+
+    return (pts, colors)
+end
+
 function animate_trajectory(
     traj::Trajectory, segs::Vector{Int};
     lifetime::Float64=1.0,
     framerate::Int=60,
     filepath::String="trajectory_animation.mp4",
-    padding::Float64=0.1
+    padding::Float64=0.3,
 )
     set_theme!(theme_black())
+
+    inferno = cgrad(:inferno)
+
+    current_color = inferno(0.95) # base colors 
+    trail_color = inferno(0.65)
+    footfall_color = inferno(0.25)
+    RGBAf(current_color.r, current_color.g, current_color.b, 1f0) # for converting color
+
     positions = traj.pos
     times = traj.t
     N = length(times)
@@ -398,36 +459,22 @@ function animate_trajectory(
     current_point = @lift [Point3f(positions[:, $current_idx]...)]
 
     # ── Footfall data ────────────────────────────────────────────────────────
-    footfall_sizes = @lift begin
-        ff = footfall_idxs[footfall_idxs.≤$current_idx]
-        isempty(ff) && return Float32[]
-        ages = times[$current_idx] .- times[ff]
-        within_ages = ages[ages.≤lifetime]
-        isempty(within_ages) && return Float32[]
-        Float32.(3 .+ 32 .* (within_ages ./ lifetime))   # 8px → 40px
+    footfall_ring_data = @lift begin
+        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime;
+            alpha_fn=x -> 1f0 - x,
+            radius_scale=1f0,
+        )
     end
 
-    footfall_points = @lift begin
-        ff = footfall_idxs[footfall_idxs.≤$current_idx]
-        isempty(ff) && return Point3f[]
-        ages = times[$current_idx] .- times[ff]
-        within = ff[ages.≤lifetime]
-        isempty(within) && return Point3f[]
-        [Point3f(positions[:, j]...) for j in within]
-    end
-
-    footfall_colors = @lift begin
-        ff = footfall_idxs[footfall_idxs.≤$current_idx]
-        isempty(ff) && return RGBAf[]
-        ages = times[$current_idx] .- times[ff]
-        within_ages = ages[ages.≤lifetime]
-        isempty(within_ages) && return RGBAf[]
-        [RGBAf(0, 1, 0, clamp(1f0 - Float32(a / lifetime), 0f0, 1f0)) for a in within_ages]
+    footfall_ring_data_soft = @lift begin
+        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime;
+            alpha_fn=x -> 0.3f0 * (1f0 - x),
+            radius_scale=1.3f0,
+        )
     end
 
     # ── Camera azimuth ───────────────────────────────────────────────────────────
-    azimuth = @lift deg2rad(60 + 15 * sin(2π * $current_idx / (framerate * 10)))
-
+    azimuth = @lift deg2rad(30 + 15 * sin(2π * $current_idx / (framerate * 20)))
 
     # ── Figure & plots (created once) ────────────────────────────────────────
     fig = Figure(size=(800, 600))
@@ -438,13 +485,15 @@ function animate_trajectory(
         minimum(positions[3, :]) - padding, maximum(positions[3, :]) + padding)
 
     linesegments!(ax, trail_points; color=trail_colors, linewidth=2, transparency=true)
-    scatter!(ax, current_point; color=:red, markersize=12)
-    scatter!(ax, footfall_points;
-        color=footfall_colors,
-        markersize=footfall_sizes,
-        marker=:circle,
-        strokewidth=2,
-        strokecolor=footfall_colors,   # ring edge same color
+    scatter!(ax, current_point; color=current_color, markersize=12)
+    lines!(ax, @lift($footfall_ring_data[1]);
+        color=@lift($footfall_ring_data[2]),
+        linewidth=2,
+        transparency=true,
+    )
+    lines!(ax, @lift($footfall_ring_data_soft[1]);
+        color=@lift($footfall_ring_data_soft[2]),
+        linewidth=6,       # wide = soft halo
         transparency=true,
     )
     connect!(ax.azimuth, azimuth)
