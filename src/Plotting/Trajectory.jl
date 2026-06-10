@@ -342,87 +342,117 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     return fig
 end
-using GLMakie
-using LinearAlgebra
-using Makie.Colors
-
-function indices_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
+function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
     current_time = times[current_idx]
-    age = current_time .- times[1:current_idx]
-    return findall(age .<= lifetime)
+    ages = current_time .- times[1:current_idx]
+    mask = ages .<= lifetime
+    return findall(mask), ages[mask]
 end
 
-function update_line!(line::Lines, positions::Matrix{Float64}, idxs::Vector{Int})
-    if isempty(idxs)
-        line.positions[] = Point3f[]
-    else
-        pts = [Point3f(positions[1, i], positions[2, i], positions[3, i]) for i in idxs]
-        line.positions[] = pts
-    end
+function ring_points(center::Point3f, radius::Float32)
+    θs = range(0, 2π, length=64)
+    push!(
+        [Point3f(center[1] + radius * cos(θ), center[2] + radius * sin(θ), center[3]) for θ in θs],
+        Point3f(center[1] + radius, center[2], center[3])  # close the loop
+    )
 end
 
-function animate_trajectory(traj::Trajectory, segs::Vector{Int};
+function animate_trajectory(
+    traj::Trajectory, segs::Vector{Int};
     lifetime::Float64=1.0,
-    framerate::Int=30,
-    filename::String="trajectory_animation.mp4")
+    framerate::Int=60,
+    filepath::String="trajectory_animation.mp4",
+    padding::Float64=0.1
+)
+    set_theme!(theme_black())
     positions = traj.pos
     times = traj.t
     N = length(times)
     footfall_idxs = segs
 
-    fig = Figure(size=(800, 600))
-    ax = Axis3(fig[1, 1]; aspect=:data, title="Trajectory Animation")
-    # Full trajectory (grey, semi-transparent)
-    padding = 0.1
-    limits!(ax,
-        min(positions[1, :]) - padding, max(positions[1, :]) + padding,
-        min(positions[2, :]) - padding, max(positions[2, :]) + padding,
-        min(positions[3, :]) - padding, max(positions[3, :]) + padding
-    )
-    lines!(ax, positions[1, :], positions[2, :], positions[3, :]; color=:gray, alpha=0.1)
-    # Trail line (updated each frame)
-    trail_line = lines!(ax, Point3f[]; color=:blue, linewidth=2, alpha=0.7)
-    # Moving point marker (updated each frame)
-    current_marker = scatter!(ax, Point3f[]; color=:red, markersize=12)
+    # ── Single source of truth ──────────────────────────────────────────────
+    current_idx = Observable(1)
 
-    # We will re-create the footfall plot each frame
-    footfall_plot = nothing
-
-    function update_frame!(i)
-        # ----- Trail line -----
-        trail_idxs = indices_within_lifetime(times, i, lifetime)
-        update_line!(trail_line, positions, trail_idxs)
-
-        # ----- Current point -----
-        current_pt = [Point3f(positions[1, i], positions[2, i], positions[3, i])]
-        current_marker.positions[] = current_pt
-
-        # ----- Footfall markers (recreate every frame) -----
-        if footfall_plot !== nothing
-            delete!(ax, footfall_plot)
+    # ── Trail data ──────────────────────────────────────────────────────────
+    # Two parallel flat arrays: one point-pair per segment, one color per pair
+    trail_points = @lift begin
+        trail_idxs, _ = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
+        length(trail_idxs) < 2 && return Point3f[]
+        pts = Point3f[]
+        for k in 1:length(trail_idxs)-1
+            push!(pts,
+                Point3f(positions[:, trail_idxs[k]]...),
+                Point3f(positions[:, trail_idxs[k+1]]...))
         end
-
-        # Footfalls that have occurred up to frame i
-        ff_candidates = footfall_idxs[footfall_idxs.≤i]
-        if !isempty(ff_candidates)
-            ages = times[i] .- times[ff_candidates]
-            within = ff_candidates[ages.≤lifetime]
-            if !isempty(within)
-                pts = [Point3f(positions[1, j], positions[2, j], positions[3, j]) for j in within]
-                alphas = 1.0f0 .- (Float32.(ages[ages.≤lifetime]) ./ lifetime)
-                colors = [RGBAf(0, 1, 0, alpha) for alpha in alphas]
-                footfall_plot = scatter!(ax, pts; color=colors, markersize=8, transparency=true)
-            else
-                # Empty plot (no footfalls visible)
-                footfall_plot = scatter!(ax, Point3f[]; color=RGBAf(0, 1, 0, 0), markersize=8)
-            end
-        else
-            footfall_plot = scatter!(ax, Point3f[]; color=RGBAf(0, 1, 0, 0), markersize=8)
-        end
+        pts
     end
 
-    record(fig, filename, 1:N; framerate=framerate) do i
-        update_frame!(i)
+    trail_colors = @lift begin
+        trail_idxs, trail_ages = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
+        length(trail_idxs) < 2 && return RGBAf[]
+        [RGBAf(0, 0, 1, clamp(1f0 - Float32(trail_ages[k+1] / lifetime), 0f0, 1f0))
+         for k in 1:length(trail_idxs)-1]
+    end
+
+    # ── Current marker ───────────────────────────────────────────────────────
+    current_point = @lift [Point3f(positions[:, $current_idx]...)]
+
+    # ── Footfall data ────────────────────────────────────────────────────────
+    footfall_sizes = @lift begin
+        ff = footfall_idxs[footfall_idxs.≤$current_idx]
+        isempty(ff) && return Float32[]
+        ages = times[$current_idx] .- times[ff]
+        within_ages = ages[ages.≤lifetime]
+        isempty(within_ages) && return Float32[]
+        Float32.(3 .+ 32 .* (within_ages ./ lifetime))   # 8px → 40px
+    end
+
+    footfall_points = @lift begin
+        ff = footfall_idxs[footfall_idxs.≤$current_idx]
+        isempty(ff) && return Point3f[]
+        ages = times[$current_idx] .- times[ff]
+        within = ff[ages.≤lifetime]
+        isempty(within) && return Point3f[]
+        [Point3f(positions[:, j]...) for j in within]
+    end
+
+    footfall_colors = @lift begin
+        ff = footfall_idxs[footfall_idxs.≤$current_idx]
+        isempty(ff) && return RGBAf[]
+        ages = times[$current_idx] .- times[ff]
+        within_ages = ages[ages.≤lifetime]
+        isempty(within_ages) && return RGBAf[]
+        [RGBAf(0, 1, 0, clamp(1f0 - Float32(a / lifetime), 0f0, 1f0)) for a in within_ages]
+    end
+
+    # ── Camera azimuth ───────────────────────────────────────────────────────────
+    azimuth = @lift deg2rad(60 + 15 * sin(2π * $current_idx / (framerate * 10)))
+
+
+    # ── Figure & plots (created once) ────────────────────────────────────────
+    fig = Figure(size=(800, 600))
+    ax = Axis3(fig[1, 1]; aspect=:data, title="Trajectory Animation")
+    limits!(ax,
+        minimum(positions[1, :]) - padding, maximum(positions[1, :]) + padding,
+        minimum(positions[2, :]) - padding, maximum(positions[2, :]) + padding,
+        minimum(positions[3, :]) - padding, maximum(positions[3, :]) + padding)
+
+    linesegments!(ax, trail_points; color=trail_colors, linewidth=2, transparency=true)
+    scatter!(ax, current_point; color=:red, markersize=12)
+    scatter!(ax, footfall_points;
+        color=footfall_colors,
+        markersize=footfall_sizes,
+        marker=:circle,
+        strokewidth=2,
+        strokecolor=footfall_colors,   # ring edge same color
+        transparency=true,
+    )
+    connect!(ax.azimuth, azimuth)
+    # ax.azimuth = azimuth
+
+    # ── Recording: only one thing changes per frame ───────────────────────────
+    record(fig, filepath, 1:N; framerate=framerate) do i
+        current_idx[] = i          # triggers all derived Observables automatically
     end
 
     return fig

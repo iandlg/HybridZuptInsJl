@@ -14,5 +14,6 @@ ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_al
 )
 
 
-fig = HybridZuptInsJl.animate_trajectory(gt_traj_aligned, segs; lifetime=0.8, filename="my_trajectory.mp4")
-display(fig)   # or just run the function to create the video
+filepath = joinpath("out/Media", "trajectory.mp4")
+fig = HybridZuptInsJl.animate_trajectory(gt_traj_aligned, segs; lifetime=1.2, filepath=filepath)
+display(fig)
