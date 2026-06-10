@@ -342,3 +342,88 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     return fig
 end
+using GLMakie
+using LinearAlgebra
+using Makie.Colors
+
+function indices_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
+    current_time = times[current_idx]
+    age = current_time .- times[1:current_idx]
+    return findall(age .<= lifetime)
+end
+
+function update_line!(line::Lines, positions::Matrix{Float64}, idxs::Vector{Int})
+    if isempty(idxs)
+        line.positions[] = Point3f[]
+    else
+        pts = [Point3f(positions[1, i], positions[2, i], positions[3, i]) for i in idxs]
+        line.positions[] = pts
+    end
+end
+
+function animate_trajectory(traj::Trajectory, segs::Vector{Int};
+    lifetime::Float64=1.0,
+    framerate::Int=30,
+    filename::String="trajectory_animation.mp4")
+    positions = traj.pos
+    times = traj.t
+    N = length(times)
+    footfall_idxs = segs
+
+    fig = Figure(size=(800, 600))
+    ax = Axis3(fig[1, 1]; aspect=:data, title="Trajectory Animation")
+    # Full trajectory (grey, semi-transparent)
+    padding = 0.1
+    limits!(ax,
+        min(positions[1, :]) - padding, max(positions[1, :]) + padding,
+        min(positions[2, :]) - padding, max(positions[2, :]) + padding,
+        min(positions[3, :]) - padding, max(positions[3, :]) + padding
+    )
+    lines!(ax, positions[1, :], positions[2, :], positions[3, :]; color=:gray, alpha=0.1)
+    # Trail line (updated each frame)
+    trail_line = lines!(ax, Point3f[]; color=:blue, linewidth=2, alpha=0.7)
+    # Moving point marker (updated each frame)
+    current_marker = scatter!(ax, Point3f[]; color=:red, markersize=12)
+
+    # We will re-create the footfall plot each frame
+    footfall_plot = nothing
+
+    function update_frame!(i)
+        # ----- Trail line -----
+        trail_idxs = indices_within_lifetime(times, i, lifetime)
+        update_line!(trail_line, positions, trail_idxs)
+
+        # ----- Current point -----
+        current_pt = [Point3f(positions[1, i], positions[2, i], positions[3, i])]
+        current_marker.positions[] = current_pt
+
+        # ----- Footfall markers (recreate every frame) -----
+        if footfall_plot !== nothing
+            delete!(ax, footfall_plot)
+        end
+
+        # Footfalls that have occurred up to frame i
+        ff_candidates = footfall_idxs[footfall_idxs.≤i]
+        if !isempty(ff_candidates)
+            ages = times[i] .- times[ff_candidates]
+            within = ff_candidates[ages.≤lifetime]
+            if !isempty(within)
+                pts = [Point3f(positions[1, j], positions[2, j], positions[3, j]) for j in within]
+                alphas = 1.0f0 .- (Float32.(ages[ages.≤lifetime]) ./ lifetime)
+                colors = [RGBAf(0, 1, 0, alpha) for alpha in alphas]
+                footfall_plot = scatter!(ax, pts; color=colors, markersize=8, transparency=true)
+            else
+                # Empty plot (no footfalls visible)
+                footfall_plot = scatter!(ax, Point3f[]; color=RGBAf(0, 1, 0, 0), markersize=8)
+            end
+        else
+            footfall_plot = scatter!(ax, Point3f[]; color=RGBAf(0, 1, 0, 0), markersize=8)
+        end
+    end
+
+    record(fig, filename, 1:N; framerate=framerate) do i
+        update_frame!(i)
+    end
+
+    return fig
+end

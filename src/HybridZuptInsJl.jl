@@ -5,7 +5,7 @@ import Quaternions
 using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
 import Interpolations     # LinearInterpolation
 using CSV, DataFrames, JSON, OrderedCollections
-using GLMakie
+using GLMakie, Makie.Colors
 import Optim
 import LeastSquaresOptim
 import GaussianProcesses
