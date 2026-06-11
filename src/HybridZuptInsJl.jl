@@ -2,8 +2,8 @@ module HybridZuptInsJl
 
 using LinearAlgebra, Statistics
 import Quaternions
-using Rotations, DSP          # QuatRotation, RotMatrix, Slerp
-import Interpolations     # LinearInterpolation
+using Rotations, DSP
+import Interpolations
 using CSV, DataFrames, JSON, OrderedCollections
 using GLMakie, Makie.Colors
 import Optim
@@ -41,6 +41,8 @@ include("4OnlineCorrection/NominalHybridZuptIns.jl")
 include("4OnlineCorrection/HybridZuptIns.jl")
 include("4OnlineCorrection/HyrbridGpZuptIns.jl")
 include("4OnlineCorrection/VariabilityAnalysis.jl")
+include("4OnlineCorrection/Correctors.jl")
+include("4OnlineCorrection/HybridZuptInsV2.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")

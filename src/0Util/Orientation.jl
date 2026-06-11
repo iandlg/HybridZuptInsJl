@@ -361,4 +361,9 @@ function quat_conjugate(q::AbstractVector{T}) where T<:Real
     return [qw, -qx, -qy, -qz]
 end
 
-
+function quat_exp(v::Vector{T}) where T<:Real
+    length(v) == 3 || throw(DimensionMismatch("Expected vector of length 3, got $(length(v))"))
+    ϕ = LinearAlgebra.norm(v)
+    ϕ < 1e-9 && return [1.0, 0.0, 0.0, 0.0]
+    return vcat(cos(ϕ / 2), v ./ ϕ .* sin(ϕ / 2))
+end

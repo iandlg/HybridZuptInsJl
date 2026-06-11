@@ -482,8 +482,8 @@ function animate_trajectory(
     limits!(ax,
         minimum(positions[1, :]) - padding, maximum(positions[1, :]) + padding,
         minimum(positions[2, :]) - padding, maximum(positions[2, :]) + padding,
-        minimum(positions[3, :]) - padding, maximum(positions[3, :]) + padding)
-
+        minimum(positions[3, :]) - padding, maximum(positions[3, :]) + padding
+    )
     linesegments!(ax, trail_points; color=trail_colors, linewidth=4 * scale, transparency=true, fxaa=true, ssao=true)
     scatter!(ax, current_point; color=current_color_rgba, markersize=12 * scale)
     lines!(ax, @lift($footfall_ring_data[1]);

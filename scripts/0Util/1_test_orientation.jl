@@ -27,6 +27,7 @@ phi = pi / 3
 v = phi * u
 
 q = [cos(phi / 2); sin(phi / 2) .* u]
+q_me = HybridZuptInsJl.quat_exp(v)
 
 R = I(3) + sin(phi) .* HybridZuptInsJl.skew(u) + (1 - cos(phi)) * HybridZuptInsJl.skew(u)^2
 R_exp = exp(HybridZuptInsJl.skew(v))
