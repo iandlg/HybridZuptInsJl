@@ -21,7 +21,6 @@ function plot_groundtruth_vs_inertial_positions(
     samples::Int=typemax(Int)
 )
 
-    # Create figure and axis
     fig = Figure(size=(800, 600))
     ax = Axis(fig[1, 1];
         xlabel="X (m)",
@@ -32,24 +31,22 @@ function plot_groundtruth_vs_inertial_positions(
 
     if !isnothing(gt_traj)
         n = min(length(gt_traj.t), samples)
-        # Ground truth line (dashed black)
         lines!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
             color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+        scatter!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
+            color=:black, marker=:circle, markersize=5, alpha=0.6)
 
-        # Ground truth start (circle) and end (square)
         scatter!(ax, [gt_traj.pos[1, 1]], [gt_traj.pos[2, 1]];
             color=:black, marker=:circle, markersize=12, label="Start")
         scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
             color=:black, marker=:rect, markersize=12, label="End")
     end
 
-    # Colour palette for the estimated trajectories (tab10 equivalent)
-    colors = Makie.wong_colors()   # gives 9 distinct colours (or use ColorSchemes.tab10)
-    # If more trajectories than colors, cycle
+    colors = Makie.wong_colors()
     color_cycle = Iterators.cycle(colors)
 
     for (i, (key, traj)) in enumerate(trajs)
-        c = first(color_cycle)   # get next colour
+        c = first(color_cycle)
         color_cycle = Iterators.drop(color_cycle, 1)
 
         n = min(length(traj.t), samples)
@@ -58,18 +55,20 @@ function plot_groundtruth_vs_inertial_positions(
         lines!(ax, traj.pos[1, 1:n], traj.pos[2, 1:n];
             color=c, linewidth=1, label=key)
 
-        # Start marker (circle)
+        # Small markers at every data point
+        scatter!(ax, traj.pos[1, 1:n], traj.pos[2, 1:n];
+            color=c, marker=:circle, markersize=5, alpha=0.6)
+
+        # Start marker (larger circle)
         scatter!(ax, [traj.pos[1, 1]], [traj.pos[2, 1]];
             color=c, marker=:circle, markersize=12)
 
-        # End marker (square)
+        # End marker (larger square)
         scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
             color=c, marker=:rect, markersize=12)
     end
 
-    # Add legend
     axislegend(ax; position=:rt)
-
     return fig
 end
 

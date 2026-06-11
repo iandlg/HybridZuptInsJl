@@ -64,6 +64,8 @@ mutable struct InsConfig
     # ZUPT segmentation
     segmentation_thrsld::Float64
     calibration_distance_m::Float64
+    # Hybrid
+    sigma_groundtruth::NTuple{4,Float64}
 end
 
 function InsConfig(;
@@ -84,7 +86,8 @@ function InsConfig(;
     sigma_initial_att=(100 * π / 180, 100 * π / 180, 0.1 * π / 180),
     g=nothing,
     segmentation_thrsld=0.1e-3,
-    calibration_distance_m=1.55
+    calibration_distance_m=1.55,
+    sigma_groundtruth=(1e-2, 1e-2, 1e-2, 1e-3)
 )
     g_val = isnothing(g) ? compute_gravity(latitude, altitude) : Float64(g)
 
@@ -93,7 +96,7 @@ function InsConfig(;
         sigma_a, sigma_g, window_size, gamma,
         sigma_acc, sigma_gyro, sigma_vel,
         sigma_initial_pos, sigma_initial_vel, sigma_initial_att,
-        g_val, segmentation_thrsld, calibration_distance_m
+        g_val, segmentation_thrsld, calibration_distance_m, sigma_groundtruth
     )
 end
 
@@ -107,3 +110,4 @@ sigma_vel_array(cfg::InsConfig) = collect(cfg.sigma_vel)
 sigma_initial_pos_array(cfg::InsConfig) = collect(cfg.sigma_initial_pos)
 sigma_initial_vel_array(cfg::InsConfig) = collect(cfg.sigma_initial_vel)
 sigma_initial_att_array(cfg::InsConfig) = collect(cfg.sigma_initial_att)
+sigma_groundtruth_array(cfg::InsConfig) = collect(cfg.sigma_groundtruth)

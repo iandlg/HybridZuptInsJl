@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 15 # meta["trial_id"]
+trial_id = 14 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
 train_ratio = 0.4
@@ -41,6 +41,11 @@ x_init = vcat(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
+N = length(inertial_updated)
+n_train_cutoff = floor(Int, train_ratio * N)
+gt_available = [n <= n_train_cutoff for n in 1:N]
+gt_available[1:min(500, N)] .= false
+
 true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
@@ -50,13 +55,16 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )
-N = length(inertial_updated)
+
+
 default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
-zupt, zupt_ins_traj, step_seg, corr_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(inertial_updated, sim_config_updated, gt_traj_aligned, default_corr; x_init=x_init)
+zupt, zupt_ins_traj, step_seg, corr_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, default_corr; x_init=x_init, gt_available=gt_available)
 
 trajs = Dict(
     "zupt ins" => zupt_ins_traj[step_seg],
     "step_wise" => corr_traj
 )
-
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[segs])
+@show step_seg
+@show segs
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; samples=10)

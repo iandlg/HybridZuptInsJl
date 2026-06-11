@@ -127,12 +127,6 @@ function hybrid_zupt_aided_insv2(
         prev_step = step_seg[end-1]
         curr_step = step_seg[end]
 
-        @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-
-        # Compute yaw change from x
-        yaw_ins_seg = unwrap(x[9, prev_step:curr_step])
-        Δθ3 = yaw_ins_seg[end] - yaw_ins_seg[1]
-
         dynamic_update!(corrector;
             t=inertial.t[curr_step],
             Δp=x[1:3, curr_step] - x[1:3, prev_step],
@@ -141,11 +135,30 @@ function hybrid_zupt_aided_insv2(
         )
 
         if gt_available[curr_step] && gt_available[prev_step]
+            @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
+            @info "Prev and curr GT available"
+
+            # Method 1
+            θ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
+            θ3_ins = matrix_to_euler(quat_to_matrix(corrector.quat[:, corrector.i]))[3]
+            Δθ3_m1 = atan(sin(θ3_gt - θ3_ins), cos(θ3_gt - θ3_ins))
 
         elseif gt_available[curr_step]
+            @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
+            @info "Curr GT available"
 
+            # Method 1
+            θ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
+            θ3_ins = matrix_to_euler(quat_to_matrix(corrector.quat[:, corrector.i]))[3]
+            Δθ3_m1 = atan(sin(θ3_gt - θ3_ins), cos(θ3_gt - θ3_ins))
+
+            measurement_update!(corrector;
+                curr_pos=gt_traj.pos[:, curr_step],
+                curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
+                Σy=Diagonal(sigma_groundtruth_array(simdata))
+            )
         else
-
+            # @info "No GT available"
         end
 
         relinearize!(corrector)

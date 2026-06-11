@@ -1,10 +1,10 @@
 abstract type AbstractCorrector end
 
-function initialize_corrector!(c::AbstractCorrector; t::Float64, pos_init::Vector{Float64}, quat_init::Vector{Float64}, Σ_init::Matrix{Float64}, kwarg...)
+function initialize_corrector!(c::AbstractCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σ_init::AbstractMatrix{Float64}, kwarg...)
     error("initialize_corrector! not implemented for $(typeof(c))")
 end
 
-function dynamic_update!(c::AbstractCorrector; t::Float64, Δp::Vector{Float64}, Δq::Vector{Float64}, Σpq::Matrix{Float64}, kwarg...)
+function dynamic_update!(c::AbstractCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwarg...)
     error("dynamic_update! not implemented for $(typeof(c))")
 end
 
@@ -12,15 +12,15 @@ function relinearize!(c::AbstractCorrector; kwarg...)
     error("relinearize! not implemented for $(typeof(c))")
 end
 # Accessors
-function get_time(c::AbstractCorrector)::Vector{Float64}
+function get_time(c::AbstractCorrector)::AbstractVector{Float64}
     return c.t[1:c.i]
 end
 
-function get_pos(c::AbstractCorrector)::Matrix{Float64}
+function get_pos(c::AbstractCorrector)::AbstractMatrix{Float64}
     return c.pos[:, 1:c.i]
 end
 
-function get_quat(c::AbstractCorrector)::Matrix{Float64}
+function get_quat(c::AbstractCorrector)::AbstractMatrix{Float64}
     return c.quat[:, 1:c.i]
 end
 
@@ -34,7 +34,7 @@ end
 
 
 
-# function update_corrector!(c::AbstractCorrector, Δp::Vector{Float64}, Δq::Vector{Float64}, Σpq::Matrix{Float64})
+# function update_corrector!(c::AbstractCorrector, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::Matrix{Float64})
 #     error("update_corrector! not implemented for $(typeof(c))")
 # end
 
@@ -44,12 +44,13 @@ end
 
 # ── Concrete correctors ───────────────────────────────────────────────────
 mutable struct DefaultCorrector <: AbstractCorrector
-    t::Vector{Float64}
-    pos::Matrix{Float64}
-    quat::Matrix{Float64}
-    δx::Matrix{Float64}
-    Σ::Array{Float64,3}
-    F::Array{Float64,3}
+    t::AbstractVector{Float64}
+    pos::AbstractMatrix{Float64}
+    quat::AbstractMatrix{Float64}
+    δx::AbstractMatrix{Float64}
+    Σ::AbstractArray{Float64,3}
+    F::AbstractArray{Float64,3}
+    H::AbstractArray{Float64,3}
     i::Int
 end
 
@@ -57,10 +58,10 @@ function DefaultCorrector(N::Int)::DefaultCorrector
     @assert N > 1 "Invalid number of "
     return DefaultCorrector(
         zeros(Float64, N), zeros(Float64, 3, N), zeros(Float64, 4, N), zeros(Float64, 6, N),
-        zeros(Float64, 6, 6, N), repeat(Matrix{Float64}(I, 6, 6), 1, 1, N), 1)
+        zeros(Float64, 6, 6, N), repeat(Matrix{Float64}(I, 6, 6), 1, 1, N), zeros(Float64, 4, 6, N), 1)
 end
 
-function initialize_corrector!(c::DefaultCorrector; t::Float64, pos_init::Vector{Float64}, quat_init::Vector{Float64}, Σ_init::Matrix{Float64})
+function initialize_corrector!(c::DefaultCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σ_init::AbstractMatrix{Float64})
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
@@ -70,7 +71,7 @@ function initialize_corrector!(c::DefaultCorrector; t::Float64, pos_init::Vector
     c.i = 1
 end
 
-function dynamic_update!(c::DefaultCorrector; t::Float64, Δp::Vector{Float64}, Δq::Vector{Float64}, Σpq::Matrix{Float64})
+function dynamic_update!(c::DefaultCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64})
     c.i += 1
     c.t[c.i] = t
     # Nominal update
@@ -83,8 +84,17 @@ function dynamic_update!(c::DefaultCorrector; t::Float64, Δp::Vector{Float64}, 
     c.Σ[:, :, c.i] = c.F[:, :, c.i] * c.Σ[:, :, c.i-1] * c.F[:, :, c.i]' + Σpq
 end
 
-function measurement_update!(c::DefaultCorrector;)
-
+function measurement_update!(c::DefaultCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64})
+    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6, c.i] = jacobian_∂θ3_∂δθ(c.quat[:, c.i])
+    θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
+    @show typeof(θ3_estim)
+    c.δx[:, c.i], c.Σ[:, :, c.i] = measurement_update(
+        c.δx[:, c.i], c.Σ[:, :, c.i],
+        vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
+        c.H[:, :, c.i],
+        Σy
+    )
 end
 
 function relinearize!(c::DefaultCorrector)
