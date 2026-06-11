@@ -342,7 +342,6 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     return fig
 end
-
 function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
     current_time = times[current_idx]
     ages = current_time .- times[1:current_idx]
@@ -363,12 +362,12 @@ function make_ring_data(
     times,
     footfall_idxs,
     current_idx,
-    lifetime;
+    lifetime,
+    inferno;
     radius0::Float32=0.05f0,
     radius_growth::Float32=0.2f0,
     radius_scale::Float32=1f0,
     alpha_fn=x -> 1f0 - x,
-    color_rgb=(0.2f0, 1f0, 0.2f0),
 )
     ff = footfall_idxs[footfall_idxs.≤current_idx]
     isempty(ff) && return (Point3f[], RGBAf[])
@@ -385,21 +384,18 @@ function make_ring_data(
     colors = RGBAf[]
 
     for (j, age) in zip(within, within_ages)
-
         frac = Float32(age / lifetime)
 
-        radius =
-            (radius0 + radius_growth * frac) * radius_scale
+        # Sample inferno: newest footfalls near 0.65, oldest near 0.0
+        cmap_pos = 0.65f0 * (1f0 - frac)
+        c = get(inferno, cmap_pos)
+        # c = inferno(cmap_pos)
 
+        radius = (radius0 + radius_growth * frac) * radius_scale
         α = clamp(alpha_fn(frac), 0f0, 1f0)
+        color = RGBAf(c.r, c.g, c.b, α)
 
-        color = RGBAf(color_rgb..., α)
-
-        ring = ring_points(
-            Point3f(positions[:, j]...),
-            radius,
-        )
-
+        ring = ring_points(Point3f(positions[:, j]...), radius)
         append!(pts, ring)
         append!(colors, fill(color, length(ring)))
 
@@ -416,26 +412,23 @@ function animate_trajectory(
     framerate::Int=60,
     filepath::String="trajectory_animation.mp4",
     padding::Float64=0.3,
+    scale::Float32=2.1f0
 )
     set_theme!(theme_black())
 
     inferno = cgrad(:inferno)
 
-    current_color = inferno(0.95) # base colors 
-    trail_color = inferno(0.65)
-    footfall_color = inferno(0.25)
-    RGBAf(current_color.r, current_color.g, current_color.b, 1f0) # for converting color
+    current_color = get(inferno, 0.95)
+    current_color_rgba = RGBAf(current_color.r, current_color.g, current_color.b, 1f0)
 
     positions = traj.pos
     times = traj.t
     N = length(times)
     footfall_idxs = segs
 
-    # ── Single source of truth ──────────────────────────────────────────────
     current_idx = Observable(1)
 
     # ── Trail data ──────────────────────────────────────────────────────────
-    # Two parallel flat arrays: one point-pair per segment, one color per pair
     trail_points = @lift begin
         trail_idxs, _ = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
         length(trail_idxs) < 2 && return Point3f[]
@@ -451,8 +444,15 @@ function animate_trajectory(
     trail_colors = @lift begin
         trail_idxs, trail_ages = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
         length(trail_idxs) < 2 && return RGBAf[]
-        [RGBAf(0, 0, 1, clamp(1f0 - Float32(trail_ages[k+1] / lifetime), 0f0, 1f0))
-         for k in 1:length(trail_idxs)-1]
+        map(1:length(trail_idxs)-1) do k
+            # Use the older end of each segment to determine color
+            frac = Float32(trail_ages[k+1] / lifetime)
+            # Sample inferno: newest near 0.95, oldest near 0.0
+            cmap_pos = 0.95f0 * (1f0 - frac)
+            c = get(inferno, cmap_pos)
+            α = clamp(1f0 - frac, 0f0, 1f0)
+            RGBAf(c.r, c.g, c.b, α)
+        end
     end
 
     # ── Current marker ───────────────────────────────────────────────────────
@@ -460,23 +460,23 @@ function animate_trajectory(
 
     # ── Footfall data ────────────────────────────────────────────────────────
     footfall_ring_data = @lift begin
-        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime;
+        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime, inferno;
             alpha_fn=x -> 1f0 - x,
-            radius_scale=1f0,
+            radius_scale=1f0 * scale,
         )
     end
 
     footfall_ring_data_soft = @lift begin
-        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime;
+        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime, inferno;
             alpha_fn=x -> 0.3f0 * (1f0 - x),
-            radius_scale=1.3f0,
+            radius_scale=1.3f0 * scale,
         )
     end
 
     # ── Camera azimuth ───────────────────────────────────────────────────────────
-    azimuth = @lift deg2rad(30 + 15 * sin(2π * $current_idx / (framerate * 20)))
+    azimuth = @lift deg2rad(30 + 30 * sin(2π * $current_idx / (framerate * 30)))
 
-    # ── Figure & plots (created once) ────────────────────────────────────────
+    # ── Figure & plots ────────────────────────────────────────────────────────
     fig = Figure(size=(800, 600))
     ax = Axis3(fig[1, 1]; aspect=:data, title="Trajectory Animation")
     limits!(ax,
@@ -484,24 +484,22 @@ function animate_trajectory(
         minimum(positions[2, :]) - padding, maximum(positions[2, :]) + padding,
         minimum(positions[3, :]) - padding, maximum(positions[3, :]) + padding)
 
-    linesegments!(ax, trail_points; color=trail_colors, linewidth=2, transparency=true)
-    scatter!(ax, current_point; color=current_color, markersize=12)
+    linesegments!(ax, trail_points; color=trail_colors, linewidth=4 * scale, transparency=true, fxaa=true, ssao=true)
+    scatter!(ax, current_point; color=current_color_rgba, markersize=12 * scale)
     lines!(ax, @lift($footfall_ring_data[1]);
         color=@lift($footfall_ring_data[2]),
-        linewidth=2,
-        transparency=true,
+        linewidth=2 * scale,
+        transparency=true, fxaa=true
     )
     lines!(ax, @lift($footfall_ring_data_soft[1]);
         color=@lift($footfall_ring_data_soft[2]),
-        linewidth=6,       # wide = soft halo
-        transparency=true,
+        linewidth=6 * scale,
+        transparency=true, fxaa=true
     )
     connect!(ax.azimuth, azimuth)
-    # ax.azimuth = azimuth
 
-    # ── Recording: only one thing changes per frame ───────────────────────────
     record(fig, filepath, 1:N; framerate=framerate) do i
-        current_idx[] = i          # triggers all derived Observables automatically
+        current_idx[] = i
     end
 
     return fig
