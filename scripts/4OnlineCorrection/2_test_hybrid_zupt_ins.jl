@@ -59,36 +59,37 @@ zupt, classic_ins_traj, step_seg, _, _, _ = HybridZuptInsJl.hybrid_zupt_aided_in
 )
 
 # Run static mean correction
-static_corrector = HybridZuptInsJl.StaticMeanCorrector()
-zupt, static_ins_traj, step_seg, true_outputs["model + static"], pred_outputs["model + static"], _, _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
-    inertial_updated, sim_config_updated, gt_traj_aligned;
-    corrector=static_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
-)
+# static_corrector = HybridZuptInsJl.StaticMeanCorrector()
+# zupt, static_ins_traj, step_seg, true_outputs["model + static"], pred_outputs["model + static"], _, _, _ = HybridZuptInsJl.hybrid_nominal_zupt_aided_ins(
+#     inertial_updated, sim_config_updated, gt_traj_aligned;
+#     corrector=static_corrector, x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
+# )
 
-zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], tr_input_gp = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
-    inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
-    x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
-)
-zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"], betahist, tr_input = HybridZuptInsJl.hybrid_zupt_aided_ins(
-    inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
-    x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
-)
+# zupt, gp_ins_traj, step_seg, true_outputs["model + GP"], pred_outputs["model + GP"], tr_input_gp = HybridZuptInsJl.hybrid_zupt_aided_ins_gp(
+#     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
+#     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
+# )
+# zupt, hsgp_ins_traj, step_seg, true_outputs["model + HSGP"], pred_outputs["model + HSGP"], betahist, tr_input = HybridZuptInsJl.hybrid_zupt_aided_ins(
+#     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
+#     x_init=x_init, train_ratio=train_ratio, feature_type=FEATURE_TYPE
+# )
 
 step_trajs = OrderedDict(
     "model" => classic_ins_traj[segs],
-    "model + static" => static_ins_traj[segs],
-    "model + GP" => gp_ins_traj[segs],
-    "model + online HSGP" => hsgp_ins_traj[segs],
+    # "model + static" => static_ins_traj[segs],
+    # "model + GP" => gp_ins_traj[segs],
+    # "model + online HSGP" => hsgp_ins_traj[segs],
 )
 
 trajs = OrderedDict(
     "model" => classic_ins_traj,
-    "model + static" => static_ins_traj,
-    "model + GP" => gp_ins_traj,
-    "model + online HSGP" => hsgp_ins_traj,
+    # "model + static" => static_ins_traj,
+    # "model + GP" => gp_ins_traj,
+    # "model + online HSGP" => hsgp_ins_traj,
 )
 
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(step_trajs, gt_traj_aligned[step_seg])
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned)
 fig_out = HybridZuptInsJl.plot_regression_results(pred_outputs, true_outputs["model + HSGP"])

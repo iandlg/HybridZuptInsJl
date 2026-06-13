@@ -1,3 +1,20 @@
+function stride_heading(R_bw::AbstractMatrix{T}, Δp_w::AbstractVector{T})::AbstractVector{T} where T<:Real
+    euler = zeros(Float64, 3)
+    euler[3] = matrix_to_euler(R_bw)[3]
+    return euler_to_matrix(euler) * Δp_w
+end
+
+function stride_body(R_bw::AbstractMatrix{T}, Δp_w::AbstractVector{T})::AbstractVector{T} where T<:Real
+    return R_bw * Δp_w
+end
+
+function stride_local(ref_frame::ReferenceFrame, R_bw::AbstractMatrix{T}, Δp_w::AbstractVector{T}) where T<:Real
+    return Dict{ReferenceFrame,AbstractVector{T}}(
+        HEADING => stride_heading(R_bw, Δp_w),
+        BODY => stride_body(R_bw, Δp_w),
+    )[ref_frame]
+end
+
 abstract type AbstractCorrector end
 
 function initialize_corrector!(c::AbstractCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σ_init::AbstractMatrix{Float64}, kwarg...)
@@ -49,7 +66,7 @@ mutable struct DefaultCorrector <: AbstractCorrector
     quat::AbstractMatrix{Float64}
     δx::AbstractMatrix{Float64}
     Σ::AbstractArray{Float64,3}
-    F::AbstractArray{Float64,3}
+    G::AbstractArray{Float64,3}
     H::AbstractArray{Float64,3}
     i::Int
 end
@@ -67,7 +84,7 @@ function initialize_corrector!(c::DefaultCorrector; t::Float64, pos_init::Abstra
     c.quat[:, 1] = quat_init
     c.δx[:, 1] .= 0.0
     c.Σ[:, :, 1] = Σ_init
-    c.F[:, :, 1] = Matrix{Float64}(I, 6, 6)
+    c.G[:, :, 1] = Matrix{Float64}(I, 6, 6)
     c.i = 1
 end
 
@@ -75,29 +92,62 @@ function dynamic_update!(c::DefaultCorrector; t::Float64, Δp::AbstractVector{Fl
     c.i += 1
     c.t[c.i] = t
     # Nominal update
-    c.pos[:, c.i] = c.pos[:, c.i-1] + Δp
+    c.pos[:, c.i] = c.pos[:, c.i-1] + quat_to_matrix(c.quat[:, c.i-1]) * Δp
     c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
 
     # Covariance update
-    c.F[4:6, 4:6, c.i] = quat_to_matrix(Δq)'
+    c.G[4:6, 4:6, c.i] = quat_to_matrix(c.quat[:, c.i])
     c.δx[:, c.i] .= 0.0 # c.F[:, :, c.i] * c.δx[:, c.i-1]
-    c.Σ[:, :, c.i] = c.F[:, :, c.i] * c.Σ[:, :, c.i-1] * c.F[:, :, c.i]' + Σpq
+    c.Σ[:, :, c.i] = c.Σ[:, :, c.i-1] + c.G[:, :, c.i] * Σpq * c.G[:, :, c.i]'
+
 end
 
-function measurement_update!(c::DefaultCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64})
-    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
+function measurement_update_A!(c::DefaultCorrector; ref_frame::ReferenceFrame, stride_aug::AbstractVector{Float64}, Σstride::AbstractMatrix{Float64})
+    R̂_prev = quat_to_matrix(c.quat[:, c.i])
+    c.H[1:3, 1:3, c.i] = R̂_prev'
     c.H[4, 4:6, c.i] = jacobian_∂θ3_∂δθ(c.quat[:, c.i])
+
+    stride_aug[1:3] -= stride_local(ref_frame, R̂_prev', c.pos[:, c.i] - c.pos[:, c.i-1])
+    Δθ3 = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3] - matrix_to_euler(quat_to_matrix(c.quat[:, c.i-1]))[3]
+    Δθ3 = atan(sin(Δθ3), cos(Δθ3))
+    stride_aug[4] = atan(sin(stride_aug[4] - Δθ3), cos(stride_aug[4] - Δθ3))
+
+    c.δx[:, c.i], c.Σ[:, :, c.i] = measurement_update(
+        c.δx[:, c.i], c.Σ[:, :, c.i],
+        stride_aug,
+        c.H[:, :, c.i],
+        Σstride
+    )
+
+
+end
+
+function measurement_update_B!(c::DefaultCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64})
+    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6, c.i] = jacobian_∂θ3_∂δθ_left(c.quat[:, c.i])
+    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
-    @show typeof(θ3_estim)
+    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+    # @info "Measurement matrix H" c.H[:, :, c.i]
+    @info "Initial output angle deviation $(c.δx[4:6, c.i])"
+    # @info "Covariance matrix before meas upd" c.Σ[:, :, c.i]
+
     c.δx[:, c.i], c.Σ[:, :, c.i] = measurement_update(
         c.δx[:, c.i], c.Σ[:, :, c.i],
         vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
         c.H[:, :, c.i],
         Σy
     )
+    # @info "Covariance matrix after meas upd" c.Σ[:, :, c.i]
+
+    @info "angle measurment : $(atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))), output angle deviation $(c.δx[4:6, c.i])"
+
 end
+
+
 
 function relinearize!(c::DefaultCorrector)
     c.pos[:, c.i] += c.δx[1:3, c.i]
-    c.quat[:, c.i] = quat_multiply(c.quat[:, c.i], quat_exp(c.δx[4:6, c.i]))
+    δθ_yaw_only = [0.0, 0.0, c.δx[6, c.i]]  # assumes δθ in body frame, z=yaw
+    c.quat[:, c.i] = quat_multiply(quat_exp(δθ_yaw_only), c.quat[:, c.i])
 end

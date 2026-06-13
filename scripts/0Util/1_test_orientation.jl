@@ -18,7 +18,10 @@ q_batch = HybridZuptInsJl.normalize_quat(q_batch)
 R_batch = HybridZuptInsJl.quat_to_matrix(q_batch)      # 3×3×10
 q_back = HybridZuptInsJl.matrix_to_quat(R_batch)      # 4×10 matrix
 
+dx = [0.001, 0.002, 0.0002]
+dq1 = HybridZuptInsJl.matrix_to_quat(HybridZuptInsJl.euler_to_matrix(dx))
 
+dq2 = HybridZuptInsJl.normalize_quat(HybridZuptInsJl.quat_exp(dx))
 
 
 # Test using rotation vectors

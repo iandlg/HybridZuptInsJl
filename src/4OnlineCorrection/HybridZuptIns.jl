@@ -251,17 +251,20 @@ function hybrid_zupt_aided_ins(
                 # Construct Measurement matrix H_gt 
                 H_gt = [
                     I zeros(Float64, (3, 6));
-                    zeros(Float64, (1, 8)) 1.0
+                    zeros(Float64, (1, 6)) jacobian_∂θ3_∂δθ_right(quat[:, curr_step])'
                 ]
+                Δθ = atan(sin(yaw_gt_seg[end] - yaw_ins_seg[end]), cos(yaw_gt_seg[end] - yaw_ins_seg[end]))
+                @info "Measured yaw error" round(Δθ; digits=3)
 
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
-                    vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]),
+                    vcat(gt_traj.pos[:, curr_step] - x[[1, 2, 3], curr_step], Δθ),
                     H_gt,
                     Diagonal(sigma_gt .^ 2)
                 )
+                @info "Resulting axis angle" dx[7:9, curr_step]
 
                 # -------- Compensate error -------------
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(

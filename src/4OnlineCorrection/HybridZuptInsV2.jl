@@ -32,6 +32,7 @@ function hybrid_zupt_aided_insv2(
     P_smooth = zeros(9, 9, N)
     F_store = zeros(9, 9, N)
     ΔP = zeros(Float64, 9, 9)
+    mat66 = zeros(Float64, 6, 6)
 
     P[1:3, 1:3, 1] = Diagonal(sigma_initial_pos_array(simdata) .^ 2)
     P[4:6, 4:6, 1] = Diagonal(sigma_initial_vel_array(simdata) .^ 2)
@@ -127,21 +128,37 @@ function hybrid_zupt_aided_insv2(
         prev_step = step_seg[end-1]
         curr_step = step_seg[end]
 
+        mat66 .= 0.0
+        mat66[1:3, 1:3] = quat_to_matrix(quat[:, prev_step])'
+        mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
+
         dynamic_update!(corrector;
             t=inertial.t[curr_step],
-            Δp=x[1:3, curr_step] - x[1:3, prev_step],
+            Δp=mat66[1:3, 1:3] * (x[1:3, curr_step] - x[1:3, prev_step]),
             Δq=quat_multiply(quat_conjugate(quat[:, prev_step]), quat[:, curr_step]),
-            Σpq=ΔP[[1:3; 7:9], [1:3; 7:9]]
+            Σpq=(mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66')
         )
 
         if gt_available[curr_step] && gt_available[prev_step]
             @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             @info "Prev and curr GT available"
 
-            # Method 1
-            θ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
-            θ3_ins = matrix_to_euler(quat_to_matrix(corrector.quat[:, corrector.i]))[3]
-            Δθ3_m1 = atan(sin(θ3_gt - θ3_ins), cos(θ3_gt - θ3_ins))
+            # # Compute step measurement and covariance
+            # Δθ_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3] - matrix_to_euler(gt_traj.R_nb[:, :, prev_step])[3]
+
+            # stride_aug_gt = vcat(
+            #     stride_local(ref_frame, gt_traj.R_nb[:, :, curr_step]', gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step]),
+            #     atan(sin(Δθ_gt), cos(Δθ_gt))
+            # )
+            σ = sigma_groundtruth_array(simdata)
+            σ[4] *= 1e-4
+            σ[1:3] .*= 1e-2
+
+            measurement_update_B!(corrector;
+                curr_pos=gt_traj.pos[:, curr_step],
+                curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
+                Σy=Diagonal(σ)
+            )
 
         elseif gt_available[curr_step]
             @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
@@ -152,7 +169,7 @@ function hybrid_zupt_aided_insv2(
             θ3_ins = matrix_to_euler(quat_to_matrix(corrector.quat[:, corrector.i]))[3]
             Δθ3_m1 = atan(sin(θ3_gt - θ3_ins), cos(θ3_gt - θ3_ins))
 
-            measurement_update!(corrector;
+            measurement_update_B!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
                 Σy=Diagonal(sigma_groundtruth_array(simdata))

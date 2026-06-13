@@ -18,7 +18,8 @@ end
 function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
     gt_traj::Union{Nothing,Trajectory};
-    samples::Int=typemax(Int)
+    start::Int=1,
+    stop::Int=typemax(Int)
 )
 
     fig = Figure(size=(800, 600))
@@ -30,13 +31,13 @@ function plot_groundtruth_vs_inertial_positions(
         xgridvisible=true)
 
     if !isnothing(gt_traj)
-        n = min(length(gt_traj.t), samples)
-        lines!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
+        n = min(length(gt_traj.t), stop)
+        lines!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
-        scatter!(ax, gt_traj.pos[1, 1:n], gt_traj.pos[2, 1:n];
+        scatter!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, marker=:circle, markersize=5, alpha=0.6)
 
-        scatter!(ax, [gt_traj.pos[1, 1]], [gt_traj.pos[2, 1]];
+        scatter!(ax, [gt_traj.pos[1, start]], [gt_traj.pos[2, start]];
             color=:black, marker=:circle, markersize=12, label="Start")
         scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
             color=:black, marker=:rect, markersize=12, label="End")
@@ -49,18 +50,18 @@ function plot_groundtruth_vs_inertial_positions(
         c = first(color_cycle)
         color_cycle = Iterators.drop(color_cycle, 1)
 
-        n = min(length(traj.t), samples)
+        n = min(length(traj.t), stop)
 
         # Line
-        lines!(ax, traj.pos[1, 1:n], traj.pos[2, 1:n];
+        lines!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
             color=c, linewidth=1, label=key)
 
         # Small markers at every data point
-        scatter!(ax, traj.pos[1, 1:n], traj.pos[2, 1:n];
+        scatter!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
             color=c, marker=:circle, markersize=5, alpha=0.6)
 
         # Start marker (larger circle)
-        scatter!(ax, [traj.pos[1, 1]], [traj.pos[2, 1]];
+        scatter!(ax, [traj.pos[1, start]], [traj.pos[2, start]];
             color=c, marker=:circle, markersize=12)
 
         # End marker (larger square)
@@ -95,12 +96,15 @@ RMSE(k) = sqrt( (1/k) * Σ_{i=1..k} ( (x̂_i - x_i)² + (ŷ_i - y_i)² ) )
 
 Only the overlapping portion of the trajectories (minimum number of samples) is used.
 """
-function plot_position_rmse(trajs::Union{AbstractDict{String,Trajectory},Trajectory}, gt_traj::Trajectory)
+function plot_position_rmse(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory;
+    show_index_ticks::Bool=true
+)
     if trajs isa Trajectory
         trajs = Dict("Estimation" => trajs)
     end
 
-    # Create figure and axis
     fig = Figure(size=(800, 600))
     ax = Axis(fig[1, 1];
         xlabel="Time (s)",
@@ -108,21 +112,41 @@ function plot_position_rmse(trajs::Union{AbstractDict{String,Trajectory},Traject
         title="Position RMSE over time",
         xgridvisible=true)
 
+    # -- plot all trajectories --
     for (key, traj) in trajs
-        # Number of common time steps
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
-        # Horizontal errors at each time step (squared, per sample)
-        cum_rmse = rmse(traj, gt_traj)
-
-        # Legend label create from key
+        cum_rmse = rmse(traj, gt_traj)  # presumably computes cumulative RMSE
         label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", cum_rmse[end]/total_distance(gt_traj)))"
         lines!(ax, traj.t[1:n], cum_rmse, label=label)
     end
-    axislegend()
+    axislegend(ax)
+
+    # -- add a twin x-axis for index (top) --
+    if show_index_ticks
+        # pick the first trajectory to get a representative time vector
+        first_traj = first(values(trajs))
+        n = min(size(first_traj.pos, 2), size(gt_traj.pos, 2))
+        t_vec = first_traj.t[1:n]
+
+        # choose a reasonable number of index ticks (e.g., ~10)
+        step = max(1, n ÷ 10)
+        idx_ticks = 1:step:n
+        time_ticks = t_vec[idx_ticks]
+
+        # create the top axis, linked to the main axis
+        ax_top = Axis(fig[1, 1];
+            xaxisposition=:top,
+            yaxisposition=:right,        # avoids overlapping y-axis
+            ylabelvisible=false,
+            xlabel="Sample index",
+            xticks=(time_ticks, string.(idx_ticks)),
+            xticklabelrotation=0,
+        )
+        linkxaxes!(ax, ax_top)
+    end
 
     return fig
 end
-
 
 
 """
@@ -184,6 +208,67 @@ function plot_groundtruth_vs_inertial_orientations(
     axislegend(axs[1]; position=:rt)   # :rt = right top, you can also use :rb, :lt, etc.
 
     # Adjust layout to prevent legend overlap
+    colgap!(fig.layout, 5)
+    resize_to_layout!(fig)
+
+    return fig
+end
+
+"""
+    plot_groundtruth_vs_inertial_xyz(trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+                                           gt_traj::Trajectory)
+
+Plot position components (X, Y, Z) from estimated trajectories against ground truth.
+
+# Arguments
+- `trajs`: Either a single `Trajectory` (labelled "Estimation") or a dictionary mapping labels
+  (e.g. "Estimation", "Filter") to `Trajectory` objects. Each trajectory must provide:
+  - `t::Vector{Float64}` time vector
+  - `pos::Matrix{Float64}` position (3×N) in meters (x=row1, y=row2, z=row3)
+- `gt_traj`: Ground truth trajectory with the same `t` and `pos` fields.
+
+# Returns
+- A `Figure` object with three side‑by‑side axis objects (X, Y, Z).
+"""
+function plot_groundtruth_vs_inertial_xyz(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory
+)
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
+
+    labels = ["X (m)", "Y (m)", "Z (m)"]
+    fig = Figure(size=(1200, 400))
+
+    # Create three axes in a row
+    axs = [Axis(fig[1, i]; title=labels[i], xlabel="Time (s)", ylabel="Position (m)",
+        xgridvisible=true) for i in 1:3]
+
+    legend_handles = []
+
+    for (key, ins_traj) in trajs
+        # Plot all three position components for this trajectory
+        for i in 1:3
+            line = lines!(axs[i], ins_traj.t, ins_traj.pos[i, :];
+                linewidth=0.8, label=(i == 1 ? key : ""))
+            if i == 1
+                push!(legend_handles, line)
+            end
+        end
+    end
+
+    # Plot ground truth (dashed black line) on all subplots
+    for i in 1:3
+        lines!(axs[i], gt_traj.t, gt_traj.pos[i, :];
+            color=:black, linestyle=:dash, linewidth=0.8,
+            label=(i == 1 ? "Ground truth" : ""))
+    end
+
+    # Add legend on the first axis only
+    axislegend(axs[1]; position=:rt)
+
+    # Adjust layout
     colgap!(fig.layout, 5)
     resize_to_layout!(fig)
 
