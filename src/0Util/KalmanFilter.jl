@@ -22,8 +22,8 @@ function measurement_update(state::AbstractVector{T}, stateCov::AbstractMatrix{T
     dim_x = length(state)
     dim_z = length(measurement)
     @assert size(stateCov) == (dim_x, dim_x)
-    @assert size(H) == (dim_z, dim_x)
-    @assert size(R) == (dim_z, dim_z)
+    @assert size(H) == (dim_z, dim_x) "Expected $((dim_z, dim_x)) got $(size(H))"
+    @assert size(R) == (dim_z, dim_z) "Expected $((dim_z, dim_z)) got $(size(R))"
 
     # Innovation
     innovation = measurement - H * state          # (dim_z,)

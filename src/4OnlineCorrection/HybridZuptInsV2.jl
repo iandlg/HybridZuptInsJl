@@ -148,15 +148,13 @@ function hybrid_zupt_aided_insv2(
             # # Compute step measurement and covariance
             mat66[1:4, 1:4] .= 0.0
             σ = sigma_groundtruth_array(simdata)
-            σ[1:3] .*= 1e-1
-            σ[4] *= 1e-1
 
             Δθ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3] - matrix_to_euler(gt_traj.R_nb[:, :, prev_step])[3]
             Δθ3_gt = atan(sin(Δθ3_gt), cos(Δθ3_gt))
             ΔpΔθ3 = [gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step]; Δθ3_gt]
 
-            stride_aug_gt, mat66[1:4, 1:4] = stride_local(ref_frame;
-                R_wb=gt_traj.R_nb[:, :, prev_step], ΔpΔθ3=ΔpΔθ3, Σ_ΔpΔθ3=Diagonal(σ)
+            stride_aug_gt, mat66[1:4, 1:4], _ = stride_local(ref_frame;
+                R_wb=gt_traj.R_nb[:, :, prev_step], ΔpΔθ3=ΔpΔθ3, Σ_ΔpΔθ3=Diagonal(σ .^ 2)
             )
 
             stride_measurement_update!(corrector;
@@ -167,13 +165,11 @@ function hybrid_zupt_aided_insv2(
 
             relinearize!(corrector)
             σ = sigma_groundtruth_array(simdata)
-            σ[4] *= 1e-1
-            σ[1:3] .*= 1e-1
 
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(σ)
+                Σy=Diagonal(σ .^ 2)
             )
 
         elseif gt_available[curr_step]
@@ -183,18 +179,17 @@ function hybrid_zupt_aided_insv2(
             # Method 1
             θ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
             θ3_ins = matrix_to_euler(quat_to_matrix(corrector.quat[:, corrector.i]))[3]
-            Δθ3_m1 = atan(sin(θ3_gt - θ3_ins), cos(θ3_gt - θ3_ins))
             σ = sigma_groundtruth_array(simdata)
             # σ[4] *= 1e-4
             # σ[1:3] .*= 1e-3
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(σ)
+                Σy=Diagonal(σ .^ 2)
             )
         else
             # @info "No GT available"
-            learned_measurement_update!(corrector)
+            learned_measurement_update!(corrector; ref_frame=ref_frame, feature_type=feature_type)
         end
 
         relinearize!(corrector)

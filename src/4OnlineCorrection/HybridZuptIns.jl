@@ -364,7 +364,6 @@ function hybrid_zupt_aided_ins(
                     dx[:, curr_step],
                     quat[:, curr_step]
                 )
-
             end
         end
 

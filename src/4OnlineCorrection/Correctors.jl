@@ -1,26 +1,26 @@
 function stride_heading(;
     R_wb::AbstractMatrix{T}, ΔpΔθ3::AbstractVector{T}, Σ_ΔpΔθ3::Union{Nothing,AbstractMatrix{Float64}}=nothing
-)::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}}} where T<:Real
+)::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}},AbstractMatrix{Float64}} where T<:Real
     temp = zeros(Float64, 4, 4)
     temp[4, 4] = matrix_to_euler(R_wb')[3]
 
     temp[1:3, 1:3] = euler_to_matrix(temp[2:4, 4])
     temp[4, 4] = 1.0
-    return temp * ΔpΔθ3, isnothing(Σ_ΔpΔθ3) ? nothing : temp * Σ_ΔpΔθ3 * temp'
+    return temp * ΔpΔθ3, isnothing(Σ_ΔpΔθ3) ? nothing : temp * Σ_ΔpΔθ3 * temp', temp'
 end
 
 function stride_body(;
     R_wb::AbstractMatrix{T}, ΔpΔθ3::AbstractVector{T}, Σ_ΔpΔθ3::Union{Nothing,AbstractMatrix{Float64}}=nothing
-)::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}}} where T<:Real
+)::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}},AbstractMatrix{Float64}} where T<:Real
     temp = zeros(Float64, 4, 4)
     temp[1:3, 1:3] = R_wb'
     temp[4, 4] = 1.0
-    return temp * ΔpΔθ3, isnothing(Σ_ΔpΔθ3) ? nothing : temp * Σ_ΔpΔθ3 * temp'
+    return temp * ΔpΔθ3, isnothing(Σ_ΔpΔθ3) ? nothing : temp * Σ_ΔpΔθ3 * temp', temp'
 end
 
 function stride_local(ref_frame::ReferenceFrame;
     R_wb::AbstractMatrix{T}, ΔpΔθ3::AbstractVector{T}, Σ_ΔpΔθ3::Union{Nothing,AbstractMatrix{Float64}}=nothing
-)::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}}} where T<:Real
+)::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}},AbstractMatrix{Float64}} where T<:Real
     return Dict{ReferenceFrame,Function}(
         HEADING => () -> stride_heading(; R_wb=R_wb, ΔpΔθ3=ΔpΔθ3, Σ_ΔpΔθ3=Σ_ΔpΔθ3),
         BODY => () -> stride_body(; R_wb=R_wb, ΔpΔθ3=ΔpΔθ3, Σ_ΔpΔθ3=Σ_ΔpΔθ3),
@@ -59,6 +59,48 @@ function compute_feature(feature_type::FeatureType;
         ],
     )[feature_type]
     return feature_fun(), isnothing(Σ_stride_local_aug) ? nothing : feature_cov_fun()
+end
+
+function normalize_feature!(
+    feature_type::FeatureType;
+    feature::AbstractVector{Float64},
+    Σ_feature::Union{Nothing,AbstractMatrix{Float64}}=nothing,
+    input_stats::Vector{Vector{Float64}}
+)::Tuple{AbstractVector{Float64},Union{Nothing,AbstractMatrix{Float64}}}
+
+    μ = input_stats[1]
+    σ = input_stats[2]
+
+    # In-place normalization
+    feature .-= μ
+
+    # Indices corresponding to angular variables
+    angle_idx = Dict(
+        AUG_STEP => [4],
+        TWOD_STEP_YAW => [3],
+        TWOD_STEP_DT_YAW => [4],
+        THREED_STEP => Int[],
+        TWOD_STEP_DT => Int[],
+        THREED_STEP_DT => Int[],
+    )[feature_type]
+
+    # Wrap angles after mean subtraction
+    for i in angle_idx
+        feature[i] = atan(sin(feature[i]), cos(feature[i]))
+    end
+
+    # Scale features in-place
+    feature ./= σ
+
+    # Covariance normalization
+    Σ_feature_norm = if isnothing(Σ_feature)
+        nothing
+    else
+        D = Diagonal(1.0 ./ σ)
+        D * Σ_feature * D
+    end
+
+    return feature, Σ_feature_norm
 end
 
 abstract type AbstractCorrector end
@@ -168,7 +210,7 @@ function stride_measurement_update!(c::DefaultCorrector; ref_frame::ReferenceFra
 
     ΔpΔθ3 = [c.pos[:, c.i] - c.pos[:, c.i-1]; Δθ3]
 
-    temp, _ = stride_local(ref_frame; R_wb=c.H[1:3, 1:3, c.i]', ΔpΔθ3=ΔpΔθ3)
+    temp, _, _ = stride_local(ref_frame; R_wb=c.H[1:3, 1:3, c.i]', ΔpΔθ3=ΔpΔθ3)
     stride_aug[1:3] -= temp[1:3]
 
     stride_aug[4] = atan(sin(stride_aug[4] - Δθ3), cos(stride_aug[4] - Δθ3))
@@ -273,7 +315,7 @@ function stride_measurement_update!(c::StaticCorrector; ref_frame::ReferenceFram
     Δθ3 = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3] - matrix_to_euler(quat_to_matrix(c.quat[:, c.i-1]))[3]
     Δθ3 = atan(sin(Δθ3), cos(Δθ3))
 
-    temp, _ = stride_local(ref_frame; R_wb=c.H[1:3, 1:3, c.i]', ΔpΔθ3=[c.pos[:, c.i] - c.pos[:, c.i-1]; Δθ3])
+    temp, _, _ = stride_local(ref_frame; R_wb=c.H[1:3, 1:3, c.i]', ΔpΔθ3=[c.pos[:, c.i] - c.pos[:, c.i-1]; Δθ3])
 
     stride_aug -= temp + c.stride_err_mean[:, c.i]
     stride_aug[4] = atan(sin(stride_aug[4]), cos(stride_aug[4]))
@@ -342,6 +384,7 @@ mutable struct SplitHybridCorrector <: AbstractCorrector
     Φ::AbstractMatrix{Float64}
     per_dim_eigvals::AbstractMatrix{Float64}
     d::Int
+    σ_n::AbstractVector{Float64}
 end
 
 function SplitHybridCorrector(N::Int, params::HsgpParameters, feature_type::FeatureType)::SplitHybridCorrector
@@ -350,7 +393,7 @@ function SplitHybridCorrector(N::Int, params::HsgpParameters, feature_type::Feat
         zeros(Float64, N), zeros(Float64, 3, N), zeros(Float64, 4, N), zeros(Float64, 6, N),
         zeros(Float64, 6, 6, N), repeat(Matrix{Float64}(I, 6, 6), 1, 1, N), zeros(Float64, 4, 6, N), 1,
         params, zeros(Float64, params.m * 4), zeros(Float64, params.m * 4, params.m * 4), zeros(Float64, 4, feature_dims[feature_type]),
-        zeros(Float64, 4, params.m * 4), zeros(Float64, params.m, feature_dims[feature_type]), feature_dims[feature_type]
+        zeros(Float64, 4, params.m * 4), zeros(Float64, params.m, feature_dims[feature_type]), feature_dims[feature_type], zeros(Float64, 4)
     )
 end
 
@@ -373,6 +416,11 @@ function initialize_corrector!(c::SplitHybridCorrector; t::Float64, pos_init::Ab
             getfield(c.params.hp, field)[3]
         )
     end
+
+    for (idx, field) in enumerate(fieldnames(SeHyperparams))
+        c.σ_n[idx] = getfield(c.params.hp, field)[1]
+    end
+
     output_names = ["pos_1", "pos_2", "pos_3", "yaw"]
     c.β .= 0.0
     c.Σβ = Diagonal(psd)
@@ -409,7 +457,7 @@ function stride_measurement_update!(c::SplitHybridCorrector;
     Δθ3 = atan(sin(Δθ3), cos(Δθ3))
 
     # Compute target output
-    stride_local_aug, Σ_ins_stride = stride_local(ref_frame;
+    stride_local_aug, Σ_ins_stride, _ = stride_local(ref_frame;
         R_wb=c.H[1:3, 1:3, c.i]',
         ΔpΔθ3=[c.pos[:, c.i] - c.pos[:, c.i-1]; Δθ3],
         Σ_ΔpΔθ3=c.Σ[[1:3; 6], [1:3; 6], c.i]
@@ -424,27 +472,21 @@ function stride_measurement_update!(c::SplitHybridCorrector;
 
     Σ_target_norm = Diagonal(1 ./ c.params.output_stats[2]) * (Σstride + Σ_ins_stride) * Diagonal(1 ./ c.params.output_stats[2])
 
-    c.δx[:, c.i], c.Σ[:, :, c.i] = measurement_update(
-        c.δx[:, c.i], c.Σ[:, :, c.i],
-        stride_aug,
-        c.H[:, :, c.i],
-        Σstride
-    )
-
     feature, Σ_feature = compute_feature(feature_type;
         stride_local_aug=stride_local_aug, Σ_stride_local_aug=Σ_ins_stride, ΔT=c.t[c.i] - c.t[c.i-1])
 
     # Normalise estimated feature and feature covariance
-    feature -= c.params.input_stats[1]
-    feature[4] = atan(sin(feature[4]), cos(feature[4]))
-    feature ./= c.params.input_stats[2]
+    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+    # feature -= c.params.input_stats[1]
+    # feature[4] = atan(sin(feature[4]), cos(feature[4]))
+    # feature ./= c.params.input_stats[2]
 
-    Σ_feature = Diagonal(1 ./ c.params.input_stats[2]) * Σ_feature * Diagonal(1 ./ c.params.input_stats[2])
+    # Σ_feature = Diagonal(1 ./ c.params.input_stats[2]) * Σ_feature * Diagonal(1 ./ c.params.input_stats[2])
 
     # ------------ Construct Feature Covariance ---------
     for output_d in axes(c.∂y∂z, 1)
         for input_d in axes(c.∂y∂z, 2)
-            c.∂y∂z[output_d, input_d] = calc_eigenvectors_dx(
+            c.∂y∂z[output_d, input_d:input_d] = calc_eigenvectors_dx(
                 reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
             ) * c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)]
         end
@@ -453,20 +495,14 @@ function stride_measurement_update!(c::SplitHybridCorrector;
 
     # ---------- Construct measurement matrix H_update --------------
     kron!(c.Φ, I(4), calc_eigenvectors(
-        reshape(feature, 1, c.params.d), params.LL, c.per_dim_eigvals)
+        reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
     )
 
-    if correct && gt_available[prev_step] && gt_available[curr_step]
-        noise_vect = Vector{Float64}(undef, 4)
-        for (idx, field) in enumerate(fieldnames(SeHyperparams))
-            noise_vect[idx] = getfield(c.params.hp, field)[1]
-        end
-        α = tr(Diagonal(noise_vect .^ 2)) / tr(Σ_target_norm)
-        R = Diagonal(noise_vect .^ 2) + α * Σ_target_norm
-        c.β, c.Σβ = measurement_update(
-            c.β, c.Σβ, feature, Φ, R # Diagonal(noise_vect .^ 2)
-        )
-    end
+    α = tr(Diagonal(c.σ_n .^ 2)) / tr(Σ_target_norm)
+    c.β, c.Σβ = measurement_update(
+        c.β, c.Σβ, stride_aug, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_target_norm # Diagonal(noise_vect .^ 2)
+    )
+
 end
 
 
@@ -486,16 +522,57 @@ function posyaw_measurement_update!(c::SplitHybridCorrector; curr_pos::AbstractV
     )
 end
 
-function learned_measurement_update!(c::SplitHybridCorrector; kwargs...)
-    # c.H[1:3, 1:3, c.i] = quat_to_matrix(c.quat[:, c.i-1])' # H[1:3, 1:3] = R_bw = R_wb^⊤
-    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+function learned_measurement_update!(c::SplitHybridCorrector;
+    ref_frame::ReferenceFrame, feature_type::FeatureType, kwargs...)
+    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
 
-    # c.δx[:, c.i], c.Σ[:, :, c.i] = measurement_update(
-    #     c.δx[:, c.i], c.Σ[:, :, c.i],
-    #     c.stride_err_mean[:, c.i],
-    #     c.H[:, :, c.i],
-    #     c.Σ[7:10, 7:10, c.i] .* 1e-2
-    # )
+    Δθ3 = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3] - matrix_to_euler(quat_to_matrix(c.quat[:, c.i-1]))[3]
+    Δθ3 = atan(sin(Δθ3), cos(Δθ3))
+
+    stride_local_aug, Σ_ins_stride, R_aug_wl = stride_local(ref_frame;
+        R_wb=c.H[1:3, 1:3, c.i]',
+        ΔpΔθ3=[c.pos[:, c.i] - c.pos[:, c.i-1]; Δθ3],
+        Σ_ΔpΔθ3=c.Σ[[1:3; 6], [1:3; 6], c.i]
+    )
+
+    feature, Σ_feature = compute_feature(feature_type;
+        stride_local_aug=stride_local_aug, Σ_stride_local_aug=Σ_ins_stride, ΔT=c.t[c.i] - c.t[c.i-1])
+
+    @info "feature before normalization " feature
+    # Normalise estimated feature and feature covariance
+    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+    @info "feature after normalization " feature
+
+    for output_d in axes(c.∂y∂z, 1)
+        for input_d in axes(c.∂y∂z, 2)
+            c.∂y∂z[output_d, input_d:input_d] = calc_eigenvectors_dx(
+                reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
+            ) * c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)]
+        end
+    end
+
+    kron!(c.Φ, I(4), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
+
+    # Compute prediction and prediction covariance
+    pred = c.Φ * c.β
+    Σ_pred = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
+
+    # Denormalise prediction and prediction covariance
+    pred = pred .* c.params.output_stats[2] .+ c.params.output_stats[1]
+    pred[4] = atan(sin(pred[4]), cos(pred[4]))
+    Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
+
+    # Rotate to body frame 
+    pred = R_aug_wl * pred
+    Σ_pred = R_aug_wl * Σ_pred * R_aug_wl'
+
+    c.δx[:, c.i], c.Σ[:, :, c.i] = measurement_update(
+        c.δx[:, c.i], c.Σ[:, :, c.i],
+        pred,
+        c.H[:, :, c.i],
+        Σ_pred
+    )
 end
 
 function relinearize!(c::SplitHybridCorrector)
