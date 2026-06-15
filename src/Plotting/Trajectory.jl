@@ -32,6 +32,7 @@ function plot_groundtruth_vs_inertial_positions(
 
     if !isnothing(gt_traj)
         n = min(length(gt_traj.t), stop)
+        start = min(length(gt_traj.t), start)
         lines!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
         scatter!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];

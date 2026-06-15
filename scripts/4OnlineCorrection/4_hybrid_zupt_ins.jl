@@ -21,13 +21,13 @@ data_dir = Dict{String,String}(
     "ANG2" => "data/angermann_v2"
 )[data_key]
 
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
+FRAME = HybridZuptInsJl.HEADING # HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 15 # meta["trial_id"]
+trial_id = 14 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
-train_ratio = 0.7
+train_ratio = 0.4
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
@@ -44,7 +44,7 @@ x_init = vcat(
 N = length(inertial_updated)
 n_train_cutoff = floor(Int, train_ratio * N)
 gt_available = [n <= n_train_cutoff for n in 1:N]
-# gt_available[1:min(500, N)] .= false
+gt_available[1:min(500, N)] .= false
 
 true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
@@ -55,7 +55,6 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )
-
 
 default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
 zupt, zupt_ins_traj, step_seg, corr_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(
@@ -69,6 +68,6 @@ trajs = Dict(
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=170, stop=185)
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=18, stop=25)
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
