@@ -146,27 +146,23 @@ function hybrid_zupt_aided_insv2(
             @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             @info "Prev and curr GT available"
             # # Compute step measurement and covariance
-            Δθ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3] - matrix_to_euler(gt_traj.R_nb[:, :, prev_step])[3]
-
-            stride_aug_gt = vcat(
-                stride_local(ref_frame; R_wb=gt_traj.R_nb[:, :, prev_step], Δp_w=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step]),
-                atan(sin(Δθ3_gt), cos(Δθ3_gt))
-            )
-
-            @info "GT aug stride : " stride_aug_gt maxlog = 10
-
-            σ = sigma_groundtruth_array(simdata)
-            σ[4] *= 1e-1
-            σ[1:3] .*= 1e-1
-
             mat66[1:4, 1:4] .= 0.0
-            mat66[1:3, 1:3] = gt_traj.R_nb[:, :, prev_step]' # R_wb^⊤ = R_bw
-            mat66[4, 4] = 1.0
+            σ = sigma_groundtruth_array(simdata)
+            σ[1:3] .*= 1e-1
+            σ[4] *= 1e-1
+
+            Δθ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3] - matrix_to_euler(gt_traj.R_nb[:, :, prev_step])[3]
+            Δθ3_gt = atan(sin(Δθ3_gt), cos(Δθ3_gt))
+            ΔpΔθ3 = [gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step]; Δθ3_gt]
+
+            stride_aug_gt, mat66[1:4, 1:4] = stride_local(ref_frame;
+                R_wb=gt_traj.R_nb[:, :, prev_step], ΔpΔθ3=ΔpΔθ3, Σ_ΔpΔθ3=Diagonal(σ)
+            )
 
             stride_measurement_update!(corrector;
                 ref_frame=ref_frame, feature_type=feature_type,
                 stride_aug=stride_aug_gt,
-                Σstride=mat66[1:4, 1:4] * Diagonal(σ) * mat66[1:4, 1:4]'
+                Σstride=mat66[1:4, 1:4]
             )
 
             relinearize!(corrector)

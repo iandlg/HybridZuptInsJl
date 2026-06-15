@@ -13,6 +13,15 @@ end
     TWOD_STEP_DT_YAW = 6
 end
 
+feature_dims = Dict{FeatureType,Int}(
+    THREED_STEP => 3,
+    TWOD_STEP_DT => 3,
+    THREED_STEP_DT => 4,
+    AUG_STEP => 4,
+    TWOD_STEP_YAW => 3,
+    TWOD_STEP_DT_YAW => 4
+)
+
 function string_to_enum(::Type{T}, s::AbstractString) where T<:Enum
     for v in instances(T)
         string(v) == s && return v
