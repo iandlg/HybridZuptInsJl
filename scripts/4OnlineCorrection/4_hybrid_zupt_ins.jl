@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.HEADING # HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 14 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
 train_ratio = 0.4
@@ -57,13 +57,19 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 )
 
 default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
-zupt, zupt_ins_traj, step_seg, corr_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, zupt_ins_traj, step_seg, def_corr_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
 
-trajs = Dict(
+static_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
+zupt, zupt_ins_traj, step_seg, stat_corr_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, static_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
+
+trajs = OrderedDict(
     "zupt ins" => zupt_ins_traj[step_seg],
-    "step_wise" => corr_traj
+    "step_wise" => def_corr_traj,
+    "static correction" => stat_corr_traj
 )
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])

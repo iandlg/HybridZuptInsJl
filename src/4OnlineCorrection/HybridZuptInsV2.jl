@@ -45,7 +45,7 @@ function hybrid_zupt_aided_insv2(
         t=inertial.t[1],
         pos_init=x_init[1:3],
         quat_init=quat[:, 1],
-        Σ_init=P[[1:3; 7:9], [1:3; 7:9], 1],
+        Σpq_init=P[[1:3; 7:9], [1:3; 7:9], 1],
     )
 
     # n_train_cutoff = floor(Int, train_ratio * N)
@@ -198,6 +198,7 @@ function hybrid_zupt_aided_insv2(
             )
         else
             # @info "No GT available"
+            learned_measurement_update!(corrector)
         end
 
         relinearize!(corrector)
