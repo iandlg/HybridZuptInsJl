@@ -56,9 +56,11 @@ function hybrid_zupt_aided_insv2(
     seg_end = N
     step_seg = Int[1]
 
-    # training_inputs = CorrectionIO(d_feat, true)
-    # training_outputs = CorrectionIO(p, true)
-    # pred_outputs = CorrectionIO(p, true)
+    io_data = Dict{String,CorrectionIO}(
+        "inputs" => CorrectionIO(FEATURE_DIMS[feature_type], true),
+        "target" => CorrectionIO(4, true),
+        "predicted outputs" => CorrectionIO(4, true),
+    )
 
     while true
         # ------------------- Step Covariance Reset -------------------------
@@ -133,7 +135,9 @@ function hybrid_zupt_aided_insv2(
         # and no rotation uncertainty q_i-1
         mat66 .= 0.0
         mat66[1:3, 1:3] = quat_to_matrix(quat[:, prev_step])'
-        mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
+        mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3) # Body frame noise from INS
+
+        @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------ " maxlog = 5
 
         dynamic_update!(corrector;
             t=inertial.t[curr_step],
@@ -142,62 +146,64 @@ function hybrid_zupt_aided_insv2(
             Σpq=(mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66')
         )
 
+        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl = stride_error(ref_frame;
+            R_wb=(quat_to_matrix(corrector.quat[:, corrector.i-1]), quat_to_matrix(corrector.quat[:, corrector.i])),
+            Δp=corrector.pos[:, corrector.i] - corrector.pos[:, corrector.i-1],
+            Σ_ΔpΔθ3=ΔP[[1:3; 9], [1:3; 9]],
+            R_wb_gt=(gt_traj.R_nb[:, :, prev_step], gt_traj.R_nb[:, :, curr_step]),
+            Δp_gt=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step],
+            Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+        )
+
+        append_io!(io_data["target"], inertial.t[prev_step], stride_err, sqrt.(diag(Σ_err)))
+
         if gt_available[curr_step] && gt_available[prev_step]
-            @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-            @info "Prev and curr GT available"
+            # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
+            # @info "Prev and curr GT available"
             # # Compute step measurement and covariance
-            mat66[1:4, 1:4] .= 0.0
-            σ = sigma_groundtruth_array(simdata)
 
-            Δθ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3] - matrix_to_euler(gt_traj.R_nb[:, :, prev_step])[3]
-            Δθ3_gt = atan(sin(Δθ3_gt), cos(Δθ3_gt))
-            ΔpΔθ3 = [gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step]; Δθ3_gt]
 
-            stride_aug_gt, mat66[1:4, 1:4], _ = stride_local(ref_frame;
-                R_wb=gt_traj.R_nb[:, :, prev_step], ΔpΔθ3=ΔpΔθ3, Σ_ΔpΔθ3=Diagonal(σ .^ 2)
+            feature, var_feature = stride_measurement_update!(corrector;
+                feature_type=feature_type, R_aug_wl=R_aug_wl,
+                stride_err=stride_err, Σ_err=Σ_err,
+                ins_stride=ins_stride, Σ_ins_stride=Σ_ins_stride,
             )
-
-            stride_measurement_update!(corrector;
-                ref_frame=ref_frame, feature_type=feature_type,
-                stride_aug=stride_aug_gt,
-                Σstride=mat66[1:4, 1:4]
-            )
+            if !isnothing(feature) && !isnothing(var_feature)
+                append_io!(io_data["inputs"], corrector.t[corrector.i], feature, sqrt.(var_feature))
+            end
 
             relinearize!(corrector)
-            σ = sigma_groundtruth_array(simdata)
-
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(σ .^ 2)
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
             )
 
         elseif gt_available[curr_step]
-            @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-            @info "Curr GT available"
+            # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
+            # @info "Curr GT available"
 
-            # Method 1
-            θ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
-            θ3_ins = matrix_to_euler(quat_to_matrix(corrector.quat[:, corrector.i]))[3]
-            σ = sigma_groundtruth_array(simdata)
             # σ[4] *= 1e-4
             # σ[1:3] .*= 1e-3
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(σ .^ 2)
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
             )
         else
             # @info "No GT available"
-            learned_measurement_update!(corrector; ref_frame=ref_frame, feature_type=feature_type)
+            feature, var_feature, pred, var_pred = learned_measurement_update!(corrector;
+                ref_frame=ref_frame, feature_type=feature_type)
+            if !isnothing(feature) && !isnothing(var_feature)
+                append_io!(io_data["inputs"], corrector.t[corrector.i], feature, sqrt.(var_feature))
+            end
+            if !isnothing(pred) && !isnothing(var_pred)
+            end
+
         end
 
         relinearize!(corrector)
     end
 
-    R_nb_final = euler_to_matrix(x[7:9, :])
-    zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
-    corr_traj = get_trajectory(corrector)
-
-    return zupt, zupt_ins_traj, step_seg, corr_traj
+    return zupt, step_seg, get_trajectory(corrector), io_data
 end

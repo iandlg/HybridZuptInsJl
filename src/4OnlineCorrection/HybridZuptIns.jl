@@ -50,7 +50,7 @@ function hybrid_zupt_aided_ins(
     seg_start = 2
     seg_end = N
     step_detector = StepDetector()
-    step_seg = Int[]
+    step_seg = Int[1]
 
     # HSGP variables
     p = 4
@@ -88,7 +88,6 @@ function hybrid_zupt_aided_ins(
     training_outputs = CorrectionIO(p, true)
     pred_outputs = CorrectionIO(p, true)
 
-    ΔP_sum = zeros(Float64, 9, 9)
     ΔP = Matrix{Float64}(undef, 9, 9)
 
     while true
@@ -137,11 +136,6 @@ function hybrid_zupt_aided_ins(
                 break
             end
         end
-        ΔP_sum .+= ΔP
-        if length(step_seg) <= 3
-            @info "ΔP sum : " ΔP_sum
-            @info "Normal P : " P[:, :, seg_end]
-        end
 
         dx_smooth[:, seg_end] = dx[:, seg_end]
         P_smooth[:, :, seg_end] = P[:, :, seg_end]
@@ -159,11 +153,14 @@ function hybrid_zupt_aided_ins(
             -dx_smooth[:, seg_start:seg_end],
             view(quat, :, seg_start:seg_end)
         )
+        prev_step = step_seg[end-1]
+        curr_step = step_seg[end]
+
+        @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------ " maxlog = 5
+        @info "ΔP : " ΔP[[1:3; 7:9], [1:3; 7:9]] maxlog = 5
 
         # ------------------- HSGP stepwise correction ------------------------
         if length(step_seg) > 1 && seg_end != N
-            prev_step = step_seg[end-1]
-            curr_step = step_seg[end]
 
             R_nb = quat_to_matrix(quat)
             R_aug_nb[1:3, 1:3] = R_nb[:, :, prev_step]
@@ -254,7 +251,7 @@ function hybrid_zupt_aided_ins(
                     zeros(Float64, (1, 6)) jacobian_∂θ3_∂δθ_right(quat[:, curr_step])'
                 ]
                 Δθ = atan(sin(yaw_gt_seg[end] - yaw_ins_seg[end]), cos(yaw_gt_seg[end] - yaw_ins_seg[end]))
-                @info "Measured yaw error" round(Δθ; digits=3)
+                # @info "Measured yaw error" round(Δθ; digits=3)
 
                 # δx is zero since has been compensated after zupts
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
@@ -264,7 +261,7 @@ function hybrid_zupt_aided_ins(
                     H_gt,
                     Diagonal(sigma_gt .^ 2)
                 )
-                @info "Resulting axis angle" dx[7:9, curr_step]
+                # @info "Resulting axis angle" dx[7:9, curr_step]
 
                 # -------- Compensate error -------------
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(

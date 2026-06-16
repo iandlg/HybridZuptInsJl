@@ -14,3 +14,5 @@ function log_around(base::Float64, exp_range::Tuple{Float64,Float64}, n_steps::I
     exps = range(lo, hi, length=n_steps)
     return base .* 10.0 .^ exps
 end
+
+const Optional{T} = Union{Nothing,T}

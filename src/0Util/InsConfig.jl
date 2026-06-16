@@ -13,7 +13,7 @@ end
     TWOD_STEP_DT_YAW = 6
 end
 
-feature_dims = Dict{FeatureType,Int}(
+const FEATURE_DIMS = Dict{FeatureType,Int}(
     THREED_STEP => 3,
     TWOD_STEP_DT => 3,
     THREED_STEP_DT => 4,
