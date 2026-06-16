@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 14 # meta["trial_id"]
+trial_id = 13 # meta["trial_id"]
 m = 300
 margin = meta["margin"]
 train_ratio = 0.4
@@ -63,28 +63,28 @@ zupt, step_seg, def_corr_traj, io_data["Default"] = HybridZuptInsJl.hybrid_zupt_
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
 
-# static_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
-# zupt, step_seg, stat_corr_traj, io_data["Static"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, static_corr;
-#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
+static_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
+zupt, step_seg, stat_corr_traj, io_data["Static"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, static_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
 
-# splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p, FEATURE_TYPE)
-# zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
-#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
+splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p, FEATURE_TYPE)
+zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME)
 
 input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 for (method_name, io_dict) in io_data
-    input_data[method_name] = io_dict["inputs"]
+    input_data["$method_name : Input"] = io_dict["input"]
     output_data["$method_name : Target"] = io_dict["target"]
-    # output_data["$method_name : Training"] = io_dict["training outputs"]
+    output_data["$method_name : Prediction"] = io_dict["prediction"]
 end
 
 trajs = OrderedDict(
     "zupt ins" => def_corr_traj,
-    # "static correction" => stat_corr_traj,
-    # "split hsgp correction" => hsgp1_corr_traj
+    "static correction" => stat_corr_traj,
+    "split hsgp correction" => hsgp1_corr_traj
 )
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
@@ -92,5 +92,5 @@ fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligne
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=18, stop=25)
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-# fig_out = HybridZuptInsJl.plot_regression_results(output_data)
-# fig_in_splithsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["inputs"])
+fig_out = HybridZuptInsJl.plot_regression_results(output_data)
+fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])

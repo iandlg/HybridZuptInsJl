@@ -26,7 +26,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 14 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
 # z_thresh = meta["z_thresh"]
@@ -48,7 +48,7 @@ pred_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 300, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 20, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )

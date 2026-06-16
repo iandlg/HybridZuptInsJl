@@ -57,9 +57,9 @@ function hybrid_zupt_aided_insv2(
     step_seg = Int[1]
 
     io_data = Dict{String,CorrectionIO}(
-        "inputs" => CorrectionIO(FEATURE_DIMS[feature_type], true),
+        "input" => CorrectionIO(FEATURE_DIMS[feature_type], true),
         "target" => CorrectionIO(4, true),
-        "predicted outputs" => CorrectionIO(4, true),
+        "prediction" => CorrectionIO(4, true),
     )
 
     while true
@@ -138,7 +138,7 @@ function hybrid_zupt_aided_insv2(
         mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3) # Body frame noise from INS
 
         @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------ " maxlog = 5
-
+        # Update slow kalman
         dynamic_update!(corrector;
             t=inertial.t[curr_step],
             Δp=mat66[1:3, 1:3] * (x[1:3, curr_step] - x[1:3, prev_step]),
@@ -146,6 +146,7 @@ function hybrid_zupt_aided_insv2(
             Σpq=(mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66')
         )
 
+        # Compute stride error and estimated stride 
         stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl = stride_error(ref_frame;
             R_wb=(quat_to_matrix(corrector.quat[:, corrector.i-1]), quat_to_matrix(corrector.quat[:, corrector.i])),
             Δp=corrector.pos[:, corrector.i] - corrector.pos[:, corrector.i-1],
@@ -155,24 +156,26 @@ function hybrid_zupt_aided_insv2(
             Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
         )
 
+        # Compute feature
+        feature, Σ_feature = compute_feature(feature_type;
+            ins_stride=ins_stride, Σ_ins_stride=Σ_ins_stride,
+            ΔT=inertial.t[curr_step] - inertial.t[prev_step]
+        )
+
+        # Save for plotting
         append_io!(io_data["target"], inertial.t[prev_step], stride_err, sqrt.(diag(Σ_err)))
+        append_io!(io_data["input"], inertial.t[prev_step], feature, sqrt.(diag(Σ_feature)))
 
         if gt_available[curr_step] && gt_available[prev_step]
             # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             # @info "Prev and curr GT available"
-            # # Compute step measurement and covariance
-
-
-            feature, var_feature = stride_measurement_update!(corrector;
-                feature_type=feature_type, R_aug_wl=R_aug_wl,
+            stride_measurement_update!(corrector;
+                feature_type=feature_type,
                 stride_err=stride_err, Σ_err=Σ_err,
-                ins_stride=ins_stride, Σ_ins_stride=Σ_ins_stride,
+                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl,
             )
-            if !isnothing(feature) && !isnothing(var_feature)
-                append_io!(io_data["inputs"], corrector.t[corrector.i], feature, sqrt.(var_feature))
-            end
-
             relinearize!(corrector)
+
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
@@ -182,9 +185,6 @@ function hybrid_zupt_aided_insv2(
         elseif gt_available[curr_step]
             # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             # @info "Curr GT available"
-
-            # σ[4] *= 1e-4
-            # σ[1:3] .*= 1e-3
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
@@ -192,16 +192,14 @@ function hybrid_zupt_aided_insv2(
             )
         else
             # @info "No GT available"
-            feature, var_feature, pred, var_pred = learned_measurement_update!(corrector;
-                ref_frame=ref_frame, feature_type=feature_type)
-            if !isnothing(feature) && !isnothing(var_feature)
-                append_io!(io_data["inputs"], corrector.t[corrector.i], feature, sqrt.(var_feature))
-            end
+            pred, var_pred = learned_measurement_update!(corrector;
+                feature_type=feature_type,
+                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl)
             if !isnothing(pred) && !isnothing(var_pred)
+                append_io!(io_data["prediction"], inertial.t[prev_step], pred, sqrt.(var_pred))
             end
 
         end
-
         relinearize!(corrector)
     end
 
