@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 16 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 m = 300
 margin = meta["margin"]
 train_ratio = 0.4
