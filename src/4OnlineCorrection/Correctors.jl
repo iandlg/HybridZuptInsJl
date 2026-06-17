@@ -609,7 +609,7 @@ function learned_measurement_update!(c::SplitHybridCorrector;
         c.δx[:, c.i], c.Σ,
         pred,
         c.H[:, :, c.i],
-        Σ_pred .* 1e-3
+        Σ_pred
     )
     return pred, diag(Σ_pred)
 end
