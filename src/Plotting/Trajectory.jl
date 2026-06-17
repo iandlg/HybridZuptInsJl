@@ -434,11 +434,11 @@ function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::I
     return findall(mask), ages[mask]
 end
 
-function ring_points(center::Point3f, radius::Float32)
+function ring_points(center::Point3f, radius::Float32, z_offset::Float32)
     θs = range(0, 2π, length=64)
     push!(
-        [Point3f(center[1] + radius * cos(θ), center[2] + radius * sin(θ), center[3]) for θ in θs],
-        Point3f(center[1] + radius, center[2], center[3])  # close the loop
+        [Point3f(center[1] + radius * cos(θ), center[2] + radius * sin(θ), center[3] + z_offset) for θ in θs],
+        Point3f(center[1] + radius, center[2], center[3] + z_offset)  # close the loop
     )
 end
 
@@ -450,9 +450,10 @@ function make_ring_data(
     lifetime,
     inferno;
     radius0::Float32=0.05f0,
-    radius_growth::Float32=0.2f0,
+    radius_growth::Float32=0.15f0,
     radius_scale::Float32=1f0,
     alpha_fn=x -> 1f0 - x,
+    z_phase::Float32=0.0f0
 )
     ff = footfall_idxs[footfall_idxs.≤current_idx]
     isempty(ff) && return (Point3f[], RGBAf[])
@@ -477,10 +478,11 @@ function make_ring_data(
         # c = inferno(cmap_pos)
 
         radius = (radius0 + radius_growth * frac) * radius_scale
+        z_offset = -Float32(0.02f0 * sin(age * 2pi / (lifetime / 1.7) + z_phase))
         α = clamp(alpha_fn(frac), 0f0, 1f0)
         color = RGBAf(c.r, c.g, c.b, α)
 
-        ring = ring_points(Point3f(positions[:, j]...), radius)
+        ring = ring_points(Point3f(positions[:, j]...), radius, z_offset)
         append!(pts, ring)
         append!(colors, fill(color, length(ring)))
 
@@ -545,16 +547,18 @@ function animate_trajectory(
 
     # ── Footfall data ────────────────────────────────────────────────────────
     footfall_ring_data = @lift begin
-        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime, inferno;
+        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime * 0.5, inferno;
             alpha_fn=x -> 1f0 - x,
             radius_scale=1f0 * scale,
+            z_phase=0.0f0
         )
     end
 
     footfall_ring_data_soft = @lift begin
-        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime, inferno;
+        make_ring_data(positions, times, footfall_idxs, $current_idx, lifetime * 0.5, inferno;
             alpha_fn=x -> 0.3f0 * (1f0 - x),
             radius_scale=1.3f0 * scale,
+            z_phase=Float32(pi * 3 / 4)
         )
     end
 
