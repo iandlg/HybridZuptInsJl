@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 20
+hsgp_p_key = 30
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 13 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 m = 300
 margin = meta["margin"]
 train_ratio = 0.4
@@ -77,7 +77,6 @@ input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 for (method_name, io_dict) in io_data
     input_data["$method_name : Input"] = io_dict["input"]
-    output_data["$method_name : Target"] = io_dict["target"]
     output_data["$method_name : Prediction"] = io_dict["prediction"]
 end
 
@@ -92,5 +91,6 @@ fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligne
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=18, stop=25)
 fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-fig_out = HybridZuptInsJl.plot_regression_results(output_data)
+fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
 fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
+fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])

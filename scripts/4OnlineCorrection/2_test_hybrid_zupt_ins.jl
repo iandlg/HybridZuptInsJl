@@ -48,7 +48,7 @@ pred_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
 hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 20, hsgp_p.LL;
+    hsgp_p.hp, hsgp_p.d, 200, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
     output_stats=hsgp_p.output_stats
 )

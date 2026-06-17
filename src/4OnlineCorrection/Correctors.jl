@@ -274,7 +274,7 @@ end
 
 function posyaw_measurement_update!(c::DefaultCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
-    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0] #  jacobian_∂θ3_∂δθ_left(c.quat[:, c.i])
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
     # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
     # @info "Measurement matrix H" c.H[:, :, c.i]
@@ -327,9 +327,11 @@ function initialize_corrector!(c::StaticCorrector; t::Float64, pos_init::Abstrac
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
+    c.stride_err_mean[:, 1] .= 0.0
     c.δx[:, 1] .= 0.0
     c.Σ[1:6, 1:6] .= Σpq_init
-    c.Σ[7:10, 7:10] .= Matrix{Float64}(I, 4, 4) * 1e-1
+    c.Σ[7:10, 7:10] .= Matrix{Float64}(I, 4, 4) * 1e2
+    c.Σ[10, 10] *= 1e2
     c.G .= Matrix{Float64}(I, 10, 6)
     c.F .= 0.0
     c.i = 1
@@ -344,6 +346,7 @@ function dynamic_update!(c::StaticCorrector; t::Float64, Δp::AbstractVector{Flo
     # Nominal update
     c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
     c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
+    c.stride_err_mean[:, c.i] = c.stride_err_mean[:, c.i-1]
 
     c.G .= 0.0
     c.G[1:3, 1:3] = R_prev
@@ -369,6 +372,7 @@ function stride_measurement_update!(c::StaticCorrector;
     c.H[1:4, 7:10, c.i] = Matrix{Float64}(I, 4, 4)
 
     stride_err -= c.stride_err_mean[:, c.i]
+    stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
 
     c.δx[:, c.i], c.Σ = measurement_update(
         c.δx[:, c.i], c.Σ,
@@ -379,10 +383,10 @@ function stride_measurement_update!(c::StaticCorrector;
     return
 end
 
-
 function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+    # c.H[4, 4:6, c.i] = jacobian_∂θ3_∂δθ_left(c.quat[:, c.i])
     c.H[1:4, 7:10, c.i] .= 0.0
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
     # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
@@ -398,18 +402,20 @@ function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector
 end
 
 function learned_measurement_update!(c::StaticCorrector;
-    R_aug_wl, kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+    R_aug_wl, kwargs...
+)::NTuple{2,Optional{AbstractVector{Float64}}}
     c.H[1:3, 1:3, c.i] = R_aug_wl[1:3, 1:3]'
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+    # c.H[4, 4:6, c.i] = jacobian_∂θ3_∂δθ_left(c.quat[:, c.i])
     c.H[1:4, 7:10, c.i] .= 0.0
 
     c.δx[:, c.i], c.Σ = measurement_update(
         c.δx[:, c.i], c.Σ,
         c.stride_err_mean[:, c.i],
         c.H[:, :, c.i],
-        c.Σ[7:10, 7:10]
+        Diagonal(fill(1e-5, 4) .^ 2)
     )
-    return c.stride_err_mean[:, c.i], diag(c.Σ[7:10, 7:10])
+    return c.stride_err_mean[:, c.i], fill(1e-5, 4) .^ 2
 end
 
 function relinearize!(c::StaticCorrector)
@@ -417,6 +423,9 @@ function relinearize!(c::StaticCorrector)
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     c.stride_err_mean[:, c.i] += c.δx[7:10, c.i]
     c.δx[:, c.i] .= 0.0
+
+    c.Σ[1:6, 7:10] .= 0.0
+    c.Σ[7:10, 1:6] .= 0.0
 end
 
 mutable struct SplitHybridCorrector <: AbstractCorrector

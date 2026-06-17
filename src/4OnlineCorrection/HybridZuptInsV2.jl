@@ -64,7 +64,7 @@ function hybrid_zupt_aided_insv2(
 
     while true
         # ------------------- Step Covariance Reset -------------------------
-        ΔP = zeros(Float64, 9, 9)
+        ΔP .= 0.0
 
         # ------------------- ZUPT aided INS Loop -------------------------
         for n in seg_start:seg_end
