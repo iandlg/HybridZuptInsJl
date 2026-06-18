@@ -216,16 +216,16 @@ function calc_eigenvectors_dx(
 
     return dphi
 end
-
 """
-    nlml(w, y, lambda, Phiy, PhiPhi, d, m, opt, theta)
+    nlml(w, y, lambda, Phiy, PhiPhi, d, m, opt, theta, use_linear)
 
 Compute the negative log marginal likelihood and its gradient w.r.t. the
 log-transformed hyperparameters for the SE kernel reduced-rank GP.
 
-Only the hyperparameters indicated by `opt` (indices 1:σ_n, 2:ℓ, 3:σ_f) are
+Only the hyperparameters indicated by `opt` (indices 1:σ_n, 2:ℓ, 3:σ_f, 4:σ_lin) are
 being optimised; `w` contains their logs in that order. Non-optimised
-hyperparameters are taken from `theta_full`.
+hyperparameters are taken from `theta`. When `use_linear=false`, σ_lin is
+excluded from the basis and its gradient is never computed.
 """
 function nlml(
     w::AbstractVector{T},
@@ -236,29 +236,27 @@ function nlml(
     d::Int,
     m::Int,
     opt::AbstractVector{Bool},
-    theta::AbstractVector{T}
-) where {T<:Real}
+    theta::AbstractVector{T},
+    use_linear::Bool
+)::Tuple{T,Vector{T}} where {T<:Real}
 
-    # Insert the optimised parameters (log-scale) into full theta
     θ = copy(theta)
     θ[opt] .= exp.(w)
 
-    # Unpack (standard deviations)
     σ_n, ℓ, σ_f, σ_lin = θ
     σ_n² = σ_n^2
     σ_f² = σ_f^2
     σ_lin² = σ_lin^2
 
     n = length(y)
-    m_total = d + m
+    basis_count = (use_linear ? d : 0) + m   # total number of basis functions
 
-    # Spectral density (prior variance) for each basis function
-    k_lin = fill(σ_lin², d)                       # linear part
+    # Spectral densities (prior variances) for each basis function
     C = (√(2π))^d
-    k_se = σ_f² * C * ℓ^d .* exp.(-0.5 * lambda * ℓ^2)   # SE part
-    k = vcat(k_lin, k_se)
+    k_se = σ_f² * C * ℓ^d .* exp.(-0.5 * lambda * ℓ^2)
+    k = use_linear ? vcat(fill(σ_lin², d), k_se) : k_se
 
-    # Matrix A = ΦᵀΦ + σ_n² * diag(1/k)
+    # A = ΦᵀΦ + σ_n² diag(1/k)
     A = PhiPhi + Diagonal(σ_n² ./ k)
 
     Lchol = cholesky(A; check=false)
@@ -269,43 +267,45 @@ function nlml(
 
     v = L \ Phiy
     yiQy = (dot(y, y) - dot(v, v)) / σ_n²
-    logdetQ = (n - m_total) * log(σ_n²) + sum(log.(k)) + 2 * sum(log.(diag(L)))
+    logdetQ = (n - basis_count) * log(σ_n²) + sum(log.(k)) + 2 * sum(log.(diag(L)))
     nll = 0.5 * yiQy + 0.5 * logdetQ + 0.5 * n * log(2π)
 
-    # Pre-computations for gradients
+    # Pre-computations shared by all gradients
     vv = L' \ v
-    Linv_diag_kinv = L \ Diagonal(1 ./ k)
-    LLk = L' \ Linv_diag_kinv
+    Linv_diag = L \ Diagonal(1 ./ k)
+    LLk_diag = diag(L' \ Linv_diag)          # diag((LLᵀ)⁻¹ diag(1/k))
 
-    # Gradient w.r.t. the *squared* noise parameter
-    dlogdetQ_σ² = (n - m_total) / σ_n² + sum(diag(LLk))
+    # ── ∂/∂σ_n² ──────────────────────────────────────────────────────────────
+    dlogdetQ_σ² = (n - basis_count) / σ_n² + sum(LLk_diag)
     dyiQy_σ² = dot(vv, (Diagonal(1 ./ k) * vv)) / σ_n² - yiQy / σ_n²
-    grad_σ² = 0.5 * dlogdetQ_σ² + 0.5 * dyiQy_σ²
+    grad_σ² = 0.5 * (dlogdetQ_σ² + dyiQy_σ²)
 
-    # Gradient w.r.t. length scale ℓ (directly, not squared)
-    dk_se_dℓ = σ_f² * C * ℓ^d .* exp.(-0.5 * lambda * ℓ^2) .* (d / ℓ .- ℓ .* lambda)
-    dk_dℓ = vcat(zeros(T, d), dk_se_dℓ)
-    dlogdetQ_ℓ = sum(dk_dℓ ./ k) - σ_n² * sum(diag(LLk) .* (dk_dℓ ./ k))
-    dyiQy_ℓ = -dot(vv, (Diagonal(dk_dℓ ./ (k .^ 2)) * vv))
-    grad_ℓ = 0.5 * dlogdetQ_ℓ + 0.5 * dyiQy_ℓ
+    # ── ∂/∂ℓ ─────────────────────────────────────────────────────────────────
+    dk_se_dℓ = k_se .* (d / ℓ .- ℓ .* lambda)
+    dk_dℓ = use_linear ? vcat(zeros(T, d), dk_se_dℓ) : dk_se_dℓ
+    dlogdetQ_ℓ = sum(dk_dℓ ./ k) - σ_n² * sum(LLk_diag .* (dk_dℓ ./ k))
+    dyiQy_ℓ = -dot(vv, (Diagonal(dk_dℓ ./ k .^ 2) * vv))
+    grad_ℓ = 0.5 * (dlogdetQ_ℓ + dyiQy_ℓ)
 
-    # Gradient w.r.t. σ_f²
+    # ── ∂/∂σ_f² ──────────────────────────────────────────────────────────────
     dk_se_dσ_f² = k_se / σ_f²
-    dk_dσ_f² = vcat(zeros(T, d), dk_se_dσ_f²)
-    dlogdetQ_σ_f² = sum(dk_dσ_f² ./ k) - σ_n² * sum(diag(LLk) .* (dk_dσ_f² ./ k))
-    dyiQy_σ_f² = -dot(vv, (Diagonal(dk_dσ_f² ./ (k .^ 2)) * vv))
-    grad_σ_f² = 0.5 * dlogdetQ_σ_f² + 0.5 * dyiQy_σ_f²
+    dk_dσ_f² = use_linear ? vcat(zeros(T, d), dk_se_dσ_f²) : dk_se_dσ_f²
+    dlogdetQ_σ_f² = sum(dk_dσ_f² ./ k) - σ_n² * sum(LLk_diag .* (dk_dσ_f² ./ k))
+    dyiQy_σ_f² = -dot(vv, (Diagonal(dk_dσ_f² ./ k .^ 2) * vv))
+    grad_σ_f² = 0.5 * (dlogdetQ_σ_f² + dyiQy_σ_f²)
 
-    # Gradient w.r.t. σ_lin²
-    dk_dσ_lin² = vcat(ones(T, d), zeros(T, m))
-    dlogdetQ_σ_lin² = sum(dk_dσ_lin² ./ k) - σ_n² * sum(diag(LLk) .* (dk_dσ_lin² ./ k))
-    dyiQy_σ_lin² = -dot(vv, (Diagonal(dk_dσ_lin² ./ (k .^ 2)) * vv))
-    grad_σ_lin² = 0.5 * dlogdetQ_σ_lin² + 0.5 * dyiQy_σ_lin²
+    # ── ∂/∂σ_lin² (only when use_linear=true) ────────────────────────────────
+    if use_linear
+        dk_dσ_lin² = vcat(ones(T, d), zeros(T, m))
+        dlogdetQ_σ_lin² = sum(dk_dσ_lin² ./ k) - σ_n² * sum(LLk_diag .* (dk_dσ_lin² ./ k))
+        dyiQy_σ_lin² = -dot(vv, (Diagonal(dk_dσ_lin² ./ k .^ 2) * vv))
+        grad_σ_lin² = 0.5 * (dlogdetQ_σ_lin² + dyiQy_σ_lin²)
+    end
 
-    # Map to log-parameter gradients: ∂/∂(log θ) = θ * ∂/∂θ  for σ’s, and ℓ * ∂/∂ℓ for ℓ
+    # ── Map to log-parameter gradients: ∂/∂(log θ) = θ · ∂/∂θ ──────────────
     grad = similar(w)
     idx = 1
-    if opt[1]   # log σ_n  →  σ_n * (∂/∂σ_n) = σ_n * (2σ_n * ∂/∂(σ_n²)) = 2σ_n² * ∂/∂(σ_n²)
+    if opt[1]   # log σ_n  →  2σ_n² · ∂/∂σ_n²
         grad[idx] = 2 * σ_n² * grad_σ²
         idx += 1
     end
@@ -313,11 +313,11 @@ function nlml(
         grad[idx] = ℓ * grad_ℓ
         idx += 1
     end
-    if opt[3]   # log σ_f
+    if opt[3]   # log σ_f  →  2σ_f² · ∂/∂σ_f²
         grad[idx] = 2 * σ_f² * grad_σ_f²
         idx += 1
     end
-    if opt[4]   # log σ_lin
+    if opt[4] && use_linear   # log σ_lin  →  2σ_lin² · ∂/∂σ_lin²
         grad[idx] = 2 * σ_lin² * grad_σ_lin²
         idx += 1
     end
@@ -325,28 +325,35 @@ function nlml(
     return nll, grad
 end
 
+
 """
-    hsgp_regression(x, y, xt, m, LL, theta, opt, predcf; optimizer, optim_options)
+    hsgp_regression(x, y, xt, m; kwargs...)
 
-Reduced-rank Gaussian process regression (Hilbert-space approximation) with a
-linear + squared exponential kernel.
+Reduced-rank Gaussian process regression (Hilbert-space approximation) with an
+optional linear kernel component plus a squared-exponential kernel.
 
-- `x`: training inputs (n × d)
-- `y`: training targets (n-vector)
-- `xt`: test inputs (nₜ × d)
-- `m`: number of SE eigenfunctions
-- `LL`: domain bounds (2×d) or `nothing` → auto-computed with 10% padding
-- `theta`: [σₙ, ℓ, σ_f, σ_lin] (standard deviations)
-- `opt`: which of `theta` to optimise (length-4 `Bool` vector, default all `true`)
-- `predcf`: kernel components for prediction: `[1]` = linear, `[2]` = SE (default `[1,2]`)
-- `optimizer`: from `Optim.jl` (default `LBFGS()`)
+# Arguments
+- `x`            : training inputs (n × d)
+- `y`            : training targets (n-vector)
+- `xt`           : test inputs (nₜ × d)
+- `m`            : number of SE basis functions
+
+# Keyword Arguments
+- `LL`           : domain bounds (2 × d), or `nothing` → auto-computed with 10 % padding
+- `theta`        : `[σₙ, ℓ, σ_f, σ_lin]` (standard deviations); σ_lin is ignored when `use_linear=false`
+- `opt`          : which of `theta` to optimise — length-4 `Bool` vector (default all `true`)
+- `use_linear`   : include the linear kernel component (default `true`)
+- `predcf`       : kernel components for prediction — `[1]` = linear, `[2]` = SE (default `[1, 2]`)
+- `optimizer`    : `Optim.jl` optimizer (default `LBFGS()`)
 - `optim_options`: `Optim.Options` (default `Optim.Options()`)
 
-Returns `(Eft, Varft, theta, lik)` where:
-- `Eft`: posterior mean at test points
-- `Varft`: posterior marginal variance
-- `theta`: final (possibly optimised) hyperparameters
-- `lik`: negative log marginal likelihood at the final hyperparameters
+# Returns
+`(Eft, Varft, theta, lik, Lvec)` where:
+- `Eft`   : posterior mean at test points
+- `Varft` : posterior marginal variance at test points
+- `theta` : final (possibly optimised) hyperparameters
+- `lik`   : negative log marginal likelihood at the final hyperparameters
+- `Lvec`  : half-widths of the scaled domain
 """
 function hsgp_regression(
     x::AbstractMatrix{T},
@@ -356,98 +363,89 @@ function hsgp_regression(
     LL::Union{Nothing,AbstractMatrix{T}}=nothing,
     theta::AbstractVector{T}=T[],
     opt::AbstractVector{Bool}=trues(4),
+    use_linear::Bool=true,
     predcf::AbstractVector{Int}=[1, 2],
-    optimizer=LBFGS(),
+    optimizer=Optim.LBFGS(),
     optim_options=Optim.Options()
 ) where {T<:Real}
 
     d = size(x, 2)
 
+    # Silently exclude σ_lin from optimisation when the linear kernel is off
+    effective_opt = copy(opt)
+    if !use_linear
+        effective_opt[4] = false
+    end
+
     # ---------- Domain boundaries ----------
+    xmin = minimum(x, dims=1)[:]
+    xmax = maximum(x, dims=1)[:]
     if LL === nothing || isempty(LL)
-        xmin = minimum(x, dims=1)[:]
-        xmax = maximum(x, dims=1)[:]
         pm = 0.1 * minimum(xmax - xmin)
         LL = [xmin' .- pm; xmax' .+ pm]
     end
 
     # ---------- Default hyperparameters ----------
     if isempty(theta)
-        rangex = xmax - xmin
-        theta = [1.0, 0.1, 1.0, 1.0]   # σ_n, ℓ, σ_f, σ_lin
+        theta = T[1.0, 0.1, 1.0, 1e-9]   # σ_n, ℓ, σ_f, σ_lin
     end
 
     # ---------- Scale inputs to [-Lᵢ, Lᵢ] ----------
     mid = (LL[1, :] .+ LL[2, :]) ./ 2
     Lvec = (LL[2, :] .- LL[1, :]) ./ 2
+    @show Lvec
     x = x .- mid'
     xt = xt .- mid'
 
     # ---------- Eigenbasis for the SE kernel ----------
-    per_dim_eigvals = calc_eigenvalues(Lvec, m, d)          # (m, d)
-    lambda = vec(sum(per_dim_eigvals, dims=2))              # total eigenvalue ω²
+    per_dim_eigvals = calc_eigenvalues(Lvec, m, d)
+    lambda = vec(sum(per_dim_eigvals, dims=2))
 
-    # ---------- Training basis functions ----------
+    # ---------- Training basis matrix ----------
     Phi_se_train = calc_eigenvectors(x, Lvec, per_dim_eigvals)   # (n, m)
-    Phi_lin_train = x                                              # (n, d)
-    Phi_train = hcat(Phi_lin_train, Phi_se_train)                  # (n, d+m)
+    Phi_train = use_linear ? hcat(x, Phi_se_train) : Phi_se_train  # (n, d+m) or (n, m)
 
     Phiy = Phi_train' * y
     PhiPhi = Phi_train' * Phi_train
 
-    # ---------- Optimisation (if any) ----------
-    if any(opt)
-        w0 = log.(theta[opt])
+    # ---------- Optimisation ----------
+    if any(effective_opt)
+        w0 = log.(theta[effective_opt])
 
-        function obj(w)
-            nll, _ = nlml(w, y, lambda, Phiy, PhiPhi, d, m, opt, theta)
-            return nll
-        end
-
+        obj(w) = nlml(w, y, lambda, Phiy, PhiPhi, d, m, effective_opt, theta, use_linear)[1]
         function grad!(G, w)
-            _, grad = nlml(w, y, lambda, Phiy, PhiPhi, d, m, opt, theta)
-            G[:] = grad
-            return G
+            G[:] = nlml(w, y, lambda, Phiy, PhiPhi, d, m, effective_opt, theta, use_linear)[2]
         end
-        @info "Optimizing"
+
         result = Optim.optimize(obj, grad!, w0, optimizer, optim_options)
-        theta[opt] .= exp.(result.minimizer)
+        theta[effective_opt] = exp.(result.minimizer)
     end
 
-    # ---------- Final negative log marginal likelihood ----------
-    lik, _ = nlml(log.(theta[opt]), y, lambda, Phiy, PhiPhi, d, m, opt, theta)
+    # ---------- Final NLL ----------
+    lik, _ = nlml(log.(theta[effective_opt]), y, lambda, Phiy, PhiPhi, d, m, effective_opt, theta, use_linear)
+    isnan(lik) && @warn "Negative log marginal likelihood is invalid: $lik"
 
-    # ---------- Prediction ----------
+    # ---------- Posterior weights ----------
     σ_n, ℓ, σ_f, σ_lin = theta
     σ_n² = σ_n^2
-    σ_f² = σ_f^2
-    σ_lin² = σ_lin^2
     C = (√(2π))^d
-    k_lin = fill(σ_lin², d)
-    k_se = σ_f² * C * ℓ^d .* exp.(-0.5 * lambda * ℓ^2)
-    k = vcat(k_lin, k_se)
+    k_se = σ_f^2 * C * ℓ^d .* exp.(-0.5 * lambda * ℓ^2)
+    k = use_linear ? vcat(fill(σ_lin^2, d), k_se) : k_se
 
     A = PhiPhi + Diagonal(σ_n² ./ k)
     L = cholesky(A).L
-
     foo = L' \ (L \ Phiy)
 
-    # Test basis
-    if 1 ∈ predcf
-        Phi_lin_test = xt
-    else
-        Phi_lin_test = zeros(T, size(xt, 1), d)
-    end
-    if 2 ∈ predcf
-        Phi_se_test = calc_eigenvectors(xt, Lvec, per_dim_eigvals)
-    else
-        Phi_se_test = zeros(T, size(xt, 1), m)
-    end
-    Phi_test = hcat(Phi_lin_test, Phi_se_test)
+    # ---------- Test basis matrix ----------
+    lin_requested = use_linear && (1 ∈ predcf)
+    Phi_lin_test = lin_requested ? xt : zeros(T, size(xt, 1), d)
+    Phi_se_test = (2 ∈ predcf) ? calc_eigenvectors(xt, Lvec, per_dim_eigvals) :
+                  zeros(T, size(xt, 1), m)
+    Phi_test = use_linear ? hcat(Phi_lin_test, Phi_se_test) : Phi_se_test
 
     Eft = Phi_test * foo
     V = Phi_test / L'
-    Varft = σ_n² .* sum(abs2.(V), dims=2)[:]
+    Varft = σ_n² .* vec(sum(abs2.(V), dims=2))
 
-    return Eft, Varft, theta, lik
+    return Eft, Varft, theta, lik, Lvec
 end

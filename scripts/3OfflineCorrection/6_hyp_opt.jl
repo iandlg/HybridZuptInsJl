@@ -90,8 +90,7 @@ for fold in 1:n_folds
         method=method,
         normalize_x=normalize_input,
         normalize_y=normalize_output,
-        ard=ard,
-        n_fold=1
+        ard=ard, n_fold=1
     )
 
     # Save parameters

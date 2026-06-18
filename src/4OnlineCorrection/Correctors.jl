@@ -34,12 +34,17 @@ function compute_feature(feature_type::FeatureType;
 )::Tuple{AbstractVector{T},Union{Nothing,AbstractMatrix{Float64}}} where T<:Real
     feature_fun = Dict{FeatureType,Function}(
         THREED_STEP => () -> ins_stride[1:3],
-        TWOD_STEP_DT => () -> [ins_stride[1:2]; ΔT],
+        TWOD_STEP_DT => () -> let
+            @info "got $feature_type" maxlog = 5
+            [ins_stride[1:2]; ΔT]
+        end,
         THREED_STEP_DT => () -> [ins_stride[1:3]; ΔT],
         AUG_STEP => () -> ins_stride,
         TWOD_STEP_YAW => () -> [ins_stride[1:2]; ins_stride[4]],
-        TWOD_STEP_DT_YAW => () -> [ins_stride[1:3]; ΔT; ins_stride[4]]
+        TWOD_STEP_DT_YAW => () -> [ins_stride[1:2]; ΔT; ins_stride[4]],
+        THREED_STEP_DT_YAW => () -> [ins_stride[1:3]; ΔT; ins_stride[4]],
     )[feature_type]
+    @info "$feature_type" maxlog = 5
 
     feature_cov_fun = Dict{FeatureType,Function}(
         THREED_STEP => () -> Σ_ins_stride[1:3, 1:3],
@@ -57,6 +62,11 @@ function compute_feature(feature_type::FeatureType;
             Σ_ins_stride[1:2, 1:2] zeros(Float64, (2, 1)) Σ_ins_stride[1:2, 4:4];
             zeros(Float64, (1, 2)) ΔT_var 0.0;
             Σ_ins_stride[4:4, 1:2] 0.0 Σ_ins_stride[4, 4]
+        ],
+        THREED_STEP_DT_YAW => () -> [
+            Σ_ins_stride[1:3, 1:3] zeros(Float64, (3, 1)) Σ_ins_stride[1:3, 4:4];
+            zeros(Float64, (1, 3)) ΔT_var 0.0;
+            Σ_ins_stride[4:4, 1:3] 0.0 Σ_ins_stride[4, 4]
         ],
     )[feature_type]
     return feature_fun(), isnothing(Σ_ins_stride) ? nothing : feature_cov_fun()
@@ -83,6 +93,7 @@ function normalize_feature!(
         THREED_STEP => Int[],
         TWOD_STEP_DT => Int[],
         THREED_STEP_DT => Int[],
+        THREED_STEP_DT_YAW => [5]
     )[feature_type]
 
     # Wrap angles after mean subtraction

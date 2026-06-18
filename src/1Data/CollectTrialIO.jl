@@ -26,37 +26,33 @@ function collect_trial_io(
     end
 end
 
-"""
-    collect_dataset(
-        data_dir::AbstractString,
-        trial_ids::AbstractVector{Int};
-        frame::ReferenceFrame=BODY,
-        feature_type::FeatureType=THREED_STEP
-    )::Tuple{CorrectionIO, Matrix{Float64}}
+# """
+#     collect_dataset(
+#         data_dir, trial_ids; frame=BODY, feature_type=THREED_STEP)::Vector{Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
 
-Collect and concatenate training IO across multiple trials.
-Failed trials are skipped with a warning.
-"""
-function collect_dataset(
-    data_dir::AbstractString,
-    trial_ids::AbstractVector{Int};
-    frame::ReferenceFrame=BODY,
-    feature_type::FeatureType=THREED_STEP
-)::Vector{Tuple{CorrectionIO,Matrix{Float64},Trajectory,Trajectory,Vector{Int}}}
+# Collect and concatenate training IO across multiple trials.
+# Failed trials are skipped with a warning.
+# """
+# function collect_dataset(
+#     data_dir::AbstractString,
+#     trial_ids::AbstractVector{Int};
+#     frame::ReferenceFrame=BODY,
+#     feature_type::FeatureType=THREED_STEP
+# )::Vector{Tuple{CorrectionIO,Matrix{Float64},Trajectory,Trajectory,Vector{Int}}}
 
-    results = map(trial_ids) do id
-        collect_trial_io(data_dir, id; frame=frame, feature_type=feature_type)
-    end
+#     results = map(trial_ids) do id
+#         collect_trial_io(data_dir, id; frame=frame, feature_type=feature_type)
+#     end
 
-    valid = filter(!isnothing, results)
-    isempty(valid) && error("No trials loaded successfully from $data_dir")
+#     valid = filter(!isnothing, results)
+#     isempty(valid) && error("No trials loaded successfully from $data_dir")
 
-    n_loaded = length(valid)
-    n_total = length(trial_ids)
-    n_loaded < n_total && @warn "$( n_total - n_loaded) / $n_total trials failed and were skipped"
-    @info "Loaded $n_loaded / $n_total trials"
-    return valid
-end
+#     n_loaded = length(valid)
+#     n_total = length(trial_ids)
+#     n_loaded < n_total && @warn "$( n_total - n_loaded) / $n_total trials failed and were skipped"
+#     @info "Loaded $n_loaded / $n_total trials"
+#     return valid
+# end
 
 """
     split_single_trial(

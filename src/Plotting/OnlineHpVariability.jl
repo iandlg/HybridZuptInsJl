@@ -50,3 +50,123 @@ function plot_hp_sensitivity(
     display(fig)
     return nothing
 end
+
+"""
+    plot_channel_boxplots(df; show_trials, save_path)
+
+Box-plot the full raw-value distribution per channel (one box = all samples across all
+trials), then overlay each trial's mean ± std as a scatter + error bar.
+"""
+function plot_channel_boxplots(
+    df::DataFrame;
+    show_trials::Bool=true,
+    save_path::Union{String,Nothing}=nothing,
+)
+    input_df = subset(df, :io_type => x -> x .== :input)
+    output_df = subset(df, :io_type => x -> x .== :output)
+
+    fig = Figure(resolution=(1000, 500))
+    ax_in = Axis(fig[1, 1], title="Input channels",
+        xlabel="Channel", ylabel="Value")
+    ax_out = Axis(fig[1, 2], title="Output channels",
+        xlabel="Channel", ylabel="Value")
+
+    # ------------------------------------------------------------------ #
+    function draw_panel!(ax, panel_df, box_color)
+
+        channels = sort(unique(panel_df.channel))
+        ax.xticks = channels
+
+        # ── 1. Box plot over ALL raw samples ──────────────────────────── #
+        boxplot!(ax, panel_df.channel, panel_df.value;
+            color=(box_color, 0.45),
+            mediancolor=:white,
+            whiskerwidth=0.5,
+            show_outliers=true,
+            outliercolor=(box_color, 0.3),
+        )
+
+        # ── 2. Per-trial mean ± std overlaid ──────────────────────────── #
+        if show_trials
+            trial_ids = sort(unique(panel_df.trial_id))
+
+            # One distinct color per trial drawn from the :tableau_10 palette.
+            palette = Makie.wong_colors()
+            trial_color = Dict(t => palette[mod1(i, length(palette))]
+                               for (i, t) in enumerate(trial_ids))
+
+            # Global mean per channel (across all trials) — used to gauge how
+            # "central" each trial point is and scale its jitter accordingly.
+            ch_global_mean = Dict(
+                ch => mean(panel_df.value[panel_df.channel.==ch])
+                for ch in channels
+            )
+            all_trial_means = [
+                mean(panel_df.value[panel_df.channel.==ch.&&panel_df.trial_id.==t])
+                for ch in channels for t in trial_ids
+            ]
+            mean_min = minimum(all_trial_means)
+            mean_max = maximum(all_trial_means)
+            range_mean = max(mean_max - mean_min, eps(Float64))
+
+            decay = 5.0   # jitter sharpness (3–10): higher → tighter near mean
+            max_jitter = 0.4   # half-width at maximum spread
+
+            for trial in trial_ids
+                tdf = subset(panel_df, :trial_id => x -> x .== trial)
+                color = trial_color[trial]
+
+                xs = Float64[]
+                mus = Float64[]
+                sigmas = Float64[]
+
+                for ch in channels
+                    vals = tdf.value[tdf.channel.==ch]
+                    isempty(vals) && continue
+
+                    mu = mean(vals)
+
+                    # Trials close to the channel mean get MORE jitter so they
+                    # don't pile up; distant outliers need less spread.
+                    d = clamp(abs(ch_global_mean[ch] - mu) / range_mean, 0.0, 1.0)
+                    jitter_factor = exp(-decay * d)
+                    jitter = (rand() - 0.5) * max_jitter * jitter_factor
+
+                    push!(xs, ch + jitter)
+                    push!(mus, mu)
+                    push!(sigmas, std(vals))
+                end
+
+                errorbars!(ax, xs, mus, sigmas;
+                    color=(color, 0.7),
+                    whiskerwidth=3,
+                    linewidth=1,
+                )
+                scatter!(ax, xs, mus;
+                    markersize=6,
+                    color=color,
+                    strokewidth=0,
+                )
+                # Trial number label just above each mean dot
+                for (x, mu) in zip(xs, mus)
+                    text!(ax, x, mu;
+                        text=string(trial),
+                        offset=(0, 6),
+                        align=(:right, :bottom),
+                        fontsize=10,
+                        color=color,
+                    )
+                end
+            end
+        end
+    end
+    # ------------------------------------------------------------------ #
+
+    draw_panel!(ax_in, input_df, :steelblue)
+    draw_panel!(ax_out, output_df, :coral)
+
+    linkyaxes!(ax_in, ax_out)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end

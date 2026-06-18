@@ -83,6 +83,9 @@ function Base.getindex(s::CorrectionIO, idx::AbstractVector{<:Integer})
     )
 end
 
+Base.size(s::CorrectionIO) = size(s.data)
+Base.size(s::CorrectionIO, d::Int) = size(s.data, d)
+
 function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std::Union{Nothing,Vector{Float64}}=nothing)
     n_channel = size(s.data, 1)
     length(data) == n_channel || throw("Wrong number of data channels.")

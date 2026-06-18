@@ -11,6 +11,7 @@ end
     AUG_STEP = 4
     TWOD_STEP_YAW = 5
     TWOD_STEP_DT_YAW = 6
+    THREED_STEP_DT_YAW = 7
 end
 
 const FEATURE_DIMS = Dict{FeatureType,Int}(
@@ -19,7 +20,8 @@ const FEATURE_DIMS = Dict{FeatureType,Int}(
     THREED_STEP_DT => 4,
     AUG_STEP => 4,
     TWOD_STEP_YAW => 3,
-    TWOD_STEP_DT_YAW => 4
+    TWOD_STEP_DT_YAW => 4,
+    THREED_STEP_DT_YAW => 5
 )
 
 function string_to_enum(::Type{T}, s::AbstractString) where T<:Enum
