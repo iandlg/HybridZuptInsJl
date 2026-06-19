@@ -6,7 +6,7 @@ import Optim, GaussianProcesses, GLMakie
 # ── Config ────────────────────────────────────────────────────────────────────
 data_key = "ANG2"
 FRAME = HybridZuptInsJl.HEADING
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP_DT_YAW
+FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_DT
 n_restarts_optimizer = 8
 log_kern_bounds = [[-3.0, -3.0], [3.0, 3.0]]
 log_noise_bounds = [[-4.0], [2.0]]
