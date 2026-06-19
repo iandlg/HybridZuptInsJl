@@ -630,3 +630,200 @@ function relinearize!(c::SplitHybridCorrector)
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     c.δx[:, c.i] .= 0.0
 end
+
+
+mutable struct SlamCorrector <: AbstractCorrector
+    t::AbstractVector{Float64}
+    pos::AbstractMatrix{Float64}
+    quat::AbstractMatrix{Float64}
+    δx::AbstractVector{Float64}
+    Σ::AbstractMatrix{Float64}
+    G::AbstractMatrix{Float64}
+    H::AbstractArray{Float64,3}
+    i::Int
+    F::AbstractMatrix{Float64}
+
+    # Corrector specific Arguments
+    params::HsgpParameters
+    β::AbstractVector{Float64}
+    ∂y∂z::AbstractMatrix{Float64}
+    Φ::AbstractMatrix{Float64}
+    per_dim_eigvals::AbstractMatrix{Float64}
+    σ_n::AbstractVector{Float64}
+end
+
+function SlamCorrector(N::Int, params::HsgpParameters, feature_type::FeatureType)::SlamCorrector
+    @assert N > 1 "Invalid number of "
+    return SlamCorrector(
+        zeros(Float64, N),                                  # t
+        zeros(Float64, 3, N),                               # pos
+        zeros(Float64, 4, N),                               # quat
+        zeros(Float64, 6 + 4 * params.m),                   # Σ
+        zeros(Float64, 6 + 4 * params.m, 6 + 4 * params.m), # G
+        zeros(Float64, 6 + 4 * params.m, 6),                # H
+        zeros(Float64, 4, 6 + 4 * params.m, N),             # 
+        1,
+        zeros(Float64, 6, 6),
+        params,
+        zeros(Float64, params.m * 4),
+        zeros(Float64, 4, params.d),
+        zeros(Float64, 4, params.m * 4),
+        zeros(Float64, params.m, params.d),
+        zeros(Float64, 4)
+    )
+end
+
+function initialize_corrector!(c::SlamCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+    c.t[1] = t
+    c.pos[:, 1] = pos_init
+    c.quat[:, 1] = quat_init
+    c.δx .= 0.0
+    c.Σ[1:6, 1:6] = Σpq_init
+    c.G[:, :, 1] = Matrix{Float64}(I, 6, 6)
+
+    # Initialize HSGP
+    c.per_dim_eigvals = calc_eigenvalues(c.params.LL, c.params.m, c.params.d)
+    psd = zeros(Float64, 4 * c.params.m)
+
+    for (idx, field) in enumerate(fieldnames(SeHyperparams))
+        psd[((idx-1)*c.params.m+1):(idx*c.params.m)] = power_spectral_density(
+            sqrt.(c.per_dim_eigvals),
+            getfield(c.params.hp, field)[2],
+            getfield(c.params.hp, field)[3]
+        )
+    end
+
+    c.σ_n = σ_n(c.params.hp)
+    c.β .= 0.0
+    c.∂y∂z .= 0.0
+    c.Φ .= 0.0
+    c.G .= Matrix{Float64}(I, 6, 6)
+    c.F .= 0.0
+    c.i = 1
+end
+
+function dynamic_update!(c::SlamCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+    c.i += 1
+    c.t[c.i] = t
+
+    R_prev = quat_to_matrix(c.quat[:, c.i-1])
+
+    # Nominal update
+    c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
+    c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
+    # c.β = c.β
+    c.G .= 0.0
+    c.G[1:3, 1:3] = R_prev
+    c.G[4:6, 4:6] = quat_to_matrix(c.quat[:, c.i])
+
+    c.F .= 0.0
+    c.F[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
+    c.F[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
+    c.F[1:3, 4:6] .= -skew(R_prev * Δp)
+
+    # Covariance update
+    c.δx[:, c.i] .= 0.0
+    c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
+end
+
+function stride_measurement_update!(c::SlamCorrector;
+    feature_type::FeatureType,
+    stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64},
+    feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64},
+    kwargs...)
+
+    # Normalise target and target covariance
+    stride_err -= c.params.output_stats[1] # remove output mean
+    stride_err ./= c.params.output_stats[2] # normalize with output std deviation
+    Σ_err = Diagonal(1 ./ c.params.output_stats[2]) * (Σ_err) * Diagonal(1 ./ c.params.output_stats[2])
+
+    # Compute input feature and normalize
+    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+
+    # ------------ Construct Feature Covariance ---------
+    for output_d in axes(c.∂y∂z, 1)
+        for input_d in axes(c.∂y∂z, 2)
+            c.∂y∂z[output_d, input_d] = dot(calc_eigenvectors_dx(
+                    reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
+                ), c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)])
+        end
+    end
+    Σ_err += c.∂y∂z * Σ_feature * c.∂y∂z'
+
+    # ---------- Construct measurement matrix H_update --------------
+    kron!(c.Φ, I(4), calc_eigenvectors(
+        reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
+    )
+
+    α = tr(Diagonal(c.σ_n .^ 2)) / tr(Σ_err)
+    c.β, c.Σβ = measurement_update(
+        c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err # Diagonal(noise_vect .^ 2)
+    )
+
+    return
+end
+
+
+function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+    θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
+    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+    # @info "Measurement matrix H" c.H[:, :, c.i]
+    # @info "Covariance matrix before meas upd" c.Σ[:, :, c.i]
+
+    c.δx[:, c.i], c.Σ = measurement_update(
+        c.δx[:, c.i], c.Σ,
+        [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
+        c.H[:, :, c.i],
+        Σy
+    )
+end
+
+function learned_measurement_update!(c::SlamCorrector;
+    feature_type::FeatureType,
+    feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
+    kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+
+    # Normalise estimated feature and feature covariance
+    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+
+    for output_d in axes(c.∂y∂z, 1)
+        for input_d in axes(c.∂y∂z, 2)
+            c.∂y∂z[output_d, input_d:input_d] = calc_eigenvectors_dx(
+                reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
+            ) * c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)]
+        end
+    end
+
+    kron!(c.Φ, I(4), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
+
+    # Compute prediction and prediction covariance
+    pred = c.Φ * c.β
+    Σ_pred = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
+
+    # Denormalise prediction and prediction covariance
+    pred = pred .* c.params.output_stats[2] .+ c.params.output_stats[1]
+    pred[4] = atan(sin(pred[4]), cos(pred[4]))
+    Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
+
+    # Rotate to body frame 
+    pred = R_aug_wl * pred
+    Σ_pred = R_aug_wl * Σ_pred * R_aug_wl'
+
+    c.δx[:, c.i], c.Σ = measurement_update(
+        c.δx[:, c.i], c.Σ,
+        pred,
+        c.H[:, :, c.i],
+        Σ_pred
+    )
+    return pred, diag(Σ_pred)
+end
+
+function relinearize!(c::SlamCorrector)
+    c.pos[:, c.i] += c.δx[1:3, c.i]
+    c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
+    c.δx[:, c.i] .= 0.0
+end

@@ -158,6 +158,13 @@ function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     )
 end
 
+function σ_n(hp::SeHyperparams)
+    σ_n = Vector{Float64}(undef, 4)
+    for (idx, field) in enumerate(fieldnames(SeHyperparams))
+        σ_n[idx] = getfield(hp, field)[1]
+    end
+    return σ_n
+end
 # Helper: create a new SeHyperparams with one element changed
 function modify_sehp(hp::SeHyperparams, group::Symbol, idx::Int, new_val::Float64)
     new_vec = copy(getfield(hp, group))
