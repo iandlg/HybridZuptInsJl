@@ -15,7 +15,7 @@ compute corrections and apply them, then record the 2‑D horizontal position RM
 - `gt_traj_aligned`: Ground truth trajectory sampled at the same timestamps.
 - `segs`: Step‑segment indices into the trajectories.
 - `hyperparams_vec`: Vector of `SeHyperparams` (length = number of folds).
-  Each `SeHyperparams` contains `yaw`, `pos_1`, `pos_2`, `pos_3` fields,
+  Each `SeHyperparams` contains `pos_1`, `pos_2`, `pos_3`, `yaw` fields,
   each being a 3‑vector [`σ_f`, `length_scale`, `σ_n`] for that output.
 - `ref_frame`: Reference frame for step vectors (default: `BODY`).
 

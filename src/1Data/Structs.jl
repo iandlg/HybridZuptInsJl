@@ -83,6 +83,9 @@ function Base.getindex(s::CorrectionIO, idx::AbstractVector{<:Integer})
     )
 end
 
+Base.size(s::CorrectionIO) = size(s.data)
+Base.size(s::CorrectionIO, d::Int) = size(s.data, d)
+
 function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std::Union{Nothing,Vector{Float64}}=nothing)
     n_channel = size(s.data, 1)
     length(data) == n_channel || throw("Wrong number of data channels.")
@@ -95,23 +98,56 @@ function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std
     s.data = hcat(s.data, data)
 end
 
+"""
+    concatenate_io(ios::Vector{CorrectionIO})::CorrectionIO
+
+Combine multiple `CorrectionIO` objects into one.
+Time stamps are replaced by a simple 1:total_steps index to guarantee
+strictly increasing order after concatenation.
+All inputs must have the same number of data channels and consistent
+`data_std` presence (all must have it or all must lack it).
+"""
+function concatenate_io(ios::Vector{CorrectionIO})
+    isempty(ios) && error("Cannot concatenate an empty vector of CorrectionIO")
+    n_chan = size(first(ios).data, 1)
+    total_steps = sum(io -> length(io.t), ios)
+    t = collect(1.0:total_steps)               # Float64 to match existing
+
+    # Check consistency
+    has_std = !isnothing(first(ios).data_std)
+    for io in ios
+        size(io.data, 1) == n_chan || error("Channel count mismatch in concatenated IO")
+        if has_std != !isnothing(io.data_std)
+            error("Inconsistent data_std: all CorrectionIO must either have or lack data_std")
+        end
+    end
+
+    all_data = reduce(hcat, [io.data for io in ios])
+    all_std = has_std ? reduce(hcat, [io.data_std for io in ios]) : nothing
+
+    return CorrectionIO(t, all_data, all_std)
+end
+
 struct SeHyperparams
     pos_1::Vector{Float64}  # for x position
     pos_2::Vector{Float64}  # for y position
     pos_3::Vector{Float64}  # for z position
-    yaw::Vector{Float64}    # [σ_f, length_scale, σ_n] for yaw
+    yaw::Vector{Float64}    # [σ_n, length_scale (can be multiple elements), σ_f] for yaw
 
-    # Inner constructor to enforce length 3
     function SeHyperparams(pos_0, pos_1, pos_2, yaw)
-        for v in (pos_0, pos_1, pos_2, yaw)
-            if length(v) != 3
-                throw(ArgumentError("Each hyperparameter vector must have exactly 3 elements"))
-            end
-        end
-        new(Vector{Float64}(pos_0), Vector{Float64}(pos_1), Vector{Float64}(pos_2), Vector{Float64}(yaw))
+        p0 = Vector{Float64}(pos_0)
+        p1 = Vector{Float64}(pos_1)
+        p2 = Vector{Float64}(pos_2)
+        y = Vector{Float64}(yaw)
+
+        all(>(0), p0) || throw(ArgumentError("All elements of pos_0 must be positive, got $p0"))
+        all(>(0), p1) || throw(ArgumentError("All elements of pos_1 must be positive, got $p1"))
+        all(>(0), p2) || throw(ArgumentError("All elements of pos_2 must be positive, got $p2"))
+        all(>(0), y) || throw(ArgumentError("All elements of yaw must be positive, got $y"))
+
+        new(p0, p1, p2, y)
     end
 end
-
 
 function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     SeHyperparams(
@@ -119,6 +155,18 @@ function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
         Float64.(d["pos_2"]),
         Float64.(d["pos_3"]),
         Float64.(d["yaw"]),
+    )
+end
+
+# Helper: create a new SeHyperparams with one element changed
+function modify_sehp(hp::SeHyperparams, group::Symbol, idx::Int, new_val::Float64)
+    new_vec = copy(getfield(hp, group))
+    new_vec[idx] = new_val
+    return SeHyperparams(
+        group == :pos_1 ? new_vec : hp.pos_1,
+        group == :pos_2 ? new_vec : hp.pos_2,
+        group == :pos_3 ? new_vec : hp.pos_3,
+        group == :yaw ? new_vec : hp.yaw
     )
 end
 
@@ -200,7 +248,6 @@ function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
 
     output_stats = haskey(d, "output_stats") && !isnothing(d["output_stats"]) ?
                    [Float64.(d["output_stats"][1]), Float64.(d["output_stats"][2])] : nothing
-    @show output_stats
     HsgpParameters(
         hp,
         d["d"],
@@ -209,6 +256,24 @@ function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
         input_stats=input_stats,
         output_stats=output_stats
     )
+end
+
+function basecopy(
+    base::HsgpParameters;
+    new_hp=nothing,
+    new_input_stats=nothing,
+    new_output_stats=nothing,
+    new_LL=nothing,
+    new_d=nothing,
+    new_m=nothing
+)
+    hp = isnothing(new_hp) ? base.hp : new_hp
+    d = isnothing(new_d) ? base.d : new_d
+    m = isnothing(new_m) ? base.m : new_m
+    LL = isnothing(new_LL) ? base.LL : new_LL
+    ins = isnothing(new_input_stats) ? base.input_stats : new_input_stats
+    outs = isnothing(new_output_stats) ? base.output_stats : new_output_stats
+    return HsgpParameters(hp, d, m, LL; input_stats=ins, output_stats=outs)
 end
 
 function to_json(
@@ -224,14 +289,6 @@ function to_json(
         JSON.print(f, envelope, 4)
     end
 end
-
-# function from_json(filename::AbstractString)
-#     raw = JSON.parsefile(filename)
-#     metadata = Dict(raw["metadata"])
-#     saved_at = raw["saved_at"]
-#     params = HsgpParameters(Dict(raw["params"]))
-#     return params, metadata, saved_at
-# end
 
 function from_json(::Type{T}, filename::AbstractString) where {T}
     raw = JSON.parsefile(filename)

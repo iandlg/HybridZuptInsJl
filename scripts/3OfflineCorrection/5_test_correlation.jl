@@ -4,11 +4,12 @@ using OrderedCollections, DataFrames, Statistics
 
 
 # Parameters (same as in 2_batch_correction.jl)
-data_key = "ANG"
+data_key = "ANG2"
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
 )[data_key]
-trial_id = 15
+trial_id = 5
 
 frames = [
     HybridZuptInsJl.BODY,

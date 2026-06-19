@@ -42,19 +42,6 @@ function hybrid_zupt_aided_ins_gp(
     n_train_cutoff = floor(Int, train_ratio * N)
     gt_available = [n <= n_train_cutoff for n in 1:N]
 
-    true_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "output" => Vector{Float64}[], "t" => Float64[]
-    )
-    pred_outputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "output" => Vector{Float64}[], "t" => Float64[]
-    )
-    training_inputs = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "input" => Vector{Float64}[], "t" => Float64[]
-    )
-    training_targets = Dict{String,Union{Vector{Vector{Float64}},Vector{Float64}}}(
-        "output" => Vector{Float64}[], "t" => Float64[]
-    )
-
     seg_start = 2
     seg_end = N
     step_detector = StepDetector()
@@ -73,9 +60,9 @@ function hybrid_zupt_aided_ins_gp(
     # Noise level taken from params.hp as before (field order = output_names).
     function make_gp(out_idx::Int)
         field = Symbol(output_names[out_idx])
-        log_sf = log(getfield(params.hp, field)[1])   # signal std 
+        log_sf = log(getfield(params.hp, field)[3])   # signal std 
         log_ls = log(getfield(params.hp, field)[2])   # length scale
-        log_noise = log(getfield(params.hp, field)[3]) # noise std
+        log_noise = log(getfield(params.hp, field)[1]) # noise std
         GaussianProcesses.GPE(; mean=GaussianProcesses.MeanZero(), kernel=GaussianProcesses.SE(log_ls, log_sf), logNoise=log_noise)
     end
 
@@ -89,7 +76,7 @@ function hybrid_zupt_aided_ins_gp(
     sigma_pos_gt = 1e-2
     sigma_ψ_gt = 1e-3
     sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt)
-    sigma_dt = 1e-5
+    sigma_dt = 1e-4
 
     R_aug_GT_nb = zeros(Float64, (p, p))
     R_aug_GT_nb[p, p] = 1.0
@@ -98,7 +85,7 @@ function hybrid_zupt_aided_ins_gp(
 
     training_inputs = CorrectionIO(d_feat, false)
     training_outputs = CorrectionIO(p, true)
-
+    pred_outputs = CorrectionIO(p, true)
 
     while true
         ΔP = zeros(Float64, 9, 9)
@@ -154,7 +141,7 @@ function hybrid_zupt_aided_ins_gp(
         )
 
         # ── Per-step correction ───────────────────────────────────────────────
-        if length(step_seg) > 1
+        if length(step_seg) > 1 && seg_end != N
             prev_step = step_seg[end-1]
             curr_step = step_seg[end]
 
@@ -192,22 +179,14 @@ function hybrid_zupt_aided_ins_gp(
             feature_norm = (feature_raw .- params.input_stats[1]) ./ params.input_stats[2]
 
             # ── Save diagnostics (target + std) ──────────────────────────────
-            marg_std = sqrt.(diag(target_cov_norm))
-            push!(true_outputs["t"], inertial.t[prev_step])
-            push!(true_outputs["output"], target)
-            if !haskey(true_outputs, "output_std")
-                true_outputs["output_std"] = Vector{Float64}[]
-            end
-            push!(true_outputs["output_std"], marg_std)
+            append_io!(training_inputs, inertial.t[prev_step], feature_norm)
+            append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(target_cov_norm)))
 
             # ── GP training update (replaces beta/P_beta measurement_update) ─
             if correct && gt_available[prev_step] && gt_available[curr_step]
                 # Accumulate normalised observations
                 X_train = hcat(X_train, feature_norm)       # d_feat × n
                 Y_train = hcat(Y_train, target_norm)        # p      × n
-
-                append_io!(training_inputs, inertial.t[prev_step], feature_norm)
-                append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(target_cov_norm)))
 
                 # Refit all GPs on the growing dataset
                 for i in 1:p
@@ -222,8 +201,7 @@ function hybrid_zupt_aided_ins_gp(
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
-                    vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) -
-                    vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]),
+                    vcat(gt_traj.pos[:, curr_step], yaw_gt_seg[end]) - vcat(x[[1, 2, 3], curr_step], yaw_ins_seg[end]),
                     H_gt,
                     Diagonal(sigma_gt .^ 2)
                 )
@@ -259,6 +237,8 @@ function hybrid_zupt_aided_ins_gp(
                     pred_mean_norm[i] = μ[1]
                     pred_var_norm[i] = σ²[1]
                 end
+                # -------- Save prediction --------------
+                append_io!(pred_outputs, inertial.t[prev_step], pred_mean_norm, sqrt.(pred_var_norm))
 
                 # Denormalise
                 pred_estim = pred_mean_norm .* params.output_stats[2] .+ params.output_stats[1]
@@ -282,14 +262,6 @@ function hybrid_zupt_aided_ins_gp(
                     dx[:, curr_step],
                     quat[:, curr_step]
                 )
-
-                # Save prediction
-                push!(pred_outputs["t"], inertial.t[prev_step])
-                push!(pred_outputs["output"], y_estim)
-                if !haskey(pred_outputs, "output_std")
-                    pred_outputs["output_std"] = Vector{Float64}[]
-                end
-                push!(pred_outputs["output_std"], sqrt.(diag(y_cov)))
             end
         end
 
@@ -308,16 +280,6 @@ function hybrid_zupt_aided_ins_gp(
     R_nb_final = euler_to_matrix(x[7:9, :])
     zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
-    # Trim the trailing spurious entry (same logic as original)
-    for d in (true_outputs, pred_outputs)
-        for k in keys(d)
-            if d[k] isa Vector && !isempty(d[k])
-                d[k] = d[k][1:end-1]
-            end
-        end
-    end
 
-    return zupt, zupt_ins_traj, step_seg,
-    CorrectionIO(true_outputs), CorrectionIO(pred_outputs),
-    training_inputs, training_outputs
+    return zupt, zupt_ins_traj, step_seg, training_outputs, pred_outputs, training_inputs
 end

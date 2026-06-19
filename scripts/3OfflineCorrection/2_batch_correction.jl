@@ -3,11 +3,11 @@ using .HybridZuptInsJl;
 using GLMakie, JSON, OrderedCollections
 import Dates, Optim
 
-data_key = "ANG"
+data_key = "ANG2"
 trial_id = 15
 FRAME = HybridZuptInsJl.BODY
-FEATURE_TYPE = HybridZuptInsJl.THREED_STEP_DT
-n_restarts_optimizer = 4
+FEATURE_TYPE = HybridZuptInsJl.THREED_STEP
+n_restarts_optimizer = 1
 kern_lo = [-3.0, -3.0]
 kern_hi = [3.0, 3.0]
 log_kern_bounds = [kern_lo, kern_hi]
@@ -15,10 +15,11 @@ log_noise_bounds = [[-4.0], [2.0]]
 method_key = "NM"
 normalize_input = true
 normalize_output = true
-ard = true
+ard = false
 
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
 )[data_key]
 method = Dict{String,Any}(
     "CG" => Optim.ConjugateGradient(),
@@ -31,7 +32,8 @@ ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_al
 )
 
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
-    ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
+    ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE
+)
 
 gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections;
@@ -108,6 +110,7 @@ HybridZuptInsJl.to_json(joinpath(outdir, filename), hyperparameters;
         "rmse" => rmses,
         "method" => method_key,
         "normalize_input" => normalize_input,
-        "normalize_output" => normalize_output
+        "normalize_output" => normalize_output,
+        "ard" => ard
     )
 )

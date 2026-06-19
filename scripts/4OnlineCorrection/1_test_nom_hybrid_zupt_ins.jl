@@ -3,26 +3,28 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 20
+hsgp_p_key = 22
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
     21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
-    3 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json"
+    22 => "out/3OfflineCorrection/3_HsgpResults/ANG215_BODY_THREED_STEP_2026-06-06T17:33:50.999.json",
+    30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json"
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)[meta["data_key"]]
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
+)[data_key]
 
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
 train_ratio = 0.4

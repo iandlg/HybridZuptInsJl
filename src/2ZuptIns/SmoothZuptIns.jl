@@ -1,16 +1,12 @@
-mutable struct StepDetector
+abstract type AbstractSegmentDetector end
+
+mutable struct StepDetector <: AbstractSegmentDetector
     zupt_counter::Int
     no_zupt_counter::Int
     reached_no_zupt_counter::Bool
 end
 StepDetector() = StepDetector(0, 0, false)
 
-"""
-    update!(det::StepDetector, zupt::Bool) -> Bool
-
-Update the detector state with a new zero-velocity flag.
-Returns `true` when a segment end should be triggered.
-"""
 function update!(det::StepDetector, zupt::Bool)
     if zupt
         det.zupt_counter += 1
@@ -20,13 +16,59 @@ function update!(det::StepDetector, zupt::Bool)
         det.zupt_counter = 0
     end
 
-    if det.zupt_counter == 10 && det.reached_no_zupt_counter
+    if det.zupt_counter == 5 && det.reached_no_zupt_counter
         det.reached_no_zupt_counter = false
         return true
     end
 
-    if det.no_zupt_counter == 50
+    if det.no_zupt_counter == 15
         det.reached_no_zupt_counter = true
+    end
+    return false
+end
+
+mutable struct CovarianceSegmentDetector <: AbstractSegmentDetector
+    c::Int               # frame counter after threshold crossing
+    thrsld::Float64      # threshold on velocity covariance sum
+    counter_limit::Int   # number of frames below threshold to end segment
+end
+
+"""
+    CovarianceSegmentDetector(; thrsld=0.03, counter_limit=30)
+
+Constructor with default values matching the original MATLAB snippet.
+"""
+function CovarianceSegmentDetector(; thrsld::Float64=0.03, counter_limit::Int=30)
+    return CovarianceSegmentDetector(0, thrsld, counter_limit)
+end
+
+"""
+    update!(det::CovarianceSegmentDetector, cov_sum_prev::Float64,
+            cov_sum_curr::Float64) -> Bool
+
+Implements the segmentation decision:
+
+1. If a segment has started (`c > 0`), increment the counter.
+2. If the velocity covariance sum crosses from above `thrsld` to below it **and** no segment is active (`c == 0`), start a new segment (`c = 1`).
+3. If the counter reaches `counter_limit`, end the segment and reset `c = 0`.
+Returns `true` when a segment end should be triggered.
+"""
+function update!(
+    det::CovarianceSegmentDetector,
+    cov_sum_prev::Float64,
+    cov_sum_curr::Float64
+)
+    if det.c > 0
+        det.c += 1
+    end
+
+    if (cov_sum_prev > det.thrsld) && (cov_sum_curr < det.thrsld) && (det.c == 0)
+        det.c = 1
+    end
+
+    if det.c == det.counter_limit
+        det.c = 0
+        return true
     end
     return false
 end
@@ -89,6 +131,7 @@ function smoothed_zupt_aided_ins(
     seg_start = 2          # first index to process (1-based, offset for n-1)
     seg_end = N
     step_detector = StepDetector()
+    # step_detector = CovarianceSegmentDetector(; thrsld=0.025, counter_limit=10)
     step_seg = Int[]
 
     while true
@@ -121,8 +164,13 @@ function smoothed_zupt_aided_ins(
             # Enforce symmetry
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
 
+            # inside the loop, right after you have P[:,:,n]:
+            cov_sum_curr = P[4, 4, n] + P[5, 5, n] + P[6, 6, n]
+            cov_sum_prev = P[4, 4, n-1] + P[5, 5, n-1] + P[6, 6, n-1]   # available because n≥2
+
             # Segmentation decision
             if update!(step_detector, zupt[n])
+                # if update!(step_detector, cov_sum_prev, cov_sum_curr)
                 push!(step_seg, n)
                 seg_end = n
                 break

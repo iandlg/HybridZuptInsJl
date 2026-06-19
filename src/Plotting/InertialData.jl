@@ -12,8 +12,8 @@ Plot accelerometer and gyroscope signals from an `InertialData` object.
 """
 function plot_inertial_data(id::InertialData)
     t = id.t
-    acc = accel(id)
-    gyr = gyro(id)
+    acc = id.u[1:3, :]
+    gyr = id.u[4:6, :]
 
     fig = Figure(size=(900, 600))
 
@@ -33,8 +33,6 @@ function plot_inertial_data(id::InertialData)
 
     return fig
 end
-
-using GLMakie  # or CairoMakie, depending on your backend
 
 function plot_inertialdata_and_stepsegm(inertial::InertialData, segs::Vector{Int})
     # Create figure and axis with grid

@@ -52,13 +52,13 @@ function plot_regression_results(
     if !isnothing(true_data)
         for (plot_idx, row) in enumerate(1:n_dim)
             lines!(axes[plot_idx], true_data.t, true_data.data[row, :];
-                color=:black, linewidth=0.9, label="True")
+                color=:black, linewidth=0.9, label="Target")
 
             if !isnothing(true_data.data_std)
                 μ = true_data.data[row, :]
                 σ = true_data.data_std[row, :]
                 band!(axes[plot_idx], true_data.t, μ .- σ, μ .+ σ;
-                    color=(:black, 0.15), label="True ±σ")
+                    color=(:black, 0.15), label="Target ±σ")
             end
         end
     end
@@ -73,16 +73,19 @@ function plot_regression_results(
             # ── RMSE on overlapping interval ──────────────────────────
             rmse = fill(NaN, 4)
             if !isnothing(true_data)
-                gt_trim, pred_trim = truncate_to_overlap(true_data, pred)
-                is_compatible(gt_trim, pred_trim) ||
-                    throw(ArgumentError(
-                        "Series '$method_name' is not compatible with ground truth " *
-                        "(different lengths or timestamps differ > 1e-9). " *
-                        "Truncate first or resample."))
+                res = truncate_to_overlap(true_data, pred)
+                if !isnothing(res)
+                    gt_trim, pred_trim = res
+                    is_compatible(gt_trim, pred_trim) ||
+                        throw(ArgumentError(
+                            "Series '$method_name' is not compatible with ground truth " *
+                            "(different lengths or timestamps differ > 1e-9). " *
+                            "Truncate first or resample."))
 
-                for (plot_idx, row) in enumerate(1:n_dim)
-                    rmse[plot_idx] = sqrt(mean(
-                        (pred_trim.data[row, :] .- gt_trim.data[row, :]) .^ 2))
+                    for (plot_idx, row) in enumerate(1:n_dim)
+                        rmse[plot_idx] = sqrt(mean(
+                            (pred_trim.data[row, :] .- gt_trim.data[row, :]) .^ 2))
+                    end
                 end
             end
 

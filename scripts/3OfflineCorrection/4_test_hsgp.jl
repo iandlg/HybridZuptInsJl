@@ -3,30 +3,34 @@ using .HybridZuptInsJl;
 using Statistics
 using OrderedCollections, Dates
 
-hyp_key = 10
+hyp_key = 100
 hyp_path = Dict{Int,String}(
     10 => "out/3OfflineCorrection/2_VariabilityResults/PY_ANG15_BODY_THREED_STEP.json",
     20 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_THREED_STEP_2026-05-13T14:14:24.485.json",
     30 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:06:28.867.json",
+    31 => "out/3OfflineCorrection/2_VariabilityResults/ANG215_BODY_THREED_STEP_2026-06-06T17:22:12.377.json",
     40 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:03.913.json",
-    41 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-22T11:18:28.679.json"
+    41 => "out/3OfflineCorrection/2_VariabilityResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-22T11:18:28.679.json",
+    100 => "out/3OfflineCorrection/6_HypOpt/ANG2/BODY-TWOD_STEP_DT/ANG2_BODY_TWOD_STEP_DT_best_fold3_2026-06-07T12:30:49.054.json",
 )[hyp_key]
 
 hp, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.SeHyperparams, hyp_path)
-
+data_key = meta["data_key"]
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)[meta["data_key"]]
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
+)[data_key]
 normalize_input = meta["normalize_input"]
 normalize_output = meta["normalize_output"]
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
-
-m = 500
-margin = 1.7
+trial_id = 13
+m = 200
+margin = 1.5
+z_thresh = 10.0
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, meta["trial_id"]
+    data_dir, trial_id; sim_config=HybridZuptInsJl.InsConfig(calibration_distance_m=2.0)
 )
 
 fig_3d_traj = HybridZuptInsJl.plot_trajectory_3d(ins_traj_aligned[segs[1:20]], gt_traj_aligned[segs[1:20]])
@@ -35,17 +39,23 @@ fig_rmse = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned[segs], gt_traj_al
 true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
     ins_traj_aligned, gt_traj_aligned, segs; ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
-    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hp;
-    n_restarts_optimizer=0)
-
+@info "---- Computing Static Corrections ----"
 static_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_static_corrections, hp)
 
+@info "---- Computing GP Corrections ----"
+gp_corrections, hyperparameters = HybridZuptInsJl.compute_corrections(
+    input_feature, true_outputs, HybridZuptInsJl.compute_gp_corrections, hp;
+    n_restarts_optimizer=0,
+    normalize_x=normalize_input,
+    normalize_y=normalize_output,
+    ard=get(meta, "ard", false)
+)
+@info "---- Computing HSGP Corrections ----"
 hsgp_corrections, _ = HybridZuptInsJl.compute_corrections(
     input_feature, true_outputs, HybridZuptInsJl.compute_hsgp_corrections, hp;
-    m=m, margin=margin, feature_type=FEATURE_TYPE
-)
+    m=m, margin=margin, feature_type=FEATURE_TYPE, normalize_x=normalize_input,
+    normalize_y=normalize_output)
 
 # Apply corrections
 true_output_traj = HybridZuptInsJl.apply_corrections(
@@ -113,7 +123,6 @@ output_stats = normalize_output ? [
 ] : [fill(0.0, 4), fill(1.0, 4)]
 
 feature_scaled = (input_feature .- input_stats[1]) ./ input_stats[2]
-z_thresh = 4.0
 # LL = margin * maximum(abs, feature_scaled, dims=2)[:]
 
 mask = all(feature_scaled .<= z_thresh, dims=1)[:]   # (n,)

@@ -10,7 +10,7 @@ L = [1, 2, 3]
 display(eig_per_dim)
 
 
-x = [1 2 3; 4 5 6]
+x = Float64.([1 2 3; 4 5 6])
 eig_vects = HybridZuptInsJl.calc_eigenvectors(x, L, eig_per_dim)
 display(eig_vects)
 
