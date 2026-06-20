@@ -248,7 +248,7 @@ function hybrid_zupt_aided_ins(
                 # Construct Measurement matrix H_gt 
                 H_gt = [
                     I zeros(Float64, (3, 6));
-                    zeros(Float64, (1, 6)) jacobian_∂θ3_∂δθ_right(quat[:, curr_step])'
+                    zeros(Float64, (1, 6)) ∂θ3_∂δθ_right(quat[:, curr_step])'
                 ]
                 Δθ = atan(sin(yaw_gt_seg[end] - yaw_ins_seg[end]), cos(yaw_gt_seg[end] - yaw_ins_seg[end]))
                 # @info "Measured yaw error" round(Δθ; digits=3)

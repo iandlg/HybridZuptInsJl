@@ -21,6 +21,7 @@ include("0Util/IO.jl")
 include("0Util/Util.jl")
 include("0Util/HSGP.jl")
 include("0Util/KalmanFilter.jl")
+include("0Util/Derivatives.jl")
 
 include("1Data/TimeSeries.jl")
 include("1Data/Trajectory.jl")
