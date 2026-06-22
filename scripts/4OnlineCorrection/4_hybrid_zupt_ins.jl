@@ -24,7 +24,7 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 15 # meta["trial_id"]
+trial_id = 14 # meta["trial_id"]
 m = 300
 margin = meta["margin"]
 train_ratio = 0.4
@@ -58,24 +58,24 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 
 io_data = OrderedDict()
 
-# default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
-# zupt, step_seg, def_corr_traj, io_data["Default"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
-#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
+zupt, step_seg, def_corr_traj, io_data["Default"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-# static_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
-# zupt, step_seg, stat_corr_traj, io_data["Static"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, static_corr;
-#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+static_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
+zupt, step_seg, stat_corr_traj, io_data["Static"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, static_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-# splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p, FEATURE_TYPE)
-# zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
-#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p, FEATURE_TYPE)
+zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
 slamHsgp_corr = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_p)
-zupt, step_seg, hsgp1_corr_traj, io_data["SlamHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, slamHsgp_corr_traj, io_data["SlamHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
@@ -89,7 +89,8 @@ end
 trajs = OrderedDict(
     "zupt ins" => def_corr_traj,
     "static correction" => stat_corr_traj,
-    "split hsgp correction" => hsgp1_corr_traj
+    "split hsgp correction" => hsgp1_corr_traj,
+    "slam hsgp" => slamHsgp_corr_traj
 )
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])

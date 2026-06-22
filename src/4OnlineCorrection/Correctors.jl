@@ -808,8 +808,8 @@ function stride_measurement_update!(c::SlamCorrector;
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
 
     # Construct Hθ
-    c.H[4, 4:6] = ∂θ3_∂δθ_left(c.quat[:, c.i])
-
+    # c.H[4, 4:6] = ∂θ3_∂δθ_left(c.quat[:, c.i])
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
     # Add GP contribution to δp and δθ
     c.H[:, 1:6] += c.∂y∂z * ∂feature_∂δpδθ(feature_type; σ_output=c.params.output_stats[2], R_aug_wl=R_aug_wl, q_curr=c.quat[:, c.i])
 
@@ -846,11 +846,19 @@ function learned_measurement_update!(c::SlamCorrector;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
-    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
-    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
 
-    # Normalise estimated feature and feature covariance
+    # ------ Construct Pseudo Measurement ------
+    # Normalise input feature
     normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+
+    # Compute basis function values
+    c.ϕ = calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
+
+    # Compute prediction estimate
+    pred = Vector{Float64}(undef, 4)
+    for i in eachindex(pred)
+        pred[i] = c.params.output_stats[2][i] * dot(c.ϕ, c.β[((i-1)*c.params.m+1):(i*c.params.m)]) + c.params.output_stats[1][i]
+    end
 
     for output_d in axes(c.∂y∂z, 1)
         for input_d in axes(c.∂y∂z, 2)
@@ -860,26 +868,31 @@ function learned_measurement_update!(c::SlamCorrector;
         end
     end
 
-    kron!(c.Φ, I(4), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
+    Σ_pred = Matrix{Float64}(undef, 4, 4)
+    for row in axes(Σ_pred, 1)
+        for col in axes(Σ_pred, 2)
+            Σ_pred[row:row, col:col] = c.ϕ * c.Σ[((row-1)*c.params.m+7):(row*c.params.m+6), ((col-1)*c.params.m+7):(col*c.params.m+6)] * c.ϕ'
+        end
+    end
+    # kron!(view(c.H, 1:4, 7:(6+c.params.m*4)), I(4), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
 
     # Compute prediction and prediction covariance
-    pred = c.Φ * c.β
-    Σ_pred = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
+    # Σ_pred = c.H[1:4, 7:end] * c.Σ[7:end, 7:end] * c.H[1:4, 7:end]' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
+    # Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
+    Σ_pred += c.∂y∂z * Σ_feature * c.∂y∂z' # input uncertainty
+    Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2]) # Denormalise
 
-    # Denormalise prediction and prediction covariance
-    pred = pred .* c.params.output_stats[2] .+ c.params.output_stats[1]
-    pred[4] = atan(sin(pred[4]), cos(pred[4]))
-    Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
+    # Update measurement matrix H_update
+    c.H[:, :] .= 0.0
+    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
 
-    # Rotate to body frame 
-    pred = R_aug_wl * pred
-    Σ_pred = R_aug_wl * Σ_pred * R_aug_wl'
 
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
+    c.δx, c.Σ = measurement_update(
+        c.δx, c.Σ,
         pred,
-        c.H[:, :, c.i],
-        Σ_pred
+        c.H,
+        Diagonal(Σ_pred) .* 1e-10
     )
     return pred, diag(Σ_pred)
 end
@@ -890,6 +903,6 @@ function relinearize!(c::SlamCorrector)
     c.β += c.δx[7:end]
     c.δx .= 0.0
 
-    c.Σ[1:6, 7:end] .= 0.0
-    c.Σ[7:end, 1:6] .= 0.0
+    # c.Σ[1:6, 7:end] .= 0.0
+    # c.Σ[7:end, 1:6] .= 0.0
 end

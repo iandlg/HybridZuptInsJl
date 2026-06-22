@@ -40,7 +40,8 @@ function ∂featureΔT_∂δpδθ(::Type{T})::AbstractVector{T} where T<:Real
 end
 
 function ∂featureΔθ3_∂δpδθ(R::AbstractMatrix{T}, σ_output_θ::T)::AbstractVector{T} where T<:Real
-    return [zeros(T, 1, 3) ∂θ3_∂δθ_left(R) ./ σ_output_θ]
+    # return [zeros(T, 1, 3) ∂θ3_∂δθ_left(R) ./ σ_output_θ]
+    return [zeros(T, 1, 3) [0.0, 0.0, 1.0] ./ σ_output_θ]
 end
 
 function ∂featureΔθ3_∂δpδθ(q::AbstractVector{T}, σ_output_θ::T)::AbstractVector{T} where T<:Real
