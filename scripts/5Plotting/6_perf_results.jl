@@ -32,10 +32,10 @@ FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
 trial_ids = HybridZuptInsJl.list_trial_ids(data_dir)
-train_ratios = [0.1, 0.2, 0.3, 0.45, 0.6, 0.75, 0.9]
+train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 correctors = OrderedDict{String,HybridZuptInsJl.AbstractCorrector}(
     "Default" => HybridZuptInsJl.DefaultCorrector(300),
-    "Static" => HybridZuptInsJl.StaticCorrector(300),
+    "Static" => HybridZuptInsJl.StaticCorrectorV2(300),
     "Split" => HybridZuptInsJl.SplitHybridCorrector(round(Int, 300), hsgp_p),
     "Slam" => HybridZuptInsJl.SlamCorrector(round(Int, 300), hsgp_p)
 )
@@ -54,7 +54,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections, Dates
 using Dates, CSV, DataFrames
 dirname = "out/4OnlineCorrection/4PerformanceResults"
-df = CSV.read("out/4OnlineCorrection/4PerformanceResults/results_ANG2_HEADING_TWOD_STEP_DT_2026-06-26T11:08:31.063.csv", DataFrame)
+df = CSV.read("out/4OnlineCorrection/4PerformanceResults/results_ANG2_HEADING_TWOD_STEP_DT_2026-06-26T16:02:48.787.csv", DataFrame)
 time = string(Dates.now())
 
 with_theme(theme_ggplot2()) do

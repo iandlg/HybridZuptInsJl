@@ -58,13 +58,59 @@ function grid_from_dict(data::AbstractDict)::ParamGrid
     return ParamGrid(group_names, max_idx, specs)
 end
 
+# function make_rmse_evaluator(
+#     data_dir::String,
+#     trial_id::Int,
+#     train_ratio::Float64,
+#     feature_type::FeatureType,
+#     ref_frame::ReferenceFrame,
+#     m::Union{Nothing,Int}=nothing
+# )::Function
+
+#     # 1. Align INS and GT (same for all hyperparameter variations)
+#     ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated =
+#         compute_aligned_ins_trajectory(data_dir, trial_id)
+
+#     # 2. Initial state from aligned trajectory
+#     x_init = vcat(
+#         ins_traj_aligned.pos[:, 1],
+#         ins_traj_aligned.vel[:, 1],
+#         matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
+#     )
+
+#     # 3. Return the evaluator closure
+#     function rmse_evaluator(hsgp_params::HsgpParameters)::Float64
+#         # Optionally force m to be consistent (if needed)
+#         hsgp_params = HsgpParameters(
+#             hsgp_params.hp, hsgp_params.d, isnothing(m) ? hsgp_params.m : m, hsgp_params.LL;
+#             input_stats=hsgp_params.input_stats,
+#             output_stats=hsgp_params.output_stats
+#         )
+
+#         # Run online correction
+#         _, hsgp_ins_traj, segs, _, _, _, _ =
+#             hybrid_zupt_aided_ins(
+#                 inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_params;
+#                 x_init=x_init,
+#                 train_ratio=train_ratio,
+#                 feature_type=feature_type,
+#                 ref_frame=ref_frame
+#             )
+
+#         return rmse(hsgp_ins_traj[segs], gt_traj_aligned[segs])[end] # final RMSE
+#     end
+
+#     return rmse_evaluator
+# end
+
+
 function make_rmse_evaluator(
     data_dir::String,
     trial_id::Int,
     train_ratio::Float64,
     feature_type::FeatureType,
     ref_frame::ReferenceFrame,
-    m::Union{Nothing,Int}=nothing
+    m::Union{Nothing,Int}=nothing,
 )::Function
 
     # 1. Align INS and GT (same for all hyperparameter variations)
@@ -78,7 +124,12 @@ function make_rmse_evaluator(
         matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
     )
 
-    # 3. Return the evaluator closure
+    # 3. Training phase 
+    N = length(inertial_updated)
+    n_train_cutoff = floor(Int, train_ratio * N)
+    gt_available = [n <= n_train_cutoff for n in 1:N]
+
+    # 4. Return the evaluator closure
     function rmse_evaluator(hsgp_params::HsgpParameters)::Float64
         # Optionally force m to be consistent (if needed)
         hsgp_params = HsgpParameters(
@@ -86,23 +137,18 @@ function make_rmse_evaluator(
             input_stats=hsgp_params.input_stats,
             output_stats=hsgp_params.output_stats
         )
+        slamHsgp_corr = SlamCorrector(round(Int, 300), hsgp_params)
+        _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
+            inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
+            x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)
 
         # Run online correction
-        _, hsgp_ins_traj, segs, _, _, _, _ =
-            hybrid_zupt_aided_ins(
-                inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_params;
-                x_init=x_init,
-                train_ratio=train_ratio,
-                feature_type=feature_type,
-                ref_frame=ref_frame
-            )
 
-        return rmse(hsgp_ins_traj[segs], gt_traj_aligned[segs])[end] # final RMSE
+        return rmse(slamHsgp_corr_traj, gt_traj_aligned[step_seg])[end] # final RMSE
     end
 
     return rmse_evaluator
 end
-
 function make_hp_param_grid(base_hp::SeHyperparams, groups::Vector{Symbol};
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
     n_steps::Int=9)::Tuple{Vector{ParamSpec},ParamGrid}

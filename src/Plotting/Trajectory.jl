@@ -117,8 +117,9 @@ function plot_position_rmse(
     for (key, traj) in trajs
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
         cum_rmse = rmse(traj, gt_traj)
+        Δrmse = cum_rmse[end] - cum_rmse[1]
         t_shifted = traj.t[1:n] .- traj.t[1]
-        label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", cum_rmse[end]/total_distance(gt_traj)))"
+        label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", Δrmse/total_distance(gt_traj)))"
         lines!(ax, t_shifted, cum_rmse, label=label)
     end
 

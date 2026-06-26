@@ -179,7 +179,7 @@ function hybrid_zupt_aided_insv2(
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 1e1
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
             )
 
         elseif gt_available[curr_step]
@@ -188,7 +188,7 @@ function hybrid_zupt_aided_insv2(
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 1e1
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
             )
         else
             # @info "No GT available"
