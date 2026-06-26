@@ -48,6 +48,8 @@ dirname = "out/4OnlineCorrection/4PerformanceResults"
 time = string(Dates.now())
 CSV.write(joinpath(dirname, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).csv"), df)
 ##
+include("../../src/HybridZuptInsJl.jl");
+
 using .HybridZuptInsJl;
 using GLMakie, OrderedCollections, Dates
 using Dates, CSV, DataFrames
@@ -56,17 +58,17 @@ df = CSV.read("out/4OnlineCorrection/4PerformanceResults/results_ANG2_HEADING_TW
 time = string(Dates.now())
 
 with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"))
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), corrector_names=["Default", "Static", "Split", "Slam"])
 end
 
 with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"))
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), corrector_names=["Default", "Static", "Split", "Slam"])
 end
 
 with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false)
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false, corrector_names=["Default", "Static", "Split", "Slam"])
 end
 
 with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false)
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false, corrector_names=["Default", "Static", "Split", "Slam"])
 end
