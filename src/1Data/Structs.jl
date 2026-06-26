@@ -312,3 +312,5 @@ function from_json(::Type{T}, filename::AbstractString) where {T}
     end
     return obj, metadata, saved_at
 end
+
+σ_n(p::HsgpParameters) = σ_n(p.hp)

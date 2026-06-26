@@ -47,7 +47,9 @@ test_id = setdiff(trial_ids, train_id)
 dataset = HybridZuptInsJl.collect_dataset(data_dir, trial_ids;
     frame=FRAME, feature_type=FEATURE_TYPE)
 
-df = HybridZuptInsJl.to_dataframe(dataset)
+df = HybridZuptInsJl.io_dataframe(dataset)
+df = transform(groupby(df, :trial_id), :t => (x -> length(unique(x))) => :trial_step_count)
+
 HybridZuptInsJl.plot_channel_boxplots(df; show_trials=true, save_path=joinpath(combo_dir, "channel_io_stats.png"))
 ##
 trial_id = 15

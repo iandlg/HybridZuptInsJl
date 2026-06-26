@@ -113,40 +113,61 @@ function plot_position_rmse(
         title="Position RMSE over time",
         xgridvisible=true)
 
-    # -- plot all trajectories --
+    # -- plot all trajectories, shifting time to start at 0 --
     for (key, traj) in trajs
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
-        cum_rmse = rmse(traj, gt_traj)  # presumably computes cumulative RMSE
+        cum_rmse = rmse(traj, gt_traj)
+        t_shifted = traj.t[1:n] .- traj.t[1]
         label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", cum_rmse[end]/total_distance(gt_traj)))"
-        lines!(ax, traj.t[1:n], cum_rmse, label=label)
+        lines!(ax, t_shifted, cum_rmse, label=label)
     end
-    axislegend(ax)
+
+    axislegend(ax; position=:lt)
 
     # -- add a twin x-axis for index (top) --
     if show_index_ticks
-        # pick the first trajectory to get a representative time vector
         first_traj = first(values(trajs))
         n = min(size(first_traj.pos, 2), size(gt_traj.pos, 2))
-        t_vec = first_traj.t[1:n]
+        t_shifted = first_traj.t[1:n] .- first_traj.t[1]
 
-        # choose a reasonable number of index ticks (e.g., ~10)
         step = max(1, n ÷ 10)
         idx_ticks = 1:step:n
-        time_ticks = t_vec[idx_ticks]
+        time_ticks = t_shifted[idx_ticks]
 
-        # create the top axis, linked to the main axis
         ax_top = Axis(fig[1, 1];
             xaxisposition=:top,
-            yaxisposition=:right,        # avoids overlapping y-axis
+            yaxisposition=:right,
             ylabelvisible=false,
+            yticksvisible=false,
+            yticklabelsvisible=false,
             xlabel="Sample index",
-            xticks=(time_ticks, string.(idx_ticks)),
-            xticklabelrotation=0,
-        )
+            xticks=(time_ticks, string.(collect(idx_ticks))),
+            xticklabelrotation=0)
+
         linkxaxes!(ax, ax_top)
     end
 
     return fig
+end
+
+function plot_position_rmse(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory,
+    train_ratio::Float64;
+    show_index_ticks::Bool=true
+)
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
+    N = length(gt_traj)
+    n_train_cutoff = floor(Int, train_ratio * N)
+
+    truncated_trajs = OrderedDict{String,Trajectory}()
+    for (name, traj) in trajs
+        @assert length(traj) == N "Incompatible trajectory $name with ground truth"
+        truncated_trajs[name] = traj[n_train_cutoff:end]
+    end
+    plot_position_rmse(truncated_trajs, gt_traj[n_train_cutoff:end]; show_index_ticks=show_index_ticks)
 end
 
 
@@ -427,6 +448,8 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     return fig
 end
+
+using CairoMakie
 function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
     current_time = times[current_idx]
     ages = current_time .- times[1:current_idx]
@@ -455,7 +478,7 @@ function make_ring_data(
     alpha_fn=x -> 1f0 - x,
     z_phase::Float32=0.0f0
 )
-    ff = footfall_idxs[footfall_idxs.≤current_idx]
+    ff = footfall_idxs[footfall_idxs .≤ current_idx]
     isempty(ff) && return (Point3f[], RGBAf[])
 
     ages = times[current_idx] .- times[ff]
@@ -493,6 +516,7 @@ function make_ring_data(
     return (pts, colors)
 end
 
+
 function animate_trajectory(
     traj::Trajectory, segs::Vector{Int};
     lifetime::Float64=1.0,
@@ -501,11 +525,9 @@ function animate_trajectory(
     padding::Float64=0.3,
     scale::Float32=2.1f0
 )
-    set_theme!(theme_black())
-
-    inferno = cgrad(:inferno)
-
-    current_color = get(inferno, 0.95)
+    inferno = cgrad(:viridis)
+    curr_color_frac = 0.9f0
+    current_color = get(inferno, curr_color_frac)
     current_color_rgba = RGBAf(current_color.r, current_color.g, current_color.b, 1f0)
 
     positions = traj.pos
@@ -520,7 +542,7 @@ function animate_trajectory(
         trail_idxs, _ = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
         length(trail_idxs) < 2 && return Point3f[]
         pts = Point3f[]
-        for k in 1:length(trail_idxs)-1
+        for k in 1:(length(trail_idxs)-1)
             push!(pts,
                 Point3f(positions[:, trail_idxs[k]]...),
                 Point3f(positions[:, trail_idxs[k+1]]...))
@@ -531,11 +553,11 @@ function animate_trajectory(
     trail_colors = @lift begin
         trail_idxs, trail_ages = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
         length(trail_idxs) < 2 && return RGBAf[]
-        map(1:length(trail_idxs)-1) do k
+        map(1:(length(trail_idxs)-1)) do k
             # Use the older end of each segment to determine color
             frac = Float32(trail_ages[k+1] / lifetime)
             # Sample inferno: newest near 0.95, oldest near 0.0
-            cmap_pos = 0.95f0 * (1f0 - frac)
+            cmap_pos = curr_color_frac * (1f0 - frac)
             c = get(inferno, cmap_pos)
             α = clamp(1f0 - frac, 0f0, 1f0)
             RGBAf(c.r, c.g, c.b, α)
@@ -566,7 +588,7 @@ function animate_trajectory(
     azimuth = @lift deg2rad(30 + 30 * sin(2π * $current_idx / (framerate * 30)))
 
     # ── Figure & plots ────────────────────────────────────────────────────────
-    fig = Figure(size=(800, 600))
+    fig = Figure(size=(1000, 800))
     ax = Axis3(fig[1, 1]; aspect=:data, title="Trajectory Animation")
     limits!(ax,
         minimum(positions[1, :]) - padding, maximum(positions[1, :]) + padding,
@@ -587,7 +609,7 @@ function animate_trajectory(
     )
     connect!(ax.azimuth, azimuth)
 
-    record(fig, filepath, 1:N; framerate=framerate) do i
+    record(fig, filepath, 1:N; framerate=framerate, profile="high", pixel_format="yuv420p") do i
         current_idx[] = i
     end
 

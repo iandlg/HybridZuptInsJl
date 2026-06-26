@@ -10,22 +10,27 @@ Plot accelerometer and gyroscope signals from an `InertialData` object.
 # Returns
 - A `Plots.Plot` object with two subplots.
 """
-function plot_inertial_data(id::InertialData)
+function plot_inertial_data(id::InertialData; start=1, stop=nothing)
     t = id.t
-    acc = id.u[1:3, :]
-    gyr = id.u[4:6, :]
+    N = length(t)
+    @show N
+    start = min(start, N)
+    stop = isnothing(stop) ? N : min(stop, N)
+    t = t[start:stop]
+    acc = id.u[1:3, start:stop]
+    gyr = id.u[4:6, start:stop]
 
-    fig = Figure(size=(900, 600))
+    fig = Figure(size=(1000, 600))
 
     # Accelerometer axes
-    ax1 = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Acceleration (m/s²)", title="Accelerometer")
+    ax1 = Axis(fig[2, 1], xlabel="Time (s)", ylabel="Acceleration (m/s²)", title="External Specific Force", titlesize=24)
     lines!(ax1, t, acc[1, :], label="Acc X", color=:red)
     lines!(ax1, t, acc[2, :], label="Acc Y", color=:green)
     lines!(ax1, t, acc[3, :], label="Acc Z", color=:blue)
     axislegend(ax1)
 
     # Gyroscope axes
-    ax2 = Axis(fig[2, 1], xlabel="Time (s)", ylabel="Angular rate (rad/s)", title="Gyroscope")
+    ax2 = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Angular rate (rad/s)", title="Angular Velocity", titlesize=24)
     lines!(ax2, t, gyr[1, :], label="Gyro X", color=:red)
     lines!(ax2, t, gyr[2, :], label="Gyro Y", color=:green)
     lines!(ax2, t, gyr[3, :], label="Gyro Z", color=:blue)
@@ -59,7 +64,7 @@ function plot_inertialdata_and_stepsegm(inertial::InertialData, segs::Vector{Int
 
     # Add scatter (drawn first, so line will cover it if overlapping)
     scatter!(ax, x_scatter, y_scatter;
-        marker='x',
+        marker=('x'),
         color=:red,
         markersize=5,
         strokewidth=1

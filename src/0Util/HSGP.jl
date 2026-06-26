@@ -97,6 +97,9 @@ function calc_eigenvalues(L::AbstractVector{<:Real}, m::Int, d::Int)::AbstractMa
     return selected
 end
 
+function calc_eigenvalues(L::Real, m)::AbstractMatrix{Float64}
+    calc_eigenvalues([L], m, 1)
+end
 """
     calc_eigenvectors(Xs::AbstractMatrix{<:Real}, L::AbstractVector{<:Real},
                       per_dim_eigvals::AbstractMatrix{<:Real}) -> Matrix{Float64}

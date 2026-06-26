@@ -102,7 +102,7 @@ function hybrid_zupt_aided_insv2(
         dx_smooth[:, seg_end] = dx[:, seg_end]
         P_smooth[:, :, seg_end] = P[:, :, seg_end]
 
-        for n in seg_end-1:-1:seg_start
+        for n in (seg_end-1):-1:seg_start
             A = P[:, :, n] * F_store[:, :, n]' / P_timeupd[:, :, n+1]
             dx_smooth[:, n] = dx[:, n] + A * (dx_smooth[:, n+1] - dx_timeupd[:, n+1])
             P_smooth[:, :, n] = P[:, :, n] +
@@ -217,8 +217,10 @@ function collect_trial_io_online(
     data_dir::AbstractString,
     trial_id::Int;
     frame::ReferenceFrame=BODY,
-    feature_type::FeatureType=THREED_STEP
-)::Union{Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}},Nothing}
+    feature_type::FeatureType=THREED_STEP,
+    train_ratio::Float64=0.0,
+    corrector::AbstractCorrector=DefaultCorrector(300)
+)::Optional{Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
     try
         ins_traj_aligned, gt_traj_aligned, _, _, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
             data_dir, trial_id
@@ -230,25 +232,25 @@ function collect_trial_io_online(
             matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
         )
 
-        gt_available = [n <= 0 for n in 1:N]
-        default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
-        _, step_seg, def_corr_traj, output_data = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-            inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
+        n_train_cutoff = floor(Int, train_ratio * N)
+        gt_available = [n <= n_train_cutoff for n in 1:N]
+        _, step_seg, corr_traj, output_data = hybrid_zupt_aided_insv2(
+            inertial_updated, sim_config_updated, gt_traj_aligned, corrector;
             x_init=x_init, gt_available=gt_available, ref_frame=frame, feature_type=feature_type)
-        return output_data["target"], output_data["input"], def_corr_traj, gt_traj_aligned, step_seg
+
+        return output_data["target"], output_data["input"], corr_traj, gt_traj_aligned, step_seg
     catch e
         @warn "Skipping trial $trial_id in $data_dir" exception = e
         return nothing
     end
 end
-
+# First method: original behaviour (no train_ratios / correctors)
 function collect_dataset(
     data_dir::AbstractString,
     trial_ids::AbstractVector{Int};
     frame::ReferenceFrame=BODY,
-    feature_type::FeatureType=THREED_STEP
+    feature_type::FeatureType=THREED_STEP,
 )::Dict{Int,Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
-
     valid_dict = Dict{Int,Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}()
     failures = Int[]
 
@@ -262,7 +264,60 @@ function collect_dataset(
     end
 
     isempty(valid_dict) && error("No trials loaded successfully from $data_dir")
+    n_loaded = length(valid_dict)
+    n_total = length(trial_ids)
+    if !isempty(failures)
+        @warn "$(length(failures)) / $n_total trials failed and were skipped. Failed IDs: $failures"
+    end
+    @info "Loaded $n_loaded / $n_total trials"
+    return valid_dict
+end
 
+# Second method: iterate over training ratios × correctors
+function collect_dataset(
+    data_dir::AbstractString,
+    trial_ids::AbstractVector{Int},
+    train_ratios::AbstractVector{<:Real},
+    correctors::AbstractDict{<:AbstractString,<:AbstractCorrector};
+    frame::ReferenceFrame=BODY,
+    feature_type::FeatureType=THREED_STEP,
+)
+    # Outer dict: trial_id -> inner dict
+    # Inner key: (corrector_name, train_ratio) -> result tuple
+    valid_dict = Dict{Int,Dict{Tuple{String,Float64},Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}}()
+    failures = Int[]
+
+    for id in trial_ids
+        trial_results = Dict{Tuple{String,Float64},
+            Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}()
+        any_success = false
+
+        for (corr_name, corr_template) in correctors
+            for ratio in train_ratios
+                # deepcopy to prevent mutation across runs
+                corr = deepcopy(corr_template)
+                res = collect_trial_io_online(
+                    data_dir, id;
+                    frame=frame,
+                    feature_type=feature_type,
+                    train_ratio=ratio,
+                    corrector=corr,
+                )
+                if !isnothing(res)
+                    trial_results[(corr_name, ratio)] = res
+                    any_success = true
+                end
+            end
+        end
+
+        if any_success
+            valid_dict[id] = trial_results
+        else
+            push!(failures, id)
+        end
+    end
+
+    isempty(valid_dict) && error("No trials loaded successfully from $data_dir")
     n_loaded = length(valid_dict)
     n_total = length(trial_ids)
     if !isempty(failures)
@@ -273,7 +328,7 @@ function collect_dataset(
 end
 
 """
-    to_dataframe(valid::Vector) -> DataFrame
+    io_dataframe(valid::Vector) -> DataFrame
 
 Collect every raw time-series sample for each input/output channel across all trials.
 Returns a long-form DataFrame with columns:
@@ -283,7 +338,7 @@ Returns a long-form DataFrame with columns:
   `t`         - timestamp of the sample (from `CorrectionIO.t`)
   `value`     - individual sample value
 """
-function to_dataframe(
+function io_dataframe(
     valid::Dict{Int,Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
 )
     @assert length(valid) > 0 "No trials in dataset."
@@ -316,11 +371,40 @@ function to_dataframe(
     return rows
 end
 
-# """
-#     from_dataframe(df)::CorrectionIO
+function result_performance(res::Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}})
+    _, _, corr_traj, gt_traj, step_seg = res
+    rmse = rmse(corr_traj, gt_traj[step_seg])[end]
+    rmse_rate = rmse / total_distance(gt_traj[step_seg])
+    return rmse, rmse_rate
+end
 
-# Takes df from a single trial and outputs input output CorrectionIO objects
-# """
-# function from_dataframe(df::Dataframe)::CorrectionIO
+function result_performance(res::Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}, train_ratio::Float64)
+    _, _, corr_traj, gt_traj, step_seg = res
+    N_step = length(corr_traj)
+    n_train_cutoff = floor(Int, train_ratio * N_step)
 
-# end
+    _rmse = rmse(corr_traj[n_train_cutoff:end], gt_traj[step_seg][n_train_cutoff:end])[end]
+    return _rmse, _rmse / total_distance(gt_traj[step_seg][n_train_cutoff:end])
+end
+
+function performance_dataframe(
+    dataset::Dict{Int,Dict{Tuple{String,Float64},Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}}
+)::DataFrame
+    df = DataFrame(
+        trial_id=Int[],
+        corrector=String[],
+        train_ratio=Float64[],
+        rmse=Float64[],
+        rmse_rate=Float64[],
+    )
+
+    for (id, inner_dict) in dataset
+        for ((corr_name, ratio), res) in inner_dict
+            _rmse, rmse_rate = result_performance(res, ratio)
+
+            push!(df, (id, corr_name, ratio, _rmse, rmse_rate))
+        end
+    end
+
+    return df
+end

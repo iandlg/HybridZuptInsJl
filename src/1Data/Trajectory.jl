@@ -23,6 +23,7 @@ Base.getindex(tr::Trajectory, mask) = Trajectory(
     tr.R_nb[:, :, mask],
     tr.vel === nothing ? nothing : tr.vel[:, mask]
 )
+Base.lastindex(tr::Trajectory) = length(tr)
 
 function Trajectory(dir::AbstractString, id::Int)
     src = resolve_source(dir)
@@ -38,12 +39,12 @@ function read_raw_trajectory(::ANG, dir::AbstractString, id::Int)
     # Drop NaN rows
     df = dropmissing(df)
     # Strictly increasing timestamps
-    mask = [true; df[2:end, 1] .> df[1:end-1, 1]]
+    mask = [true; df[2:end, 1] .> df[1:(end-1), 1]]
     df = df[mask, :]
     # Filter zero pos/rot
     pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
     rot_ok = vec(sum(Matrix(df[:, 6:14]) .^ 2, dims=2) .!= 0)
-    df = df[pos_ok.&rot_ok, :]
+    df = df[pos_ok .& rot_ok, :]
     data = Matrix(df)
     N = size(data, 1)
     t = data[:, 1] ./ 1000
@@ -79,7 +80,7 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
         path, DataFrame;
         header=false,
         # skipto=2,
-        delim=' ',
+        delim=(' '),
         ignorerepeated=true,   # treat multiple spaces as one delimiter
         missingstring=""
     )
@@ -88,12 +89,12 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     df = dropmissing(df)
 
     # Strictly increasing timestamps
-    mask = [true; df[2:end, 1] .> df[1:end-1, 1]]
+    mask = [true; df[2:end, 1] .> df[1:(end-1), 1]]
     df = df[mask, :]
     # Filter zero pos/rot
     pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
     rot_ok = vec(sum(Matrix(df[:, 6:14]) .^ 2, dims=2) .!= 0)
-    df = df[pos_ok.&rot_ok, :]
+    df = df[pos_ok .& rot_ok, :]
     data = Matrix(df)
     N = size(data, 1)
     t = Vector{Float64}(data[:, 1] .* 1e-3)
@@ -226,8 +227,8 @@ end
 function step_vectors_heading(tr::Trajectory, step_seg::Vector{Int})
     seg = step_seg
     N = length(seg) - 1
-    eu = matrix_to_euler(tr.R_nb)[:, seg[1:end-1]]      # (3, N_steps)
-    Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:end-1]]
+    eu = matrix_to_euler(tr.R_nb)[:, seg[1:(end-1)]]      # (3, N_steps)
+    Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:(end-1)]]
     steps = similar(Δpos)
     for k in 1:N
         eu_nh = [0, 0, eu[3, k]]

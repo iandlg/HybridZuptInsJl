@@ -350,7 +350,7 @@ mutable struct StaticCorrector <: AbstractCorrector
     δx::AbstractMatrix{Float64}
     Σ::AbstractMatrix{Float64}
     G::AbstractMatrix{Float64}
-    H::AbstractArray{Float64,3}
+    H::AbstractMatrix{Float64}
     i::Int
     F::AbstractMatrix{Float64}
 
@@ -361,9 +361,16 @@ end
 function StaticCorrector(N::Int)::StaticCorrector
     @assert N > 1 "Invalid number of "
     return StaticCorrector(
-        zeros(Float64, N), zeros(Float64, 3, N), zeros(Float64, 4, N), zeros(Float64, 10, N),
-        zeros(Float64, 10, 10), zeros(Float64, 10, 6), zeros(Float64, 4, 10, N), 1, zeros(Float64, 10, 10),
-        zeros(Float64, 4, N)
+        zeros(Float64, N),          # t
+        zeros(Float64, 3, N),       # pos
+        zeros(Float64, 4, N),       # quat
+        zeros(Float64, 10, N),      # δx
+        zeros(Float64, 10, 10),     # Σ
+        zeros(Float64, 10, 6),      # G
+        zeros(Float64, 4, 10),      # H
+        1,                          # i
+        zeros(Float64, 10, 10),     # F
+        zeros(Float64, 4, N)        # stride_err_mean
     )
 end
 
@@ -374,9 +381,10 @@ function initialize_corrector!(c::StaticCorrector; t::Float64, pos_init::Abstrac
     c.stride_err_mean[:, 1] .= 0.0
     c.δx[:, 1] .= 0.0
     c.Σ[1:6, 1:6] .= Σpq_init
-    c.Σ[7:10, 7:10] .= Matrix{Float64}(I, 4, 4) * 1e2
-    c.Σ[10, 10] *= 1e2
+    c.Σ[7:10, 7:10] = Matrix{Float64}(I, 4, 4) .* 1e2
+    # c.Σ[10, 10] *= 1e2
     c.G .= Matrix{Float64}(I, 10, 6)
+    c.H .= 0.0
     c.F .= 0.0
     c.i = 1
 end
@@ -410,28 +418,26 @@ end
 function stride_measurement_update!(c::StaticCorrector;
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)
-    c.H[1:3, 1:3, c.i] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
-    # c.H[4, 4:6, c.i] = ∂θ3_∂δθ_left(c.quat[:, c.i])
-    c.H[4, 6, c.i] = 1.0
-    c.H[1:4, 7:10, c.i] = Matrix{Float64}(I, 4, 4)
+    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[:, 7:end] = Matrix{Float64}(I, 4, 4)
 
     stride_err -= c.stride_err_mean[:, c.i]
-    stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
+    # stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
 
     c.δx[:, c.i], c.Σ = measurement_update(
         c.δx[:, c.i], c.Σ,
         stride_err,
-        c.H[:, :, c.i],
+        c.H,
         Σ_err
     )
     return
 end
 
 function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
-    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
-    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
-    # c.H[4, 4:6, c.i] = ∂θ3_∂δθ_left(c.quat[:, c.i])
-    c.H[1:4, 7:10, c.i] .= 0.0
+    c.H[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[:, 7:end] .= 0.0
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
     # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
     # @info "Measurement matrix H" c.H[:, :, c.i]
@@ -440,35 +446,34 @@ function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector
     c.δx[:, c.i], c.Σ = measurement_update(
         c.δx[:, c.i], c.Σ,
         vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
-        c.H[:, :, c.i],
+        c.H,
         Σy
     )
 end
 
 function learned_measurement_update!(c::StaticCorrector;
     R_aug_wl, kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
-    c.H[1:3, 1:3, c.i] = R_aug_wl[1:3, 1:3]'
-    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
-    # c.H[4, 4:6, c.i] = ∂θ3_∂δθ_left(c.quat[:, c.i])
-    c.H[1:4, 7:10, c.i] .= 0.0
+    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[:, 7:end] .= 0.0
 
     c.δx[:, c.i], c.Σ = measurement_update(
         c.δx[:, c.i], c.Σ,
         c.stride_err_mean[:, c.i],
-        c.H[:, :, c.i],
-        Diagonal(fill(1e-5, 4) .^ 2)
+        c.H,
+        c.Σ[7:end, 7:end]
     )
-    return c.stride_err_mean[:, c.i], fill(1e-5, 4) .^ 2
+    return c.stride_err_mean[:, c.i], diag(c.Σ[7:end, 7:end])
 end
 
 function relinearize!(c::StaticCorrector)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
-    c.stride_err_mean[:, c.i] += c.δx[7:10, c.i]
-    c.δx[:, c.i] .= 0.0
+    c.stride_err_mean[:, c.i] += c.δx[7:end, c.i]
+    # c.δx[:, c.i] .= 0.0
 
     c.Σ[1:6, 7:10] .= 0.0
-    c.Σ[7:10, 1:6] .= 0.0
+    c.Σ[7:10, 1:6] .= 0.0 # zero cross covs
 end
 
 mutable struct SplitHybridCorrector <: AbstractCorrector
@@ -492,21 +497,21 @@ mutable struct SplitHybridCorrector <: AbstractCorrector
     σ_n::AbstractVector{Float64}
 end
 
-function SplitHybridCorrector(N::Int, params::HsgpParameters, feature_type::FeatureType)::SplitHybridCorrector
+function SplitHybridCorrector(N::Int, params::HsgpParameters)::SplitHybridCorrector
     @assert N > 1 "Invalid number of "
     return SplitHybridCorrector(
-        zeros(Float64, N),
-        zeros(Float64, 3, N),
-        zeros(Float64, 4, N),
-        zeros(Float64, 6, N),
-        zeros(Float64, 6, 6),
-        zeros(Float64, 6, 6),
-        zeros(Float64, 4, 6, N),
-        1,
-        zeros(Float64, 6, 6),
-        params,
-        zeros(Float64, params.m * 4),
-        zeros(Float64, params.m * 4, params.m * 4),
+        zeros(Float64, N),                              # t
+        zeros(Float64, 3, N),                           # pos
+        zeros(Float64, 4, N),                           # quat
+        zeros(Float64, 6, N),                           # δx
+        zeros(Float64, 6, 6),                           # Σ
+        zeros(Float64, 6, 6),                           # G
+        zeros(Float64, 4, 6, N),                        # H
+        1,                                              # i
+        zeros(Float64, 6, 6),                           # F
+        params,                                         # params
+        zeros(Float64, params.m * 4),                   # β
+        zeros(Float64, params.m * 4, params.m * 4),     # Σβ
         zeros(Float64, 4, params.d),
         zeros(Float64, 4, params.m * 4),
         zeros(Float64, params.m, params.d),
@@ -671,7 +676,7 @@ end
 function relinearize!(c::SplitHybridCorrector)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
-    c.δx[:, c.i] .= 0.0
+    # c.δx[:, c.i] .= 0.0
 end
 
 
@@ -813,16 +818,17 @@ function stride_measurement_update!(c::SlamCorrector;
     # Add GP contribution to δp and δθ
     c.H[:, 1:6] += c.∂y∂z * ∂feature_∂δpδθ(feature_type; σ_output=c.params.output_stats[2], R_aug_wl=R_aug_wl, q_curr=c.quat[:, c.i])
 
+    D = Diagonal(σ_n(c.params) .^ 2)
+    α = tr(D) / tr(Σ_err)
+
     c.δx, c.Σ = measurement_update(
         c.δx, c.Σ,
         stride_err,
         c.H,
-        Σ_err
+        (D + α * Σ_err)
     )
-
     return
 end
-
 
 function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
@@ -892,7 +898,7 @@ function learned_measurement_update!(c::SlamCorrector;
         c.δx, c.Σ,
         pred,
         c.H,
-        Diagonal(Σ_pred) .* 1e-10
+        Σ_pred
     )
     return pred, diag(Σ_pred)
 end
