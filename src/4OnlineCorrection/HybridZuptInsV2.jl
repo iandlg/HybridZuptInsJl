@@ -231,7 +231,7 @@ function collect_trial_io_online(
             ins_traj_aligned.vel[:, 1],
             matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
         )
-
+        ## Split this
         n_train_cutoff = floor(Int, train_ratio * N)
         gt_available = [n <= n_train_cutoff for n in 1:N]
         _, step_seg, corr_traj, output_data = hybrid_zupt_aided_insv2(

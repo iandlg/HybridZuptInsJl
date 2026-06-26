@@ -29,13 +29,16 @@ function plot_corrector_boxplots(
     df::DataFrame,
     metric::Symbol;
     save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    corrector_names::Optional{AbstractVector{<:AbstractString}}=nothing
 )
     if !(metric in (:rmse, :rmse_rate))
         throw(ArgumentError("metric must be :rmse or :rmse_rate"))
     end
 
     ratios = sort(unique(df.train_ratio))
-    correctors = sort(unique(df.corrector))
+    correctors = isnothing(corrector_names) ? sort(unique(df.corrector)) : corrector_names
+    @show correctors #  
     n_correctors = length(correctors)
 
     colors = Makie.wong_colors()
@@ -74,23 +77,26 @@ function plot_corrector_boxplots(
                 boxplot!(ax, x_positions, clean_vals,
                     width=box_width,
                     color=corr_to_color[corr],
-                    label=corr in labeled ? nothing : corr)
+                    label=corr in labeled ? nothing : corr,
+                    show_outliers=show_outliers)
                 push!(labeled, corr)
 
                 # Identify and annotate outliers using Tukey fences
-                q1, q3 = quantile(clean_vals, [0.25, 0.75])
-                iqr = q3 - q1
-                lower_fence = q1 - 1.5 * iqr
-                upper_fence = q3 + 1.5 * iqr
+                if show_outliers
+                    q1, q3 = quantile(clean_vals, [0.25, 0.75])
+                    iqr = q3 - q1
+                    lower_fence = q1 - 1.5 * iqr
+                    upper_fence = q3 + 1.5 * iqr
 
-                for (v, tid) in zip(clean_vals, clean_ids)
-                    if v < lower_fence || v > upper_fence
-                        text!(ax, x_pos, v,
-                            text=string(tid),
-                            fontsize=12,
-                            align=(:center, :bottom),
-                            offset=(6, 4),  # nudge label just above the point
-                        )
+                    for (v, tid) in zip(clean_vals, clean_ids)
+                        if v < lower_fence || v > upper_fence
+                            text!(ax, x_pos, v,
+                                text=string(tid),
+                                fontsize=12,
+                                align=(:center, :bottom),
+                                offset=(6, 4),
+                            )
+                        end
                     end
                 end
             end

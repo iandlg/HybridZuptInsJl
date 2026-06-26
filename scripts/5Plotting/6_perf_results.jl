@@ -1,6 +1,7 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using GLMakie, OrderedCollections
+using GLMakie, OrderedCollections, Dates
+import CSV
 
 # Choose Parameters file
 hsgp_p_key = 30
@@ -43,10 +44,29 @@ dataset = HybridZuptInsJl.collect_dataset(data_dir, trial_ids, train_ratios, cor
 
 df = HybridZuptInsJl.performance_dataframe(dataset)
 
+dirname = "out/4OnlineCorrection/4PerformanceResults"
+time = string(Dates.now())
+CSV.write(joinpath(dirname, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).csv"), df)
+##
+using .HybridZuptInsJl;
+using GLMakie, OrderedCollections, Dates
+using Dates, CSV, DataFrames
+dirname = "out/4OnlineCorrection/4PerformanceResults"
+df = CSV.read("out/4OnlineCorrection/4PerformanceResults/results_ANG2_HEADING_TWOD_STEP_DT_2026-06-26T11:08:31.063.csv", DataFrame)
+time = string(Dates.now())
+
 with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path="rmse_perf.png")
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"))
 end
 
 with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path="rmse_rate_perf.png")
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"))
+end
+
+with_theme(theme_ggplot2()) do
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false)
+end
+
+with_theme(theme_ggplot2()) do
+    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false)
 end
