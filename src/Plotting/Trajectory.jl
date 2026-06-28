@@ -11,7 +11,13 @@ Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories
 - A `Figure` object (Makie figure).
 """
 function plot_groundtruth_vs_inertial_positions(
-    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory}; samples::Int=typemax(Int))
+    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory};
+    start=1,
+    stop=typemax(Int),
+    show_heading=false,
+    heading_stride=10,
+    heading_length=0.15,
+)
     plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
 end
 
@@ -19,7 +25,10 @@ function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
     gt_traj::Union{Nothing,Trajectory};
     start::Int=1,
-    stop::Int=typemax(Int)
+    stop::Int=typemax(Int),
+    show_heading::Bool=false,
+    heading_stride::Int=10,
+    heading_length::Float64=0.15,
 )
 
     fig = Figure(size=(800, 600))
@@ -33,41 +42,70 @@ function plot_groundtruth_vs_inertial_positions(
     if !isnothing(gt_traj)
         n = min(length(gt_traj.t), stop)
         start = min(length(gt_traj.t), start)
+
         lines!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+
         scatter!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, marker=:circle, markersize=5, alpha=0.6)
 
         scatter!(ax, [gt_traj.pos[1, start]], [gt_traj.pos[2, start]];
             color=:black, marker=:circle, markersize=12, label="Start")
+
         scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
             color=:black, marker=:rect, markersize=12, label="End")
+
+        if show_heading
+            idx = start:heading_stride:n
+            pts = Point2f[]
+            dirs = Vec2f[]
+
+            for i in idx
+                h = matrix_to_euler(gt_traj.R_nb[:, :, i])[3]
+                push!(pts, Point2f(gt_traj.pos[1, i], gt_traj.pos[2, i]))
+                push!(dirs, heading_length * Vec2f(cos(h), sin(h)))
+            end
+
+            arrows2d!(ax, pts, dirs;
+                color=:black)
+        end
     end
 
     colors = Makie.wong_colors()
     color_cycle = Iterators.cycle(colors)
 
-    for (i, (key, traj)) in enumerate(trajs)
+    for (key, traj) in trajs
         c = first(color_cycle)
         color_cycle = Iterators.drop(color_cycle, 1)
 
         n = min(length(traj.t), stop)
 
-        # Line
         lines!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
             color=c, linewidth=1, label=key)
 
-        # Small markers at every data point
         scatter!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
             color=c, marker=:circle, markersize=5, alpha=0.6)
 
-        # Start marker (larger circle)
         scatter!(ax, [traj.pos[1, start]], [traj.pos[2, start]];
             color=c, marker=:circle, markersize=12)
 
-        # End marker (larger square)
         scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
             color=c, marker=:rect, markersize=12)
+
+        if show_heading
+            idx = start:heading_stride:n
+            pts = Point2f[]
+            dirs = Vec2f[]
+
+            for i in idx
+                h = matrix_to_euler(traj.R_nb[:, :, i])[3]
+                push!(pts, Point2f(traj.pos[1, i], traj.pos[2, i]))
+                push!(dirs, heading_length * Vec2f(cos(h), sin(h)))
+            end
+
+            arrows2d!(ax, pts, dirs;
+                color=c)
+        end
     end
 
     axislegend(ax; position=:rt)
@@ -450,7 +488,6 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
     return fig
 end
 
-using CairoMakie
 function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
     current_time = times[current_idx]
     ages = current_time .- times[1:current_idx]

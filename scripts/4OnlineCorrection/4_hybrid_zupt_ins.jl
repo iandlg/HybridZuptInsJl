@@ -25,7 +25,7 @@ FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
 trial_id = 15 # meta["trial_id"]
-m = 50
+m = 200
 margin = meta["margin"]
 train_ratio = 0.45
 
@@ -44,7 +44,10 @@ x_init = vcat(
 N = length(inertial_updated)
 n_train_cutoff = floor(Int, train_ratio * N)
 gt_available = [n <= n_train_cutoff for n in 1:N]
-gt_available[1:min(500, N)] .= true
+# n_train_phases = 5
+# block_size = N ÷ (2 * n_train_phases)
+
+# gt_available = [((i ÷ block_size) % 2 == 0) for i in 0:(N-1)]
 
 true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
@@ -95,15 +98,15 @@ trajs = OrderedDict(
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=18, stop=25)
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
 with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=false)
+    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=true)
 end
 with_theme(theme_ggplot2()) do
     fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
 end
 
 # fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
+# fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
 # fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
 # fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])

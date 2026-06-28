@@ -4,9 +4,9 @@ function hybrid_zupt_aided_ins(
     gt_traj::Trajectory,
     params::HsgpParameters;
     x_init::Vector{Float64}=zeros(9),
-    train_ratio::Float64=0.5,
     ref_frame::ReferenceFrame=BODY,
     feature_type::FeatureType=THREED_STEP,
+    gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),
     correct::Bool=true
 )
     is_compatible(inertial, gt_traj) ||
@@ -38,9 +38,6 @@ function hybrid_zupt_aided_ins(
 
     x[:, 1] = x_init
     quat[:, 1] = matrix_to_quat(euler_to_matrix(x_init[7:9]))
-
-    n_train_cutoff = floor(Int, train_ratio * N)
-    gt_available = [n <= n_train_cutoff for n in 1:N]
 
     # Feature dimensionality driven by feature_type (same as before)
     d_feat = feature_type == THREED_STEP ? 3 :
@@ -140,7 +137,7 @@ function hybrid_zupt_aided_ins(
         dx_smooth[:, seg_end] = dx[:, seg_end]
         P_smooth[:, :, seg_end] = P[:, :, seg_end]
 
-        for n in seg_end-1:-1:seg_start
+        for n in (seg_end-1):-1:seg_start
             A = P[:, :, n] * F_store[:, :, n]' / P_timeupd[:, :, n+1]
             dx_smooth[:, n] = dx[:, n] + A * (dx_smooth[:, n+1] - dx_timeupd[:, n+1])
             P_smooth[:, :, n] = P[:, :, n] +
@@ -259,7 +256,7 @@ function hybrid_zupt_aided_ins(
                     P[:, :, curr_step],
                     vcat(gt_traj.pos[:, curr_step] - x[[1, 2, 3], curr_step], Δθ),
                     H_gt,
-                    Diagonal(sigma_gt .^ 2)
+                    Diagonal(sigma_gt .^ 2) .* 10e1
                 )
                 # @info "Resulting axis angle" dx[7:9, curr_step]
 

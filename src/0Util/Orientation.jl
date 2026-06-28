@@ -298,7 +298,7 @@ normalize_quat(q::AbstractVector{<:Integer}) = normalize_quat(float.(q))
 normalize_quat(q::AbstractMatrix{<:Integer}) = normalize_quat(float.(q))
 
 
-function quat_multiply(p::AbstractVector, q::AbstractVector)
+function quat_multiply(p::AbstractVector{T}, q::AbstractVector{T})::AbstractVector{T} where T<:Real
     pw, px, py, pz = p
     qw, qx, qy, qz = q
     return [
