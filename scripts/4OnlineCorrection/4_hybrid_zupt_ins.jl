@@ -32,6 +32,9 @@ train_ratio = 0.45
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
 )
+sigma_pos = 5e-1
+sigma_head = 1e-3
+sim_config_updated.sigma_groundtruth = (sigma_pos, sigma_pos, sigma_pos, sigma_head)
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
@@ -62,25 +65,25 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 io_data = OrderedDict()
 
 default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Default"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, def_corr_traj, io_data["Default"], def_traj = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-tatic_corr2 = HybridZuptInsJl.StaticCorrectorV2(round(Int, N / 60))
-zupt, step_seg, stat_corr_traj2, io_data["Static2"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr2;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+# tatic_corr2 = HybridZuptInsJl.StaticCorrectorV2(round(Int, N / 60))
+# zupt, step_seg, stat_corr_traj2, io_data["Static2"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr2;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p)
-zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+# splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p)
+# zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
-slamHsgp_corr = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_p)
-zupt, step_seg, slamHsgp_corr_traj, io_data["SlamHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+# slamHsgp_corr = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_p)
+# zupt, step_seg, slamHsgp_corr_traj, io_data["SlamHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
@@ -89,24 +92,34 @@ for (method_name, io_dict) in io_data
     output_data["$method_name : Prediction"] = io_dict["prediction"]
 end
 
+step_trajs = OrderedDict(
+    "ZUPT aided INS" => def_corr_traj,
+    # "Static" => stat_corr_traj2,
+    # "Split" => hsgp1_corr_traj,
+    # "Slam" => slamHsgp_corr_traj
+)
 trajs = OrderedDict(
-    "zupt ins" => def_corr_traj,
-    "static correction" => stat_corr_traj2,
-    "split hsgp correction" => hsgp1_corr_traj,
-    "slam hsgp" => slamHsgp_corr_traj
+    "ZUPT aided INS" => def_traj,
+    # "Static" => stat_corr_traj2,
+    # "Split" => hsgp1_corr_traj,
+    # "Slam" => slamHsgp_corr_traj
 )
 
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned)
+fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(step_trajs, gt_traj_aligned[step_seg])
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(step_trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
 with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=true)
+    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=false)
+end
+corrections = [gt && z for (gt, z) in zip(gt_available, zupt)]
+with_theme(theme_ggplot2()) do
+    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned, corrections)
 end
 with_theme(theme_ggplot2()) do
-    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
+    fig_dist = HybridZuptInsJl.plot_position_distance_error(step_trajs, gt_traj_aligned[step_seg], corrections[step_seg])
 end
 
-# fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
+# fig_dist = HybridZuptInsJl.plot_position_distance_error(step_trajs, gt_traj_aligned[step_seg])
 # fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
 # fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
 # fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])

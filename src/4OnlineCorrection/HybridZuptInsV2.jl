@@ -20,6 +20,11 @@ function hybrid_zupt_aided_insv2(
     zupt, _ = detect_zupt(u, simdata)
 
     Q, R_meas, H = init_filter(simdata)
+    H_gt = zeros(Float64, 4, 9)
+    H_gt[1:3, 1:3] = I(3)
+    H_gt[4, 9] = 1.0
+    R_gt = Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+    @show R_gt
     I9 = Matrix{Float64}(I, 9, 9)
 
     x = zeros(9, N)
@@ -86,6 +91,21 @@ function hybrid_zupt_aided_insv2(
                 dx[:, n] = dx[:, n] - K * (dx[4:6, n] - x[4:6, n])
                 P[:, :, n] = (I9 - K * H) * P[:, :, n]
                 ΔP = (I9 - ΔK * H) * ΔP
+            end
+
+            if gt_available[n] && zupt[n]
+                # H_gt[4, 7:9] = ∂θ3_∂δθ_right(quat[:, n])
+                θ3_gt = matrix_to_euler(gt_traj.R_nb[:, :, n])[3]
+                θ3_ins = x[9, n]
+                Δθ3 = atan(sin(θ3_gt - θ3_ins), cos(θ3_gt - θ3_ins))
+
+                dx[:, n], P[:, :, n] = measurement_update(
+                    dx[:, n],
+                    P[:, :, n],
+                    vcat(x[1:3, n] - gt_traj.pos[:, n], -Δθ3),
+                    H_gt,
+                    R_gt
+                )
             end
 
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
@@ -176,20 +196,20 @@ function hybrid_zupt_aided_insv2(
             )
             relinearize!(corrector)
 
-            posyaw_measurement_update!(corrector;
-                curr_pos=gt_traj.pos[:, curr_step],
-                curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 0.5e1
-            )
+            # posyaw_measurement_update!(corrector;
+            #     curr_pos=gt_traj.pos[:, curr_step],
+            #     curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
+            #     Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 0.5e1
+            # )
 
         elseif gt_available[curr_step]
             # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             # @info "Curr GT available"
-            posyaw_measurement_update!(corrector;
-                curr_pos=gt_traj.pos[:, curr_step],
-                curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 0.5e1
-            )
+            # posyaw_measurement_update!(corrector;
+            #     curr_pos=gt_traj.pos[:, curr_step],
+            #     curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
+            #     Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 0.5e1
+            # )
         else
             # @info "No GT available"
             pred, var_pred = learned_measurement_update!(corrector;
@@ -202,8 +222,14 @@ function hybrid_zupt_aided_insv2(
         end
         relinearize!(corrector)
     end
+    full_traj = Trajectory(
+        inertial.t,
+        x[1:3, :],
+        quat_to_matrix(quat),
+        x[4:6, :]
+    )
 
-    return zupt, step_seg, get_trajectory(corrector), io_data
+    return zupt, step_seg, get_trajectory(corrector), io_data, full_traj
 end
 
 
