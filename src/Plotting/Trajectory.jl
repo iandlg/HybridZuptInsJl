@@ -448,7 +448,50 @@ function plot_position_distance_error(
     axislegend(ax; position=:rt)
     return fig
 end
+function plot_position_distance_error(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory,
+    bools::AbstractVector{Bool}
+)
+    # Wrap single trajectory in a dict
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
 
+    # Find indices where bools is true
+    idxs = findall(bools)
+    if isempty(idxs)
+        @warn "No true values in bools; plotting without markers."
+    end
+
+    fig = Figure(size=(800, 600))
+    ax = Axis(fig[1, 1];
+        xlabel="Time (s)",
+        ylabel="Position error (m)",
+        title="Absolute Distance Error",
+        xgridvisible=true)
+
+    for (key, traj) in trajs
+        n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
+        # Horizontal distance error per sample (no cumulative sum)
+        diff = traj.pos[1:2, 1:n] .- gt_traj.pos[1:2, 1:n]
+        dist = sqrt.(sum(diff .^ 2, dims=1))[:]   # (n,)
+
+        # Plot the error line
+        lines!(ax, traj.t[1:n], dist; linewidth=1.2, label=key)
+
+        # Overlay dots at positions where bools is true and within the valid time range
+        valid_idxs = filter(i -> i ≤ n, idxs)
+        if !isempty(valid_idxs)
+            scatter!(ax, traj.t[valid_idxs], dist[valid_idxs];
+                marker=:circle, color=:black, markersize=8,
+                strokewidth=1, strokecolor=:white)
+        end
+    end
+
+    axislegend(ax; position=:rt)
+    return fig
+end
 
 function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
     """
