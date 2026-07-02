@@ -112,5 +112,5 @@ fig_out = HybridZuptInsJl.plot_regression_results(tr_correctiondata)
 
 fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned)
 fig_dist_step = HybridZuptInsJl.plot_position_distance_error(step_trajs, gt_traj_aligned[segs])
-fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
+fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs], train_ratio)
 fig_betahist = HybridZuptInsJl.plot_beta_evolution(beta_hist)

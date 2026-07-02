@@ -32,7 +32,7 @@ train_ratio = 0.45
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
 )
-sigma_pos = 5e-2
+sigma_pos = 5e-1
 sigma_head = 1e-4
 sim_config_updated.sigma_groundtruth = (sigma_pos, sigma_pos, sigma_pos, sigma_head)
 

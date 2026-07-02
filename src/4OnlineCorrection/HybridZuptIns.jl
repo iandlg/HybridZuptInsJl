@@ -256,7 +256,7 @@ function hybrid_zupt_aided_ins(
                     P[:, :, curr_step],
                     vcat(gt_traj.pos[:, curr_step] - x[[1, 2, 3], curr_step], Δθ),
                     H_gt,
-                    Diagonal(sigma_gt .^ 2) .* 10e1
+                    Diagonal(sigma_gt .^ 2)
                 )
                 # @info "Resulting axis angle" dx[7:9, curr_step]
 
