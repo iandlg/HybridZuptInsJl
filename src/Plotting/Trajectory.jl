@@ -18,7 +18,13 @@ function plot_groundtruth_vs_inertial_positions(
     heading_stride=10,
     heading_length=0.15,
 )
-    plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
+    plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj;
+        start=start,
+        stop=stop,
+        show_heading=show_heading,
+        heading_stride=heading_stride,
+        heading_length=heading_length,
+    )
 end
 
 function plot_groundtruth_vs_inertial_positions(

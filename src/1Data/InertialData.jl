@@ -92,7 +92,7 @@ function read_raw_imu(::ANG2, dir::AbstractString, id::Int)
         DataFrame;
         header=col_names,
         skipto=2,              # skip the original header row
-        delim=' ',
+        delim=(' '),
         ignorerepeated=true,   # treat multiple spaces as one delimiter
         missingstring=""
     )
@@ -127,3 +127,24 @@ function read_raw_imu(::ANG2, dir::AbstractString, id::Int)
     return t[mask], u[:, mask]
 end
 
+function read_raw_imu(::DCSC, dir::AbstractString, id::Int)
+    # Find the subdirectory whose name starts with the given id
+    subdirs = filter(readdir(dir)) do entry
+        isdir(joinpath(dir, entry)) || return false
+        s = string(id)
+        startswith(entry, s) && (length(entry) == length(s) || !isdigit(entry[length(s)+1]))
+    end
+
+    isempty(subdirs) && error("No subdirectory starting with '$id' found in $dir")
+    length(subdirs) > 1 && @warn "Multiple matches for id=$id in $dir, using first: $(subdirs[1])"
+    path = joinpath(dir, subdirs[1], "IMURaw.txt")
+
+    @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
+    df = CSV.read(path, DataFrame; comment="//")
+    drop = intersect(names(df), ["", "SystemTimestamp", "Column2"])
+    select!(df, Not(drop))
+
+    t = Vector{Float64}(df[:, 1])
+    u = vcat(Matrix(df[:, 2:4])', Matrix(df[:, 5:7])')   # (6, N)
+    return t, u
+end

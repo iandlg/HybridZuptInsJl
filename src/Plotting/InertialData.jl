@@ -14,7 +14,7 @@ function plot_inertial_data(id::InertialData; start=1, stop=nothing)
     t = id.t
     N = length(t)
     @show N
-    start = min(start, N)
+    start = min(max(start, 1), N)
     stop = isnothing(stop) ? N : min(stop, N)
     t = t[start:stop]
     acc = id.u[1:3, start:stop]

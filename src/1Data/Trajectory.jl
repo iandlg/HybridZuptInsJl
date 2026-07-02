@@ -127,6 +127,51 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     return t[mask], pos[:, mask], R[:, :, mask], nothing
 end
 
+function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int)
+    subdirs = filter(readdir(dir)) do entry
+        isdir(joinpath(dir, entry)) || return false
+        s = string(id)
+        startswith(entry, s) && (length(entry) == length(s) || !isdigit(entry[length(s)+1]))
+    end
+    isempty(subdirs) && error("No subdirectory starting with '$id' found in $dir")
+    length(subdirs) > 1 && @warn "Multiple matches for id=$id in $dir, using first: $(subdirs[1])"
+
+    dcsc_dir = joinpath(dir, subdirs[1], "OptiTrackOutput")
+
+    sync_files = filter(readdir(dcsc_dir)) do entry
+        endswith(entry, ".csv")
+    end
+    isempty(sync_files) && error("No $id* file found in $dcsc_dir")
+
+    path = joinpath(dcsc_dir, sync_files[1])
+    @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
+
+    df = CSV.read(
+        path, DataFrame;
+        header=true,
+        comment="//",
+    )
+
+    # Drop NaN rows
+    df = dropmissing(df)
+
+    # Strictly increasing timestamps
+    mask = [true; df[2:end, 2] .> df[1:(end-1), 2]]
+    df = df[mask, :]
+    # Filter zero pos/rot
+    pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
+    rot_ok = vec(sum(Matrix(df[:, 6:9]) .^ 2, dims=2) .!= 0)
+    df = df[pos_ok .& rot_ok, :]
+    data = Matrix(df[:, 2:end])
+    N = size(data, 1)
+    t = Vector{Float64}(data[:, 1])
+    @show t[1]
+    pos = data[:, 2:4]'          # (3, N)
+    quat = data[:, 5:8]'        # 4 , N
+
+    return t, pos, quat_to_matrix(quat), nothing
+end
+
 # Remove large Euler-angle jumps 
 function clean(tr::Trajectory)
     eu = matrix_to_euler(tr.R_nb)
