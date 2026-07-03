@@ -361,6 +361,16 @@ function quat_conjugate(q::AbstractVector{T}) where T<:Real
     return [qw, -qx, -qy, -qz]
 end
 
+function quat_conjugate(q::AbstractMatrix{T}) where T<:Real
+    size(q, 1) == 4 || throw(DimensionMismatch("Expected 4 rows, got $(size(q,1))"))
+    q_out = similar(q)
+    q_out[1, :] .= q[1, :]   # scalar part stays unchanged
+    q_out[2, :] .= -q[2, :]   # negate x
+    q_out[3, :] .= -q[3, :]   # negate y
+    q_out[4, :] .= -q[4, :]   # negate z
+    return q_out
+end
+
 function quat_exp(v::Vector{T}) where T<:Real
     length(v) == 3 || throw(DimensionMismatch("Expected vector of length 3, got $(length(v))"))
     ϕ = LinearAlgebra.norm(v)

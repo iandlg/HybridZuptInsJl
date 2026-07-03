@@ -76,8 +76,8 @@ function hybrid_zupt_aided_ins(
     R_aug_nb[p, p] = 1.0
 
     # Define parameters 
-    sigma_pos_gt = 1e-2
-    sigma_ψ_gt = 1e-3
+    sigma_pos_gt = 1e-4
+    sigma_ψ_gt = 1e-5
     sigma_gt = vcat(fill(sigma_pos_gt, 3), sigma_ψ_gt) # σ_GTx σ_GTy σ_GT_z σ_GTψ
     sigma_dt = 1e-4
 
@@ -344,7 +344,7 @@ function hybrid_zupt_aided_ins(
                 y_cov = R_aug_nb * pred_cov * R_aug_nb'
 
                 # δx is zero since has been compensated after zupts
-                dx[:, curr_step], _ = measurement_update(
+                dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
                     y_estim,

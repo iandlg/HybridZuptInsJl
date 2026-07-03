@@ -166,10 +166,21 @@ function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int)
     N = size(data, 1)
     t = Vector{Float64}(data[:, 1])
     @show t[1]
-    pos = data[:, 2:4]'          # (3, N)
-    quat = data[:, 5:8]'        # 4 , N
+    # quat = data[:, [5, 2, 3, 4]]'          # (4, N)
+    C = [
+        1.0 0.0 0.0
+        0.0 0.0 -1.0
+        0.0 1.0 0.0
+    ]
+    pos = data[:, [6, 7, 8]]'        # 3 , N [1, 3, 2]
+    pos = C * pos
+    quat = data[:, [5, 2, 3, 4]]'  # w, qx, qz, qy
+    mats = quat_to_matrix(quat)
+    for i in axes(mats, 3)
+        mats[:, :, i] = C * mats[:, :, i]
+    end
 
-    return t, pos, quat_to_matrix(quat), nothing
+    return t, pos, mats, nothing
 end
 
 # Remove large Euler-angle jumps 

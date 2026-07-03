@@ -1,7 +1,7 @@
 # scripts/main.jl
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using Printf
+using Printf, LinearAlgebra
 
 data_key = "DCSC"
 data_dir = Dict{String,String}(
@@ -10,14 +10,18 @@ data_dir = Dict{String,String}(
     "ANG2" => "data/angermann_v2",
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
-trial_id = 7
+trial_id = 8
 imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
+# gt = HybridZuptInsJl.Trajectory(gt.t, gt.pos[[1, 3, 2], :], gt.R_nb)
 
 fig = HybridZuptInsJl.plot_inertial_data(imu)
 fig = HybridZuptInsJl.plot_trajectory_xyz_euler(gt)
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(gt, nothing)
 fig3d = HybridZuptInsJl.plot_trajectory_3d(gt)
+fig = HybridZuptInsJl.plot_trajectory(gt)
+
+@show det(gt.R_nb[:, :, 500])
 
 imu_ov, gt_ov = HybridZuptInsJl.truncate_to_overlap(imu, gt)
 fig = HybridZuptInsJl.plot_inertial_data(imu_ov)

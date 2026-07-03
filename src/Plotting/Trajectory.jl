@@ -702,3 +702,60 @@ function animate_trajectory(
 
     return fig
 end
+
+function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix}; axis_len=0.3)
+    N = length(positions)
+    @assert length(Rs) == N
+
+    fig = Figure(size=(900, 700))
+    ax = Axis3(fig[1, 1], aspect=:data, title="Trajectory")
+
+    # full path (static)
+    lines!(ax, positions, color=:gray70, linewidth=1)
+
+    # slider – use update_while_dragging=false if desired
+    sl = Slider(fig[2, 1], range=1:N, startvalue=1, update_while_dragging=true)
+
+    # --- Trail: lift on slider value ---
+    trail = lift(sl.value) do idx
+        positions[1:idx]     # returns Vector{Point3f}
+    end
+    lines!(ax, trail, color=:dodgerblue, linewidth=3)
+
+    # --- Current point ---
+    current_pos = lift(sl.value) do idx
+        positions[idx]       # returns Point3f
+    end
+    scatter!(ax, current_pos, color=:black, markersize=12)
+
+    # --- Body axes segments ---
+    for (i, col) in enumerate(1:3)
+        color = (:red, :green, :blue)[i]
+        seg = lift(sl.value) do idx
+            p = positions[idx]
+            R = Rs[idx]
+            dir = Point3f(R[:, col])            # force Float32
+            Point3f[p, p+dir*Float32(axis_len)]   # concretely typed vector
+        end
+        lines!(ax, seg, color=color, linewidth=4)
+    end
+
+    # --- Label (can also use @lift or lift) ---
+    lbl = lift(sl.value) do idx
+        "Step: $idx / $N"
+    end
+    Label(fig[0, 1], lbl, tellwidth=false)
+
+    fig
+end
+
+function plot_trajectory(traj::Trajectory; axis_len=0.3)
+    n = length(traj)
+    points = Vector{Point3f}(undef, n)
+    mats = Vector{Matrix{Float32}}(undef, n)
+    for i in 1:n
+        points[i] = Point3f(traj.pos[:, i])
+        mats[i] = traj.R_nb[:, :, i]
+    end
+    plot_trajectory(points, mats; axis_len=axis_len)
+end
