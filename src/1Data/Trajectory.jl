@@ -158,6 +158,7 @@ function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int)
     # Strictly increasing timestamps
     mask = [true; df[2:end, 2] .> df[1:(end-1), 2]]
     df = df[mask, :]
+
     # Filter zero pos/rot
     pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
     rot_ok = vec(sum(Matrix(df[:, 6:9]) .^ 2, dims=2) .!= 0)
@@ -305,3 +306,23 @@ function step_lengths(traj::Trajectory, segs::Vector{Int})
     end
     return lengths
 end
+
+"""
+    angular_velocity_from_rotations(t, R)
+
+Computes angular rate using central difference.
+"""
+function angular_velocity_from_rotations(t::AbstractVector{T}, R::AbstractArray{T,3}) where T<:Real
+    N = length(t)
+    @assert size(R) == (3, 3, N)
+    ω = zeros(3, N-2)
+    for i in 2:(N-1)
+        dt = t[i+1] - t[i-1]
+        ΔR = R[:, :, i-1]' * R[:, :, i+1]   # body‑frame increment
+        # Use the matrix logarithm for rotation vectors
+        ω[:, i-1] = skew2vec(log(ΔR)) / dt   # rotation vector / dt
+    end
+    return ω
+end
+
+angular_velocity_from_rotations(trj::Trajectory) = angular_velocity_from_rotations(trj.t, trj.R_nb)

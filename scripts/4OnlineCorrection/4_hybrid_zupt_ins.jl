@@ -15,16 +15,17 @@ hsgp_p_path = Dict{Int,String}(
 
 # Load parameters with corresponding metatdata
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-data_key = "ANG2" # meta["data_key"]
+data_key = "DCSC" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2"
+    "ANG2" => "data/angermann_v2",
+    "DCSC" => "data/dcsc_optitrack"
 )[data_key]
 
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = 15 # meta["trial_id"]
+trial_id = 7 # meta["trial_id"]
 m = 200
 margin = meta["margin"]
 train_ratio = 0.45

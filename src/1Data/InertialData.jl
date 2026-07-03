@@ -145,6 +145,8 @@ function read_raw_imu(::DCSC, dir::AbstractString, id::Int)
     select!(df, Not(drop))
 
     t = Vector{Float64}(df[:, 1])
+    t .-= 1.0
+    t ./= 100
     u = vcat(Matrix(df[:, 2:4])', Matrix(df[:, 5:7])')   # (6, N)
     return t, u
 end

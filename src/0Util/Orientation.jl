@@ -354,6 +354,11 @@ function skew(v::AbstractMatrix{T}) where T<:Real
     return S_batch
 end
 
+function skew2vec(S::AbstractMatrix{T}) where T<:Real
+    @assert size(S) == (3, 3)
+    return [S[3, 2], S[1, 3], S[2, 1]]
+end
+
 
 function quat_conjugate(q::AbstractVector{T}) where T<:Real
     length(q) == 4 || throw(DimensionMismatch("Expected vector of length 4, got $(length(q))"))

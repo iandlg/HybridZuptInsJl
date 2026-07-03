@@ -3,7 +3,7 @@ module HybridZuptInsJl
 using LinearAlgebra, Statistics
 import Quaternions
 using Rotations, DSP
-import Interpolations
+import Interpolations, FFTW
 using CSV, DataFrames, JSON, OrderedCollections
 using GLMakie, Makie.Colors
 import Optim
@@ -28,6 +28,7 @@ include("1Data/Trajectory.jl")
 include("1Data/InertialData.jl")
 include("1Data/Structs.jl")
 include("1Data/CollectTrialIO.jl")
+include("1Data/Preprocessing.jl")
 
 include("2ZuptIns/Equations.jl")
 include("2ZuptIns/Zupt.jl")

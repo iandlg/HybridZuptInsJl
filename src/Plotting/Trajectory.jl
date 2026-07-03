@@ -710,9 +710,6 @@ function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix
     fig = Figure(size=(900, 700))
     ax = Axis3(fig[1, 1], aspect=:data, title="Trajectory")
 
-    # full path (static)
-    lines!(ax, positions, color=:gray70, linewidth=1)
-
     # slider – use update_while_dragging=false if desired
     sl = Slider(fig[2, 1], range=1:N, startvalue=1, update_while_dragging=true)
 
@@ -721,6 +718,12 @@ function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix
         positions[1:idx]     # returns Vector{Point3f}
     end
     lines!(ax, trail, color=:dodgerblue, linewidth=3)
+
+    # --- full path: lift on slider value ---
+    trail = lift(sl.value) do idx
+        positions[(idx):end]     # returns Vector{Point3f}
+    end
+    lines!(ax, trail, color=:gray70, linewidth=1)
 
     # --- Current point ---
     current_pos = lift(sl.value) do idx

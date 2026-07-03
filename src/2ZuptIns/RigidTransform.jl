@@ -202,11 +202,17 @@ function compute_aligned_ins_trajectory(
     sim_config::InsConfig=InsConfig(),
     orientation_offset::AbstractVector=zeros(3),
     inertial::InertialData=InertialData(data_path, trial_id),
-    gt_traj::Trajectory=Trajectory(data_path, trial_id)
+    gt_traj::Trajectory=Trajectory(data_path, trial_id),
+    fs_resample=200.0
 )
-    # Truncate to overlapping time window and align ground truth to IMU timestamps
-    inertial_trunc, gt_traj_trunc = truncate_to_overlap(inertial, gt_traj)
-    gt_traj_aligned = temporal_alignment(gt_traj_trunc, inertial_trunc.t)
+    src = resolve_source(data_path)
+
+    # Preprocessing sequence 
+    inertial_trunc, gt_traj_aligned = preprocess(src, inertial, gt_traj; fs_resample=fs_resample)
+
+    # # Truncate to overlapping time window and align ground truth to IMU timestamps
+    # inertial_trunc, gt_traj_trunc = truncate_to_overlap(inertial, gt_traj)
+    # gt_traj_aligned = temporal_alignment(gt_traj_trunc, inertial_trunc.t)
 
     # Compute INS trajectory from inertial data
     zupt, ins_traj, segs = smoothed_zupt_aided_ins(inertial_trunc, sim_config)

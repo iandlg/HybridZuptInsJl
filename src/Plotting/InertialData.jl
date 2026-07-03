@@ -1,42 +1,75 @@
+# Generic optional type alias (if not already defined)
 """
-    plot_inertial_data(id::InertialData; kwargs...)
+    plot_inertial_data(t, ω, α; start=1, stop=nothing)
 
-Plot accelerometer and gyroscope signals from an `InertialData` object.
+Core plotting function for inertial data. Creates a two‑panel figure:
+  - Top: gyroscope (`ω`) angular rates.
+  - Bottom: accelerometer (`α`) specific force.
 
 # Arguments
-- `id`: InertialData object with fields `t` (time vector) and `u` (6xN matrix).
-- `kwargs...`: Additional keyword arguments passed to `plot` (e.g., `title`, `xlabel`, `legend`).
-
-# Returns
-- A `Plots.Plot` object with two subplots.
+- `t`: Time vector.
+- `ω`: Gyroscope data (3×N matrix) or `nothing` – skipped if `nothing`.
+- `α`: Accelerometer data (3×N matrix) or `nothing` – skipped if `nothing`.
+- `start`, `stop`: indices to select a time window (1‑based).
 """
-function plot_inertial_data(id::InertialData; start=1, stop=nothing)
-    t = id.t
+function plot_inertial_data(
+    t::AbstractVector{T},
+    ω::Optional{AbstractMatrix{T}}=nothing,
+    α::Optional{AbstractMatrix{T}}=nothing;
+    start::Int=1,
+    stop::Union{Int,Nothing}=nothing
+) where T<:Real
     N = length(t)
-    @show N
     start = min(max(start, 1), N)
     stop = isnothing(stop) ? N : min(stop, N)
-    t = t[start:stop]
-    acc = id.u[1:3, start:stop]
-    gyr = id.u[4:6, start:stop]
+
+    t_window = t[start:stop]
 
     fig = Figure(size=(1000, 600))
 
-    # Accelerometer axes
-    ax1 = Axis(fig[2, 1], xlabel="Time (s)", ylabel="Acceleration (m/s²)", title="External Specific Force", titlesize=24)
-    lines!(ax1, t, acc[1, :], label="Acc X", color=:red)
-    lines!(ax1, t, acc[2, :], label="Acc Y", color=:green)
-    lines!(ax1, t, acc[3, :], label="Acc Z", color=:blue)
-    axislegend(ax1)
+    # Gyroscope (top)
+    if ω !== nothing
+        gyr = ω[:, start:stop]
+        ax_gyr = Axis(fig[1, 1],
+            xlabel="Time (s)",
+            ylabel="Angular rate (rad/s)",
+            title="Angular Velocity",
+            titlesize=24)
+        lines!(ax_gyr, t_window, gyr[1, :], label="Gyro X", color=:red)
+        lines!(ax_gyr, t_window, gyr[2, :], label="Gyro Y", color=:green)
+        lines!(ax_gyr, t_window, gyr[3, :], label="Gyro Z", color=:blue)
+        axislegend(ax_gyr)
+    end
 
-    # Gyroscope axes
-    ax2 = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Angular rate (rad/s)", title="Angular Velocity", titlesize=24)
-    lines!(ax2, t, gyr[1, :], label="Gyro X", color=:red)
-    lines!(ax2, t, gyr[2, :], label="Gyro Y", color=:green)
-    lines!(ax2, t, gyr[3, :], label="Gyro Z", color=:blue)
-    axislegend(ax2)
+    # Accelerometer (bottom)
+    if α !== nothing
+        acc = α[:, start:stop]
+        ax_acc = Axis(fig[2, 1],
+            xlabel="Time (s)",
+            ylabel="Acceleration (m/s²)",
+            title="External Specific Force",
+            titlesize=24)
+        lines!(ax_acc, t_window, acc[1, :], label="Acc X", color=:red)
+        lines!(ax_acc, t_window, acc[2, :], label="Acc Y", color=:green)
+        lines!(ax_acc, t_window, acc[3, :], label="Acc Z", color=:blue)
+        axislegend(ax_acc)
+    end
 
     return fig
+end
+
+"""
+    plot_inertial_data(id::InertialData; start=1, stop=nothing)
+
+Convenience method that extracts time, gyroscope (rows 4–6) and
+accelerometer (rows 1–3) from an `InertialData` object and calls
+the generic `plot_inertial_data(t, ω, α)` method.
+"""
+function plot_inertial_data(id::InertialData; start=1, stop=nothing)
+    t = id.t
+    ω = id.u[4:6, :]   # gyroscope
+    α = id.u[1:3, :]   # accelerometer
+    return plot_inertial_data(t, ω, α; start=start, stop=stop)
 end
 
 function plot_inertialdata_and_stepsegm(inertial::InertialData, segs::Vector{Int})
