@@ -182,6 +182,10 @@ function relinearize!(c::AbstractCorrector; kwarg...)
     error("relinearize! not implemented for $(typeof(c))")
 end
 
+function get_β_Σβ(c::AbstractCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    error("get_β_Σβ not implemented for $(typeof(c))")
+end
+
 # Accessors
 function get_time(c::AbstractCorrector)::AbstractVector{Float64}
     return c.t[1:c.i]
@@ -343,6 +347,10 @@ function relinearize!(c::DefaultCorrector)
     c.δx[:, c.i] .= 0.0
 end
 
+function get_β_Σβ(c::DefaultCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return nothing
+end
+
 mutable struct StaticCorrector <: AbstractCorrector
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
@@ -476,6 +484,10 @@ function relinearize!(c::StaticCorrector)
     c.Σ[7:10, 1:6] .= 0.0 # zero cross covs
 end
 
+function get_β_Σβ(c::StaticCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return nothing
+end
+
 mutable struct StaticCorrectorV2 <: AbstractCorrector
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
@@ -592,6 +604,9 @@ function relinearize!(c::StaticCorrectorV2)
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
 end
 
+function get_β_Σβ(c::StaticCorrectorV2)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return nothing
+end
 
 mutable struct SplitHybridCorrector <: AbstractCorrector
     t::AbstractVector{Float64}
@@ -636,7 +651,9 @@ function SplitHybridCorrector(N::Int, params::HsgpParameters)::SplitHybridCorrec
     )
 end
 
-function initialize_corrector!(c::SplitHybridCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+function initialize_corrector!(c::SplitHybridCorrector;
+    t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
+    β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
@@ -661,8 +678,19 @@ function initialize_corrector!(c::SplitHybridCorrector; t::Float64, pos_init::Ab
     end
 
     output_names = ["pos_1", "pos_2", "pos_3", "yaw"]
-    c.β .= 0.0
-    c.Σβ = Diagonal(psd)
+    if isnothing(β_Σβ_0)
+        c.β .= 0.0
+    else
+        copyto!(c.β, β_Σβ_0[1])
+    end
+
+    c.Σβ .= 0.0
+    if isnothing(β_Σβ_0)
+        c.Σβ[diagind(c.Σβ)] .= psd
+    else
+        c.Σβ .= β_Σβ_0[2]
+    end
+
     c.∂y∂z .= 0.0
     c.Φ .= 0.0
     c.G .= Matrix{Float64}(I, 6, 6)
@@ -796,6 +824,9 @@ function relinearize!(c::SplitHybridCorrector)
     # c.δx[:, c.i] .= 0.0
 end
 
+function get_β_Σβ(c::SplitHybridCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return c.β, c.Σβ
+end
 
 mutable struct SlamCorrector <: AbstractCorrector
     t::AbstractVector{Float64}
@@ -836,13 +867,19 @@ function SlamCorrector(N::Int, params::HsgpParameters)::SlamCorrector
     )
 end
 
-function initialize_corrector!(c::SlamCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+function initialize_corrector!(c::SlamCorrector;
+    t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
+    β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.i = 1
     c.t[1] = t
     # Initialize nominal states
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
-    c.β .= 0.0
+    if isnothing(β_Σβ_0)
+        c.β .= 0.0
+    else
+        copyto!(c.β, β_Σβ_0[1])
+    end
     # Initialize error state
     c.δx .= 0.0
     # Initialize HSGP
@@ -859,7 +896,11 @@ function initialize_corrector!(c::SlamCorrector; t::Float64, pos_init::AbstractV
     # Initialize state covariance
     c.Σ .= 0.0
     c.Σ[1:6, 1:6] = Σpq_init
-    c.Σ[7:end, 7:end] = Diagonal(psd)
+    if isnothing(β_Σβ_0)
+        c.Σ[7:end, 7:end] = Diagonal(psd)
+    else
+        c.Σ[7:end, 7:end] .= β_Σβ_0[2]
+    end
 
     c.∂y∂z .= 0.0
     c.ϕ .= 0.0
@@ -1028,4 +1069,8 @@ function relinearize!(c::SlamCorrector)
 
     # c.Σ[1:6, 7:end] .= 0.0
     # c.Σ[7:end, 1:6] .= 0.0
+end
+
+function get_β_Σβ(c::SlamCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return c.β, c.Σ[7:end, 7:end]
 end

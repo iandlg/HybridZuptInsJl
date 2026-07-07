@@ -15,7 +15,7 @@ hsgp_p_path = Dict{Int,String}(
 
 # Load parameters with corresponding metatdata
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-data_key = "DCSC" # meta["data_key"]
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -24,15 +24,18 @@ data_dir = Dict{String,String}(
 
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
-
-trial_id = 7 # meta["trial_id"]
 m = 200
 margin = meta["margin"]
-train_ratio = 0.45
+var_pos = 1e-2
+var_yaw = 1e-5
+
+trial_id = 15 # meta["trial_id"]
+train_ratio = 1.0
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
 )
+sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
@@ -63,23 +66,23 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 io_data = OrderedDict()
 
 default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Default"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 tatic_corr2 = HybridZuptInsJl.StaticCorrectorV2(round(Int, N / 60))
-zupt, step_seg, stat_corr_traj2, io_data["Static2"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, stat_corr_traj2, io_data["Static2"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr2;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p)
-zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"], split_β_Σβ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
 slamHsgp_corr = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_p)
-zupt, step_seg, slamHsgp_corr_traj, io_data["SlamHsgp"] = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, slamHsgp_corr_traj, io_data["SlamHsgp"], slam_β_Σβ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
@@ -104,10 +107,94 @@ with_theme(theme_ggplot2()) do
     fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=true)
 end
 with_theme(theme_ggplot2()) do
-    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
+    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
 end
 
 # fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
 # fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
 # fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
 # fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])
+
+## Test on second ack
+trial_id = 2 # meta["trial_id"]
+train_ratio = 0.0
+
+ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
+    data_dir, trial_id
+)
+sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
+
+# Extract the aligned initial state from the trajectory
+x_init = vcat(
+    ins_traj_aligned.pos[:, 1],
+    ins_traj_aligned.vel[:, 1],
+    HybridZuptInsJl.matrix_to_euler(
+        ins_traj_aligned.R_nb[:, :, 1]
+    )
+)
+N = length(inertial_updated)
+n_train_cutoff = floor(Int, train_ratio * N)
+gt_available = [n <= n_train_cutoff for n in 1:N]
+# n_train_phases = 5
+# block_size = N ÷ (2 * n_train_phases)
+
+# gt_available = [((i ÷ block_size) % 2 == 0) for i in 0:(N-1)]
+
+true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+
+# Run online correction
+hsgp_p = HybridZuptInsJl.HsgpParameters(
+    hsgp_p.hp, hsgp_p.d, m, hsgp_p.LL;
+    input_stats=hsgp_p.input_stats,
+    output_stats=hsgp_p.output_stats
+)
+
+io_data = OrderedDict()
+
+default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
+zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+
+tatic_corr2 = HybridZuptInsJl.StaticCorrectorV2(round(Int, N / 60))
+zupt, step_seg, stat_corr_traj2, io_data["Static2"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr2;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+
+splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p)
+zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, β_Σβ_0=split_β_Σβ)
+
+
+slamHsgp_corr = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_p)
+zupt, step_seg, slamHsgp_corr_traj, io_data["SlamHsgp"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, β_Σβ_0=slam_β_Σβ)
+
+input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+for (method_name, io_dict) in io_data
+    input_data["$method_name : Input"] = io_dict["input"]
+    output_data["$method_name : Prediction"] = io_dict["prediction"]
+end
+
+trajs = OrderedDict(
+    "zupt ins" => def_corr_traj,
+    "static correction" => stat_corr_traj2,
+    "split hsgp correction" => hsgp1_corr_traj,
+    "slam hsgp" => slamHsgp_corr_traj
+)
+
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
+fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
+fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
+
+with_theme(theme_ggplot2()) do
+    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
+end
+with_theme(theme_ggplot2()) do
+    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=true)
+end

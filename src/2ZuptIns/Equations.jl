@@ -142,9 +142,6 @@ function comp_internal_states(
     q_in::AbstractVector{T}
 )::Tuple{AbstractVector{T},AbstractVector{T}} where T<:Real
 
-    # Convert quaternion to rotation matrix (body-to-navigation)
-    R = quat_to_matrix(q_in)
-
     # Simple additive correction for position and velocity
     x_out = x_in + dx
 

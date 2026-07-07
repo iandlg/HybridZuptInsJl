@@ -7,7 +7,8 @@ function hybrid_zupt_aided_ins(
     ref_frame::ReferenceFrame=BODY,
     feature_type::FeatureType=THREED_STEP,
     gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),
-    correct::Bool=true
+    correct::Bool=true,
+    cov_update::Bool=true
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -87,6 +88,9 @@ function hybrid_zupt_aided_ins(
 
     ΔP = Matrix{Float64}(undef, 9, 9)
 
+    var_hist = Vector{Float64}[]
+    pred_nis = Vector{Float64}[]
+
     while true
         # ------------------- Step Covariance Reset -------------------------
         if ismissing(ΔP[1, 1])
@@ -112,6 +116,7 @@ function hybrid_zupt_aided_ins(
             ΔP = F_store[:, :, n] * ΔP * F_store[:, :, n]' + G * Q * G'
             dx_timeupd[:, n] = dx[:, n]
             P_timeupd[:, :, n] = P[:, :, n]
+            push!(var_hist, diag(P[:, :, n]))
 
             if zupt[n]
                 S = H * P[:, :, n] * H' + R_meas
@@ -125,7 +130,7 @@ function hybrid_zupt_aided_ins(
 
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
             ΔP = (ΔP + ΔP') / 2
-
+            push!(var_hist, diag(P[:, :, n]))
 
             if update!(step_detector, zupt[n])
                 push!(step_seg, n)
@@ -154,7 +159,6 @@ function hybrid_zupt_aided_ins(
         curr_step = step_seg[end]
 
         @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------ " maxlog = 5
-        @info "ΔP : " ΔP[[1:3; 7:9], [1:3; 7:9]] maxlog = 5
 
         # ------------------- HSGP stepwise correction ------------------------
         if length(step_seg) > 1 && seg_end != N
@@ -181,6 +185,9 @@ function hybrid_zupt_aided_ins(
             target_norm = (target - params.output_stats[1]) ./ params.output_stats[2]
 
             # ---------- Construct target covariance ------------
+            # ΔP = P[:, :, curr_step] - P[:, :, prev_step]
+            # ΔP = (ΔP + ΔP') / 2
+            # @info det(ΔP) maxlog=10
             step_ins_aug_cov = R_aug_nb' * ΔP[[1, 2, 3, 9], [1, 2, 3, 9]] * R_aug_nb
             step_gt_aug_cov = R_aug_GT_nb' * Diagonal(sigma_gt .^ 2) * R_aug_GT_nb
 
@@ -258,6 +265,7 @@ function hybrid_zupt_aided_ins(
                     H_gt,
                     Diagonal(sigma_gt .^ 2) .* 10e1
                 )
+                push!(var_hist, diag(P[:, :, curr_step]))
                 # @info "Resulting axis angle" dx[7:9, curr_step]
 
                 # -------- Compensate error -------------
@@ -318,7 +326,7 @@ function hybrid_zupt_aided_ins(
                 # ------------- Construct measurement matrix H_correction --------------------
                 H_correction = [
                     Matrix(I(3)) zeros(Float64, (3, 6));
-                    zeros(Float64, (1, 8)) 1
+                    zeros(Float64, (1, 6)) ∂θ3_∂δθ_right(quat[:, curr_step])'
                 ]
 
                 # ------------- Predict correction -----------------
@@ -330,8 +338,8 @@ function hybrid_zupt_aided_ins(
                 kron!(Φ, I(p), eigvect)
                 pred_estim_norm = Φ * beta
 
-                # Compute prediction covariance
-                pred_cov_norm = Φ * P_beta * Φ' + input_cov_norm
+                # Compute prediction covariance (Latent function uncertainty + measurement noise)
+                pred_cov_norm = Φ * P_beta * Φ' + input_cov_norm # + Diagonal(σ_n(params))
 
                 # -------- Save prediction --------------
                 append_io!(pred_outputs, inertial.t[prev_step], pred_estim_norm, sqrt.(diag(pred_cov_norm)))
@@ -342,15 +350,34 @@ function hybrid_zupt_aided_ins(
 
                 pred_cov = Diagonal(params.output_stats[2]) * (pred_cov_norm) * Diagonal(params.output_stats[2])
                 y_cov = R_aug_nb * pred_cov * R_aug_nb'
+                # c = sqrt(1e5)
+                # y_cov[1:3, :] .*= c
+                # y_cov[:, 1:3] .*= c
+                # c = sqrt(1e7)
+                # y_cov[4, :] .*= c
+                # y_cov[:, 4] .*= c
 
                 # δx is zero since has been compensated after zupts
-                dx[:, curr_step], P[:, :, curr_step] = measurement_update(
-                    zeros(Float64, 9),
-                    P[:, :, curr_step],
-                    y_estim,
-                    H_correction,
-                    y_cov # .* 1e-3
-                )
+                if cov_update
+                    dx[:, curr_step], P[:, :, curr_step] = measurement_update(
+                        zeros(Float64, 9),
+                        P[:, :, curr_step],
+                        y_estim,
+                        H_correction,
+                        y_cov
+                    )
+                else
+                    dx[:, curr_step], _ = measurement_update(
+                        zeros(Float64, 9),
+                        P[:, :, curr_step],
+                        y_estim,
+                        H_correction,
+                        y_cov
+                    )
+                end
+                push!(pred_nis, (y_estim .- R_aug_nb'*target) .^ 2 ./ diag(y_cov))
+                push!(var_hist, diag(P[:, :, curr_step]))
+                @info "Prediction uncertainty trace :" tr(y_cov) maxlog=10
 
                 # -------- Compensate error -------------
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(
@@ -379,5 +406,5 @@ function hybrid_zupt_aided_ins(
     R_nb_final = euler_to_matrix(x[7:9, :])
     zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
-    return zupt, zupt_ins_traj, step_seg, training_outputs, pred_outputs, beta_hist, training_inputs
+    return zupt, zupt_ins_traj, step_seg, training_outputs, pred_outputs, beta_hist, training_inputs, var_hist, pred_nis
 end

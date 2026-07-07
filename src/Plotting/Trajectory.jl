@@ -205,7 +205,7 @@ function plot_position_rmse(
         trajs = Dict("Estimation" => trajs)
     end
     N = length(gt_traj)
-    n_train_cutoff = floor(Int, train_ratio * N)
+    n_train_cutoff = max(1, floor(Int, train_ratio * N))
 
     truncated_trajs = OrderedDict{String,Trajectory}()
     for (name, traj) in trajs
@@ -761,4 +761,50 @@ function plot_trajectory(traj::Trajectory; axis_len=0.3)
         mats[i] = traj.R_nb[:, :, i]
     end
     plot_trajectory(points, mats; axis_len=axis_len)
+end
+
+"""
+Plot multiple channels (rows of `data`) versus `time`.
+
+# Arguments
+- `data`: `n_channel × N` matrix, each row is a channel.
+- `time`: time vector of length N (defaults to indices 1:N).
+- `labels`: vector of strings of length `n_channel` for legend.
+            Defaults to "ch1", "ch2", ...
+- `offset`: if `nothing`, all lines are overlaid.
+            If a number, each channel is shifted vertically by
+            `(i-1) * offset` (e.g., for stacked EEG).
+- `colormap`: any Makie colormap (Symbol or vector of colors) – 
+                for categorical colors use `:tab10`, `:Set1`, etc.
+- `kwargs...`: passed to `lines!` (e.g., `linewidth=1.5`).
+"""
+function plot_channels(data::Matrix, time::AbstractVector=axes(data, 2);
+    labels::Union{AbstractVector,Nothing}=nothing,
+    offset::Union{Real,Nothing}=nothing,
+    colormap::Union{Symbol,AbstractVector}=:tab10,
+    kwargs...)
+
+    n_ch, N = size(data)
+    labels = isnothing(labels) ? ["ch$i" for i in 1:n_ch] : labels
+    time = collect(time)
+
+    fig = Figure(size=(800, 600))
+    ax = Axis(fig[1, 1], xlabel="Time", ylabel="Amplitude",
+        title="Channel Plot")
+
+    # Get categorical colors – this replaces the deprecated `to_colormap`
+    colors = Makie.categorical_colors(colormap, n_ch)
+
+    offsets = isnothing(offset) ? zeros(n_ch) : (0:(n_ch-1)) * offset
+
+    for i in 1:n_ch
+        y = data[i, :] .+ offsets[i]
+        lines!(ax, time, y; color=colors[i], label=labels[i], kwargs...)
+    end
+
+    if n_ch > 1
+        Legend(fig[2, :], ax, "Channels"; orientation=:horizontal, tellwidth=false)
+    end
+
+    return fig
 end

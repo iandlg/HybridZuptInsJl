@@ -5,14 +5,14 @@ using Printf, LinearAlgebra
 using GLMakie, Statistics
 
 
-data_key = "DCSC"
+data_key = "ANG2"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "MTI" => "data/mti-100-recordings",
     "ANG2" => "data/angermann_v2",
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
-trial_id = 7
+trial_id = 14
 imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 # gt = HybridZuptInsJl.Trajectory(gt.t, gt.pos[[1, 3, 2], :], gt.R_nb)
@@ -25,7 +25,7 @@ fig = HybridZuptInsJl.plot_trajectory_xyz_euler(gt)
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(gt, nothing)
 fig3d = HybridZuptInsJl.plot_trajectory_3d(gt)
 fig = HybridZuptInsJl.plot_trajectory(gt)
-
+##
 # Compare the norm of ground-truth angular velocity with the IMU gyro norm
 # ω_norm_gt = vec(norm.(eachcol(ω)))
 # imu_ω_norm = vec(norm.(eachcol(imu.u[4:6, :])))
