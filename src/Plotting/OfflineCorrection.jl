@@ -58,7 +58,7 @@ function plot_regression_results(
                 μ = true_data.data[row, :]
                 σ = true_data.data_std[row, :]
                 band!(axes[plot_idx], true_data.t, μ .- σ, μ .+ σ;
-                    color=(:black, 0.15), label="Target ±σ")
+                    color=(:black, 0.15))
             end
         end
     end
@@ -104,7 +104,7 @@ function plot_regression_results(
                     μ = pred.data[row, :]
                     σ = pred.data_std[row, :]
                     band!(axes[plot_idx], pred.t, μ .- σ, μ .+ σ;
-                        color=(color, 0.15), label="$method_name ±σ")
+                        color=(color, 0.15))
                 end
             end
         end

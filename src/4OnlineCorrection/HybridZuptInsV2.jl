@@ -62,6 +62,8 @@ function hybrid_zupt_aided_insv2(
         "input" => CorrectionIO(FEATURE_DIMS[feature_type], true),
         "target" => CorrectionIO(4, true),
         "prediction" => CorrectionIO(4, true),
+        "target_norm" => CorrectionIO(4, true),
+        "pred_norm" => CorrectionIO(4, true),
     )
 
     while true
