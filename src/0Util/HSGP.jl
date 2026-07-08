@@ -336,13 +336,13 @@ Reduced-rank Gaussian process regression (Hilbert-space approximation) with an
 optional linear kernel component plus a squared-exponential kernel.
 
 # Arguments
-- `x`            : training inputs (n × d)
+- `x`            : training inputs (n x d)
 - `y`            : training targets (n-vector)
-- `xt`           : test inputs (nₜ × d)
+- `xt`           : test inputs (nₜ x d)
 - `m`            : number of SE basis functions
 
 # Keyword Arguments
-- `LL`           : domain bounds (2 × d), or `nothing` → auto-computed with 10 % padding
+- `LL`           : domain bounds (2 x d), or `nothing` → auto-computed with 10 % padding
 - `theta`        : `[σₙ, ℓ, σ_f, σ_lin]` (standard deviations); σ_lin is ignored when `use_linear=false`
 - `opt`          : which of `theta` to optimise — length-4 `Bool` vector (default all `true`)
 - `use_linear`   : include the linear kernel component (default `true`)
@@ -368,6 +368,8 @@ function hsgp_regression(
     opt::AbstractVector{Bool}=trues(4),
     use_linear::Bool=true,
     predcf::AbstractVector{Int}=[1, 2],
+    lower::AbstractVector{T}=fill(T(1e-6), 4),
+    upper::AbstractVector{T}=fill(T(Inf), 4),
     optimizer=Optim.LBFGS(),
     optim_options=Optim.Options()
 ) where {T<:Real}
@@ -420,7 +422,10 @@ function hsgp_regression(
             G[:] = nlml(w, y, lambda, Phiy, PhiPhi, d, m, effective_opt, theta, use_linear)[2]
         end
 
-        result = Optim.optimize(obj, grad!, w0, optimizer, optim_options)
+        lower_w = log.(lower[effective_opt])
+        upper_w = log.(upper[effective_opt])
+
+        result = Optim.optimize(obj, grad!, lower_w, upper_w, w0, Optim.Fminbox(optimizer), optim_options)
         theta[effective_opt] = exp.(result.minimizer)
     end
 
@@ -430,12 +435,11 @@ function hsgp_regression(
 
     # ---------- Posterior weights ----------
     σ_n, ℓ, σ_f, σ_lin = theta
-    σ_n² = σ_n^2
     C = (√(2π))^d
     k_se = σ_f^2 * C * ℓ^d .* exp.(-0.5 * lambda * ℓ^2)
     k = use_linear ? vcat(fill(σ_lin^2, d), k_se) : k_se
 
-    A = PhiPhi + Diagonal(σ_n² ./ k)
+    A = PhiPhi + Diagonal(σ_n^2 ./ k)
     L = cholesky(A).L
     foo = L' \ (L \ Phiy)
 
@@ -448,7 +452,7 @@ function hsgp_regression(
 
     Eft = Phi_test * foo
     V = Phi_test / L'
-    Varft = σ_n² .* vec(sum(abs2.(V), dims=2))
+    Varft = σ_n^2 .* vec(sum(abs2.(V), dims=2))
 
-    return Eft, Varft, theta, lik, Lvec
+    return Eft, Varft, theta, lik, Lvec, mid, per_dim_eigvals, foo
 end

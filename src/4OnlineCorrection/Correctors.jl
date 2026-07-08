@@ -174,7 +174,7 @@ end
 
 function learned_measurement_update!(c::AbstractCorrector;
     kwargs...
-)::NTuple{2,Optional{AbstractVector{Float64}}}
+)::NTuple{4,Optional{AbstractVector{Float64}}}
     error("learned_measurement_update! not implemented for $(typeof(c))")
 end
 
@@ -317,7 +317,7 @@ function stride_measurement_update!(c::DefaultCorrector;
     #     c.H[:, :, c.i],
     #     Σ_err
     # )
-    return
+    return nothing, nothing
 end
 
 function posyaw_measurement_update!(c::DefaultCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -336,9 +336,9 @@ function posyaw_measurement_update!(c::DefaultCorrector; curr_pos::AbstractVecto
     )
 end
 
-function learned_measurement_update!(c::DefaultCorrector; kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+function learned_measurement_update!(c::DefaultCorrector; kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
     # Do nothing
-    return nothing, nothing
+    return nothing, nothing, nothing, nothing
 end
 
 function relinearize!(c::DefaultCorrector)
@@ -439,7 +439,7 @@ function stride_measurement_update!(c::StaticCorrector;
         c.H,
         Σ_err
     )
-    return
+    return stride_err, nothing
 end
 
 function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -460,7 +460,7 @@ function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector
 end
 
 function learned_measurement_update!(c::StaticCorrector;
-    R_aug_wl, kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+    R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
     c.H[:, 7:end] .= 0.0
@@ -471,7 +471,7 @@ function learned_measurement_update!(c::StaticCorrector;
         c.H,
         c.Σ[7:end, 7:end]
     )
-    return c.stride_err_mean[:, c.i], diag(c.Σ[7:end, 7:end])
+    return c.stride_err_mean[:, c.i], diag(c.Σ[7:end, 7:end]), nothing, nothing
 end
 
 function relinearize!(c::StaticCorrector)
@@ -560,11 +560,10 @@ function dynamic_update!(c::StaticCorrectorV2; t::Float64, Δp::AbstractVector{F
 end
 
 function stride_measurement_update!(c::StaticCorrectorV2;
-    stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
-    kwargs...)
+    stride_err::AbstractVector{Float64}, kwargs...)
     c.stride_err_sum += stride_err
     c.stride_count += 1
-    return
+    return stride_err - c.stride_err_sum / c.stride_count, nothing
 end
 
 function posyaw_measurement_update!(c::StaticCorrectorV2; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -585,7 +584,7 @@ function posyaw_measurement_update!(c::StaticCorrectorV2; curr_pos::AbstractVect
 end
 
 function learned_measurement_update!(c::StaticCorrectorV2;
-    R_aug_wl, kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+    R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
     cov = I(4) .* 1e-6
@@ -596,7 +595,7 @@ function learned_measurement_update!(c::StaticCorrectorV2;
         c.H,
         cov
     )
-    return (c.stride_count == 0) ? zeros(Float64, 4) : (c.stride_err_sum ./ c.stride_count), diag(cov)
+    return (c.stride_count == 0) ? zeros(Float64, 4) : (c.stride_err_sum ./ c.stride_count), diag(cov), nothing, nothing
 end
 
 function relinearize!(c::StaticCorrectorV2)
@@ -756,7 +755,7 @@ function stride_measurement_update!(c::SplitHybridCorrector;
         c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err # Diagonal(noise_vect .^ 2)
     )
 
-    return
+    return nothing, nothing
 end
 
 
@@ -779,7 +778,7 @@ end
 function learned_measurement_update!(c::SplitHybridCorrector;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
-    kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+    kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
 
@@ -815,7 +814,7 @@ function learned_measurement_update!(c::SplitHybridCorrector;
         c.H[:, :, c.i],
         Σ_pred
     )
-    return pred, diag(Σ_pred)
+    return pred, diag(Σ_pred), nothing, nothing
 end
 
 function relinearize!(c::SplitHybridCorrector)
@@ -985,7 +984,7 @@ function stride_measurement_update!(c::SlamCorrector;
         c.H,
         (D + α * Σ_err)
     )
-    return
+    return stride_err, diag((D + α * Σ_err))
 end
 
 function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -1009,7 +1008,7 @@ end
 function learned_measurement_update!(c::SlamCorrector;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
-    kwargs...)::NTuple{2,Optional{AbstractVector{Float64}}}
+    kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
 
     # ------ Construct Pseudo Measurement ------
     # Normalise input feature
@@ -1021,8 +1020,10 @@ function learned_measurement_update!(c::SlamCorrector;
     # Compute prediction estimate
     pred = Vector{Float64}(undef, 4)
     for i in eachindex(pred)
-        pred[i] = c.params.output_stats[2][i] * dot(c.ϕ, c.β[((i-1)*c.params.m+1):(i*c.params.m)]) + c.params.output_stats[1][i]
+        pred[i] = dot(c.ϕ, c.β[((i-1)*c.params.m+1):(i*c.params.m)])
     end
+    pred_norm = deepcopy(pred)
+    pred = c.params.output_stats[2] .* pred .+ c.params.output_stats[1]
 
     for output_d in axes(c.∂y∂z, 1)
         for input_d in axes(c.∂y∂z, 2)
@@ -1044,6 +1045,7 @@ function learned_measurement_update!(c::SlamCorrector;
     # Σ_pred = c.H[1:4, 7:end] * c.Σ[7:end, 7:end] * c.H[1:4, 7:end]' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
     # Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
     Σ_pred += c.∂y∂z * Σ_feature * c.∂y∂z' # input uncertainty
+    Σ_pred_norm = deepcopy(Σ_pred)
     Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2]) # Denormalise
 
     # Update measurement matrix H_update
@@ -1058,7 +1060,7 @@ function learned_measurement_update!(c::SlamCorrector;
         c.H,
         Σ_pred
     )
-    return pred, diag(Σ_pred)
+    return pred, diag(Σ_pred), pred_norm, diag(Σ_pred_norm)
 end
 
 function relinearize!(c::SlamCorrector)

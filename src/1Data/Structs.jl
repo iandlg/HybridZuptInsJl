@@ -85,6 +85,7 @@ end
 
 Base.size(s::CorrectionIO) = size(s.data)
 Base.size(s::CorrectionIO, d::Int) = size(s.data, d)
+Base.length(s::CorrectionIO) = size(s.data, 2)
 
 function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std::Union{Nothing,Vector{Float64}}=nothing)
     n_channel = size(s.data, 1)

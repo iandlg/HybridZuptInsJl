@@ -57,13 +57,20 @@ function hybrid_zupt_aided_insv2(
     seg_start = 2
     seg_end = N
     step_seg = Int[1]
+    @info " ##### Processing $(typeof(corrector)) #####"
+    has_params = hasfield(typeof(corrector), :params)
+    if has_params
+        @info "input stats : " corrector.params.input_stats maxlog=10
+    end
 
     io_data = Dict{String,CorrectionIO}(
         "input" => CorrectionIO(FEATURE_DIMS[feature_type], true),
         "target" => CorrectionIO(4, true),
         "prediction" => CorrectionIO(4, true),
+        "input_norm" => CorrectionIO(FEATURE_DIMS[feature_type], true),
         "target_norm" => CorrectionIO(4, true),
-        "pred_norm" => CorrectionIO(4, true),
+        "prediction_norm" => CorrectionIO(4, true),
+        "residual" => CorrectionIO(4, false)
     )
 
     while true
@@ -170,10 +177,24 @@ function hybrid_zupt_aided_insv2(
         append_io!(io_data["target"], inertial.t[prev_step], stride_err, sqrt.(diag(Σ_err)))
         append_io!(io_data["input"], inertial.t[prev_step], feature, sqrt.(diag(Σ_feature)))
 
+        if has_params
+            feat_norm = deepcopy(feature)
+            Σ_feat_norm = deepcopy(Σ_feature)
+            normalize_feature!(feature_type; feature=feat_norm, Σ_feature=Σ_feat_norm, input_stats=corrector.params.input_stats)
+
+            target_norm = deepcopy(stride_err)
+            target_norm = (target_norm .- corrector.params.output_stats[1]) ./ corrector.params.output_stats[2]
+            Σ_err_norm = deepcopy(Σ_err)
+            Σ_err_norm = Diagonal(1 ./ corrector.params.output_stats[2]) * Σ_err_norm * Diagonal(1 ./ corrector.params.output_stats[2])
+
+            append_io!(io_data["target_norm"], inertial.t[prev_step], target_norm, sqrt.(diag(Σ_err_norm)))
+            append_io!(io_data["input_norm"], inertial.t[prev_step], feat_norm, sqrt.(diag(Σ_feat_norm)))
+        end
+
         if gt_available[curr_step] && gt_available[prev_step]
             # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             # @info "Prev and curr GT available"
-            stride_measurement_update!(corrector;
+            residual, residual_var = stride_measurement_update!(corrector;
                 feature_type=feature_type,
                 stride_err=stride_err, Σ_err=Σ_err,
                 feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl,
@@ -183,8 +204,11 @@ function hybrid_zupt_aided_insv2(
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 0.5e1
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
             )
+            if !isnothing(residual)
+                append_io!(io_data["residual"], inertial.t[prev_step], residual)
+            end
 
         elseif gt_available[curr_step]
             # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
@@ -196,11 +220,14 @@ function hybrid_zupt_aided_insv2(
             )
         else
             # @info "No GT available"
-            pred, var_pred = learned_measurement_update!(corrector;
+            pred, var_pred, pred_norm, var_pred_norm = learned_measurement_update!(corrector;
                 feature_type=feature_type,
                 feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl)
             if !isnothing(pred) && !isnothing(var_pred)
                 append_io!(io_data["prediction"], inertial.t[prev_step], pred, sqrt.(var_pred))
+            end
+            if !isnothing(pred_norm) && !isnothing(var_pred_norm)
+                append_io!(io_data["prediction_norm"], inertial.t[prev_step], pred_norm, sqrt.(var_pred_norm))
             end
 
         end
