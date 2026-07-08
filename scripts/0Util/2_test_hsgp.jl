@@ -36,7 +36,7 @@ margin = 1.6
 L_extended = [Li * margin for Li in L]
 
 ## 
-using LinearAlgebra, Distributions, Random, Plots, GaussianProcesses
+using LinearAlgebra, Distributions, Random, GaussianProcesses
 
 # ---------- Squared exponential kernel ----------
 exp_kernel(x, y, ls) = exp.(-0.5 * ((x .- y') .^ 2) / ls^2)
@@ -61,12 +61,12 @@ y_train = f_train + sqrt(var_n) * randn(rng, N_train)
 K_ff = var_f * exp_kernel(x_plot, x_plot, ls)
 std_f = sqrt.(diag(K_ff))
 
-# ---------- Plot ----------
-plot!(x_plot, f_plot, linewidth=2, label="True function", color=:black)
-scatter!(x_train, y_train, markersize=4, label="Noisy observations", color=:red)
-plot!(x_plot, f_plot .+ 2 * std_f, linewidth=0, fillrange=f_plot .- 2 * std_f,
-    fillalpha=0.3, color=:gray, label="±2σ of f")
-plot!(xlabel="x", ylabel="f(x)", title="Synthetic Data from True Function")
+# # ---------- Plot ----------
+# plot!(x_plot, f_plot, linewidth=2, label="True function", color=:black)
+# scatter!(x_train, y_train, markersize=4, label="Noisy observations", color=:red)
+# plot!(x_plot, f_plot .+ 2 * std_f, linewidth=0, fillrange=f_plot .- 2 * std_f,
+#     fillalpha=0.3, color=:gray, label="±2σ of f")
+# plot!(xlabel="x", ylabel="f(x)", title="Synthetic Data from True Function")
 
 
 ## 
@@ -152,60 +152,152 @@ hsgp_seq_cov = eigvect * P_beta * eigvect'
 hsgp_seq_std = sqrt.(diag(hsgp_seq_cov))
 
 ## 
-using Plots
+# using Plots
 
-# Assume the following are already defined:
-# x_test, gp_mean, gp_std, hsgp_mean, hsgp_std, x_train, y_train, true_fun
+# # Assume the following are already defined:
+# # x_test, gp_mean, gp_std, hsgp_mean, hsgp_std, x_train, y_train, true_fun
 
-# Left subplot: Exact GP
-p1 = plot(x_test, true_fun.(x_test);
-    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
-plot!(p1, x_test, gp_mean; linewidth=1.5, color=:blue, label="GP mean")
-plot!(p1, x_test, gp_mean .- 2 .* gp_std, fillrange=gp_mean .+ 2 .* gp_std,
-    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
-scatter!(p1, x_train, y_train; color=:red, markersize=2, label="Observations")
-title!(p1, "Exact GP")
-xlabel!(p1, "x")
-ylabel!(p1, "f(x)")
+# # Left subplot: Exact GP
+# p1 = plot(x_test, true_fun.(x_test);
+#     linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+# plot!(p1, x_test, gp_mean; linewidth=1.5, color=:blue, label="GP mean")
+# plot!(p1, x_test, gp_mean .- 2 .* gp_std, fillrange=gp_mean .+ 2 .* gp_std,
+#     fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+# scatter!(p1, x_train, y_train; color=:red, markersize=2, label="Observations")
+# title!(p1, "Exact GP")
+# xlabel!(p1, "x")
+# ylabel!(p1, "f(x)")
 
-# Right subplot: HSGP
-p2 = plot(x_test, true_fun.(x_test);
-    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
-plot!(p2, x_test, hsgp_mean; linewidth=1.5, color=:blue, label="HSGP mean")
-plot!(p2, x_test, hsgp_mean .- 2 .* hsgp_std, fillrange=hsgp_mean .+ 2 .* hsgp_std,
-    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
-scatter!(p2, x_train, y_train; color=:red, markersize=2, label="Observations")
-title!(p2, "HSGP")
-xlabel!(p2, "x")
-ylabel!(p2, "f(x)")
+# # Right subplot: HSGP
+# p2 = plot(x_test, true_fun.(x_test);
+#     linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+# plot!(p2, x_test, hsgp_mean; linewidth=1.5, color=:blue, label="HSGP mean")
+# plot!(p2, x_test, hsgp_mean .- 2 .* hsgp_std, fillrange=hsgp_mean .+ 2 .* hsgp_std,
+#     fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+# scatter!(p2, x_train, y_train; color=:red, markersize=2, label="Observations")
+# title!(p2, "HSGP")
+# xlabel!(p2, "x")
+# ylabel!(p2, "f(x)")
 
-# Right subplot: HSGP
-p3 = plot(x_test, true_fun.(x_test);
-    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
-plot!(p3, x_test, gpjl_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
-plot!(p3, x_test, gpjl_mean .- 2 .* sqrt.(gpjl_var), fillrange=gpjl_mean .+ 2 .* sqrt.(gpjl_var),
-    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
-scatter!(p3, x_train, y_train; color=:red, markersize=2, label="Observations")
-title!(p3, "GaussianProcesses.jl package")
-xlabel!(p3, "x")
-ylabel!(p3, "f(x)")
+# # Right subplot: HSGP
+# p3 = plot(x_test, true_fun.(x_test);
+#     linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+# plot!(p3, x_test, gpjl_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
+# plot!(p3, x_test, gpjl_mean .- 2 .* sqrt.(gpjl_var), fillrange=gpjl_mean .+ 2 .* sqrt.(gpjl_var),
+#     fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+# scatter!(p3, x_train, y_train; color=:red, markersize=2, label="Observations")
+# title!(p3, "GaussianProcesses.jl package")
+# xlabel!(p3, "x")
+# ylabel!(p3, "f(x)")
 
-# Right subplot: HSGP
-p4 = plot(x_test, true_fun.(x_test);
-    linewidth=0.5, linestyle=:dash, color=:black, label="True function")
-plot!(p4, x_test, hsgp_seq_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
-plot!(p4, x_test, hsgp_seq_mean .- 2 .* hsgp_seq_std, fillrange=hsgp_seq_mean .+ 2 .* hsgp_seq_std,
-    fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
-scatter!(p4, x_train, y_train; color=:red, markersize=2, label="Observations")
-title!(p4, "Sequential Fit HSGP")
-xlabel!(p4, "x")
-ylabel!(p4, "f(x)")
-# Combine both subplots side by side
-plot(p1, p2, p3, p4; layout=(2, 2), size=(1000, 900))
+# # Right subplot: HSGP
+# p4 = plot(x_test, true_fun.(x_test);
+#     linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+# plot!(p4, x_test, hsgp_seq_mean; linewidth=1.5, color=:blue, label="GP.jl mean")
+# plot!(p4, x_test, hsgp_seq_mean .- 2 .* hsgp_seq_std, fillrange=hsgp_seq_mean .+ 2 .* hsgp_seq_std,
+#     fillalpha=0.3, color=:blue, label="±2σ", linewidth=0)
+# scatter!(p4, x_train, y_train; color=:red, markersize=2, label="Observations")
+# title!(p4, "Sequential Fit HSGP")
+# xlabel!(p4, "x")
+# ylabel!(p4, "f(x)")
+# # Combine both subplots side by side
+# plot(p1, p2, p3, p4; layout=(2, 2), size=(1000, 900))
 
+using CairoMakie
+
+with_theme(theme_ggplot2()) do
+    fig = Figure(size=(800, 600))
+
+    function plot_gp_panel!(ax, x_test, mean_vals, std_vals, label_mean;
+        x_train=nothing, y_train=nothing, title="")
+        lines!(ax, x_test, true_fun.(x_test);
+            linewidth=0.5, linestyle=:dash, color=:black, label="True function")
+        band!(ax, x_test, mean_vals .- 2 .* std_vals, mean_vals .+ 2 .* std_vals;
+            color=(:blue, 0.3), label="±2σ")
+        lines!(ax, x_test, mean_vals;
+            linewidth=1.5, color=:blue, label=label_mean)
+        if !isnothing(x_train) && !isnothing(y_train)
+            scatter!(ax, x_train, y_train;
+                color=:red, markersize=4, label="Observations")
+        end
+        ax.title = title
+        ax.xlabel = "x"
+        ax.ylabel = "f(x)"
+    end
+
+    ax1 = Axis(fig[1, 1])
+    plot_gp_panel!(ax1, collect(x_test), gp_mean, gp_std, "GP mean";
+        x_train, y_train, title="Gaussian Process Regression")
+
+    # ax2 = Axis(fig[1, 2])
+    # plot_gp_panel!(ax2, collect(x_test), hsgp_mean, hsgp_std, "HSGP mean";
+    #     x_train, y_train, title = "HSGP")
+
+    # ax3 = Axis(fig[2, 1])
+    # plot_gp_panel!(ax3, collect(x_test), gpjl_mean, sqrt.(gpjl_var), "GP.jl mean";
+    #     x_train, y_train, title = "GaussianProcesses.jl package")
+
+    # ax4 = Axis(fig[2, 2])
+    # plot_gp_panel!(ax4, collect(x_test), hsgp_seq_mean, hsgp_seq_std, "Seq. HSGP mean";
+    #     x_train, y_train, title = "Sequential Fit HSGP")
+
+    # Shared legend from first axis
+    Legend(fig[2, :], ax1; orientation=:horizontal, tellwidth=false)
+
+    fig
+end
 ## Compute difference between options
 rmse = sqrt.(mean((gp_mean - gpjl_mean) .^ 2))
 rmse_var = sqrt.(mean((gp_mean .- 2 .* gp_std - (gpjl_mean .- 2 .* sqrt.(gpjl_var))) .^ 2))
 rmse_hsgp = sqrt.(mean((gp_mean - hsgp_mean) .^ 2))
-rmse_var = sqrt.(mean((gp_mean.-2 .* gp_std-(hsgp_mean.-2 .* hsgp_std))[50:450] .^ 2))
+rmse_var = sqrt.(mean((gp_mean .- 2 .* gp_std-(hsgp_mean .- 2 .* hsgp_std))[50:450] .^ 2))
 rmse_var = sqrt.(mean(((hsgp_mean .- 2 .* hsgp_std) - (hsgp_seq_mean .- 2 .* hsgp_seq_std)) .^ 2))
+
+## Exp kernel plot
+r = range(-5, 5, length=N_plot)
+k = exp.(-0.5 * (r .^ 2) / 1.0^2)
+
+with_theme(theme_ggplot2()) do
+    fig = Figure(size=(600, 400))
+    ax1 = Axis(fig[1, 1])
+    lines!(ax1, r, k;
+        linewidth=1.5, color=:blue)
+
+    ax1.title = "SE kernel"
+    ax1.xlabel = "||x - x'||"
+    ax1.ylabel = "Magnitude"
+
+    # Shared legend from first axis
+    fig
+end
+
+## basis functions plot
+
+x = collect(range(-5, 5, length=N_plot))
+x = reshape(x, N_plot, 1)
+L = 5.0
+m = 5
+d=1
+
+eig_per_dim = HybridZuptInsJl.calc_eigenvalues(L, m)
+eig_vects = HybridZuptInsJl.calc_eigenvectors(x, [L], eig_per_dim)
+
+with_theme(theme_ggplot2()) do
+    fig = Figure(size=(800, 600))
+    ax1 = Axis(fig[1, 1])
+    lines!(ax1, x[:], eig_vects[:, 1];
+        linewidth=3)
+    lines!(ax1, x[:], eig_vects[:, 2];
+        linewidth=3)
+    lines!(ax1, x[:], eig_vects[:, 3];
+        linewidth=3)
+    lines!(ax1, x[:], eig_vects[:, 4];
+        linewidth=3)
+
+    ax1.title = "1D Basis Functions"
+    ax1.xlabel = "x"
+    ax1.ylabel = "φ(x)"
+
+    # Shared legend from first axis
+    fig
+end

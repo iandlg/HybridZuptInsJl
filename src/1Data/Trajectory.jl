@@ -23,6 +23,7 @@ Base.getindex(tr::Trajectory, mask) = Trajectory(
     tr.R_nb[:, :, mask],
     tr.vel === nothing ? nothing : tr.vel[:, mask]
 )
+Base.lastindex(tr::Trajectory) = length(tr)
 
 function Trajectory(dir::AbstractString, id::Int)
     src = resolve_source(dir)
@@ -38,12 +39,12 @@ function read_raw_trajectory(::ANG, dir::AbstractString, id::Int)
     # Drop NaN rows
     df = dropmissing(df)
     # Strictly increasing timestamps
-    mask = [true; df[2:end, 1] .> df[1:end-1, 1]]
+    mask = [true; df[2:end, 1] .> df[1:(end-1), 1]]
     df = df[mask, :]
     # Filter zero pos/rot
     pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
     rot_ok = vec(sum(Matrix(df[:, 6:14]) .^ 2, dims=2) .!= 0)
-    df = df[pos_ok.&rot_ok, :]
+    df = df[pos_ok .& rot_ok, :]
     data = Matrix(df)
     N = size(data, 1)
     t = data[:, 1] ./ 1000
@@ -79,7 +80,7 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
         path, DataFrame;
         header=false,
         # skipto=2,
-        delim=' ',
+        delim=(' '),
         ignorerepeated=true,   # treat multiple spaces as one delimiter
         missingstring=""
     )
@@ -88,12 +89,12 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     df = dropmissing(df)
 
     # Strictly increasing timestamps
-    mask = [true; df[2:end, 1] .> df[1:end-1, 1]]
+    mask = [true; df[2:end, 1] .> df[1:(end-1), 1]]
     df = df[mask, :]
     # Filter zero pos/rot
     pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
     rot_ok = vec(sum(Matrix(df[:, 6:14]) .^ 2, dims=2) .!= 0)
-    df = df[pos_ok.&rot_ok, :]
+    df = df[pos_ok .& rot_ok, :]
     data = Matrix(df)
     N = size(data, 1)
     t = Vector{Float64}(data[:, 1] .* 1e-3)
@@ -124,6 +125,63 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     mask = t .>= t_start
 
     return t[mask], pos[:, mask], R[:, :, mask], nothing
+end
+
+function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int)
+    subdirs = filter(readdir(dir)) do entry
+        isdir(joinpath(dir, entry)) || return false
+        s = string(id)
+        startswith(entry, s) && (length(entry) == length(s) || !isdigit(entry[length(s)+1]))
+    end
+    isempty(subdirs) && error("No subdirectory starting with '$id' found in $dir")
+    length(subdirs) > 1 && @warn "Multiple matches for id=$id in $dir, using first: $(subdirs[1])"
+
+    dcsc_dir = joinpath(dir, subdirs[1], "OptiTrackOutput")
+
+    sync_files = filter(readdir(dcsc_dir)) do entry
+        endswith(entry, ".csv")
+    end
+    isempty(sync_files) && error("No $id* file found in $dcsc_dir")
+
+    path = joinpath(dcsc_dir, sync_files[1])
+    @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
+
+    df = CSV.read(
+        path, DataFrame;
+        header=true,
+        comment="//",
+    )
+
+    # Drop NaN rows
+    df = dropmissing(df)
+
+    # Strictly increasing timestamps
+    mask = [true; df[2:end, 2] .> df[1:(end-1), 2]]
+    df = df[mask, :]
+
+    # Filter zero pos/rot
+    pos_ok = vec(sum(Matrix(df[:, 3:5]) .^ 2, dims=2) .!= 0)
+    rot_ok = vec(sum(Matrix(df[:, 6:9]) .^ 2, dims=2) .!= 0)
+    df = df[pos_ok .& rot_ok, :]
+    data = Matrix(df[:, 2:end])
+    N = size(data, 1)
+    t = Vector{Float64}(data[:, 1])
+    @show t[1]
+    # quat = data[:, [5, 2, 3, 4]]'          # (4, N)
+    C = [
+        1.0 0.0 0.0
+        0.0 0.0 -1.0
+        0.0 1.0 0.0
+    ]
+    pos = data[:, [6, 7, 8]]'        # 3 , N [1, 3, 2]
+    pos = C * pos
+    quat = data[:, [5, 2, 3, 4]]'  # w, qx, qz, qy
+    mats = quat_to_matrix(quat)
+    for i in axes(mats, 3)
+        mats[:, :, i] = C * mats[:, :, i]
+    end
+
+    return t, pos, mats, nothing
 end
 
 # Remove large Euler-angle jumps 
@@ -226,8 +284,8 @@ end
 function step_vectors_heading(tr::Trajectory, step_seg::Vector{Int})
     seg = step_seg
     N = length(seg) - 1
-    eu = matrix_to_euler(tr.R_nb)[:, seg[1:end-1]]      # (3, N_steps)
-    Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:end-1]]
+    eu = matrix_to_euler(tr.R_nb)[:, seg[1:(end-1)]]      # (3, N_steps)
+    Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:(end-1)]]
     steps = similar(Δpos)
     for k in 1:N
         eu_nh = [0, 0, eu[3, k]]
@@ -248,3 +306,23 @@ function step_lengths(traj::Trajectory, segs::Vector{Int})
     end
     return lengths
 end
+
+"""
+    angular_velocity_from_rotations(t, R)
+
+Computes angular rate using central difference.
+"""
+function angular_velocity_from_rotations(t::AbstractVector{T}, R::AbstractArray{T,3}) where T<:Real
+    N = length(t)
+    @assert size(R) == (3, 3, N)
+    ω = zeros(3, N-2)
+    for i in 2:(N-1)
+        dt = t[i+1] - t[i-1]
+        ΔR = R[:, :, i-1]' * R[:, :, i+1]   # body‑frame increment
+        # Use the matrix logarithm for rotation vectors
+        ω[:, i-1] = skew2vec(log(ΔR)) / dt   # rotation vector / dt
+    end
+    return ω
+end
+
+angular_velocity_from_rotations(trj::Trajectory) = angular_velocity_from_rotations(trj.t, trj.R_nb)

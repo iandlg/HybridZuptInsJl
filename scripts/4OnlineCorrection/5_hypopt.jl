@@ -47,9 +47,11 @@ test_id = setdiff(trial_ids, train_id)
 dataset = HybridZuptInsJl.collect_dataset(data_dir, trial_ids;
     frame=FRAME, feature_type=FEATURE_TYPE)
 
-df = HybridZuptInsJl.to_dataframe(dataset)
+df = HybridZuptInsJl.io_dataframe(dataset)
+df = transform(groupby(df, :trial_id), :t => (x -> length(unique(x))) => :trial_step_count)
+
 HybridZuptInsJl.plot_channel_boxplots(df; show_trials=true, save_path=joinpath(combo_dir, "channel_io_stats.png"))
-##
+## --- Compare Base Hyper Parameters with Optimized ---
 trial_id = 15
 m = 500
 normalize_x = true
@@ -87,15 +89,17 @@ for (idx, symb) in enumerate(output_symbols)
     )
 
     hyps[symb] = theta[1:3]
-
 end
 pred_std = sqrt.(pred_std)
 
 pred = HybridZuptInsJl.CorrectionIO(output.t, pred_data, pred_std)
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, output)
 
-hsgp_p = HybridZuptInsJl.HsgpParameters(
+hsgp_opt = HybridZuptInsJl.HsgpParameters(
     HybridZuptInsJl.SeHyperparams(hyps), d, m, Lvec; input_stats=input_stats)
+
+# --- Load Base Hyper Parameters ---
+
 
 ## 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(

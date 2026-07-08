@@ -85,6 +85,7 @@ end
 
 Base.size(s::CorrectionIO) = size(s.data)
 Base.size(s::CorrectionIO, d::Int) = size(s.data, d)
+Base.length(s::CorrectionIO) = size(s.data, 2)
 
 function append_io!(s::CorrectionIO, t::Float64, data::Vector{Float64}, data_std::Union{Nothing,Vector{Float64}}=nothing)
     n_channel = size(s.data, 1)
@@ -158,6 +159,13 @@ function SeHyperparams(d::Dict{String,Union{Any,Vector{Any}}})
     )
 end
 
+function σ_n(hp::SeHyperparams)
+    σ_n = Vector{Float64}(undef, 4)
+    for (idx, field) in enumerate(fieldnames(SeHyperparams))
+        σ_n[idx] = getfield(hp, field)[1]
+    end
+    return σ_n
+end
 # Helper: create a new SeHyperparams with one element changed
 function modify_sehp(hp::SeHyperparams, group::Symbol, idx::Int, new_val::Float64)
     new_vec = copy(getfield(hp, group))
@@ -305,3 +313,5 @@ function from_json(::Type{T}, filename::AbstractString) where {T}
     end
     return obj, metadata, saved_at
 end
+
+σ_n(p::HsgpParameters) = σ_n(p.hp)

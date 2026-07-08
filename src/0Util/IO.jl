@@ -3,12 +3,14 @@ abstract type AbstractDataSource end
 struct ANG <: AbstractDataSource end
 struct MTI <: AbstractDataSource end
 struct ANG2 <: AbstractDataSource end
+struct DCSC <: AbstractDataSource end
 
 # Resolve a directory path to its source tag
 const _DIR_TO_SOURCE = Dict{String,AbstractDataSource}(
     "data/angermann_high_precision" => ANG(),
     "data/mti-100-recordings" => MTI(),
-    "data/angermann_v2" => ANG2()
+    "data/angermann_v2" => ANG2(),
+    "data/dcsc_optitrack" => DCSC()
 )
 
 function resolve_source(dir::AbstractString)::AbstractDataSource

@@ -2,7 +2,7 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
 # Choose Parameters file
-hsgp_p_key = 21
+hsgp_p_key = 30
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     12 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-26T13:06:11.411.json",
@@ -12,20 +12,25 @@ hsgp_p_path = Dict{Int,String}(
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
+m = 200
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
+hsgp_p = HybridZuptInsJl.HsgpParameters(
+    hsgp_p.hp, hsgp_p.d, m, hsgp_p.LL;
+    input_stats=hsgp_p.input_stats,
+    output_stats=hsgp_p.output_stats
+)
 
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision"
-)[meta["data_key"]]
+    "ANG" => "data/angermann_high_precision",
+    "ANG2" => "data/angermann_v2"
+)[data_key]
 
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 
-trial_id = meta["trial_id"]
-m = 200
-margin = meta["margin"]
-train_ratio = 0.4
-
+trial_id = 15
+train_ratio = 0.45
 
 rmse_fun = HybridZuptInsJl.make_rmse_evaluator(data_dir, trial_id, train_ratio, FEATURE_TYPE, FRAME, m)
 
@@ -48,6 +53,8 @@ df = HybridZuptInsJl.vary_hsgp_hyperparameters(
 )
 
 ## Save things 
+
+
 using JSON, Dates, CSV
 outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
 
@@ -82,11 +89,17 @@ println("Saved CSV: $csv_path")
 println("Saved JSON: $json_path")
 
 ## Plot Hp sensitivity
+include("../../src/HybridZuptInsJl.jl");
+using .HybridZuptInsJl;
+using CairoMakie
 outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
-basename_key = 16
+basename_key = 32
 basename = Dict(
     11 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T13:47:42.748",
-    16 => "ANG15_BODY_TWOD_STEP_DT_2026-06-01T10:20:18.078"
+    16 => "ANG15_BODY_TWOD_STEP_DT_2026-06-01T10:20:18.078",
+    30 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T16:36:18.693",
+    31 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T17:59:58.069",
+    32 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T18:47:22.051"
 )[basename_key]
 
 csv_file = joinpath(outdir, "$basename.csv")
@@ -97,5 +110,6 @@ df, meta = HybridZuptInsJl.load_hp_variation_results(csv_file, json_file)
 grid = HybridZuptInsJl.grid_from_dict(meta["grid"])
 log_range = (
     float(meta["log10_range"][1]), float(meta["log10_range"][2]))
-
-HybridZuptInsJl.plot_hp_sensitivity(df, grid, log_range; save_path="out/4OnlineCorrection/3HpVariabilityAnalysis/plots/$basename.png")
+with_theme(theme_ggplot2()) do
+    HybridZuptInsJl.plot_hp_sensitivity(df, grid, log_range; save_path="out/4OnlineCorrection/3HpVariabilityAnalysis/plots/$basename.svg")
+end

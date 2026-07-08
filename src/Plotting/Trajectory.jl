@@ -11,15 +11,30 @@ Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories
 - A `Figure` object (Makie figure).
 """
 function plot_groundtruth_vs_inertial_positions(
-    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory}; samples::Int=typemax(Int))
-    plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj; samples=samples)
+    trajs::Trajectory, gt_traj::Union{Nothing,Trajectory};
+    start=1,
+    stop=typemax(Int),
+    show_heading=false,
+    heading_stride=10,
+    heading_length=0.15,
+)
+    plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj;
+        start=start,
+        stop=stop,
+        show_heading=show_heading,
+        heading_stride=heading_stride,
+        heading_length=heading_length,
+    )
 end
 
 function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
     gt_traj::Union{Nothing,Trajectory};
     start::Int=1,
-    stop::Int=typemax(Int)
+    stop::Int=typemax(Int),
+    show_heading::Bool=false,
+    heading_stride::Int=10,
+    heading_length::Float64=0.15,
 )
 
     fig = Figure(size=(800, 600))
@@ -33,41 +48,70 @@ function plot_groundtruth_vs_inertial_positions(
     if !isnothing(gt_traj)
         n = min(length(gt_traj.t), stop)
         start = min(length(gt_traj.t), start)
+
         lines!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+
         scatter!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
             color=:black, marker=:circle, markersize=5, alpha=0.6)
 
         scatter!(ax, [gt_traj.pos[1, start]], [gt_traj.pos[2, start]];
             color=:black, marker=:circle, markersize=12, label="Start")
+
         scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
             color=:black, marker=:rect, markersize=12, label="End")
+
+        if show_heading
+            idx = start:heading_stride:n
+            pts = Point2f[]
+            dirs = Vec2f[]
+
+            for i in idx
+                h = matrix_to_euler(gt_traj.R_nb[:, :, i])[3]
+                push!(pts, Point2f(gt_traj.pos[1, i], gt_traj.pos[2, i]))
+                push!(dirs, heading_length * Vec2f(cos(h), sin(h)))
+            end
+
+            arrows2d!(ax, pts, dirs;
+                color=:black)
+        end
     end
 
     colors = Makie.wong_colors()
     color_cycle = Iterators.cycle(colors)
 
-    for (i, (key, traj)) in enumerate(trajs)
+    for (key, traj) in trajs
         c = first(color_cycle)
         color_cycle = Iterators.drop(color_cycle, 1)
 
         n = min(length(traj.t), stop)
 
-        # Line
         lines!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
             color=c, linewidth=1, label=key)
 
-        # Small markers at every data point
         scatter!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
             color=c, marker=:circle, markersize=5, alpha=0.6)
 
-        # Start marker (larger circle)
         scatter!(ax, [traj.pos[1, start]], [traj.pos[2, start]];
             color=c, marker=:circle, markersize=12)
 
-        # End marker (larger square)
         scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
             color=c, marker=:rect, markersize=12)
+
+        if show_heading
+            idx = start:heading_stride:n
+            pts = Point2f[]
+            dirs = Vec2f[]
+
+            for i in idx
+                h = matrix_to_euler(traj.R_nb[:, :, i])[3]
+                push!(pts, Point2f(traj.pos[1, i], traj.pos[2, i]))
+                push!(dirs, heading_length * Vec2f(cos(h), sin(h)))
+            end
+
+            arrows2d!(ax, pts, dirs;
+                color=c)
+        end
     end
 
     axislegend(ax; position=:rt)
@@ -113,40 +157,62 @@ function plot_position_rmse(
         title="Position RMSE over time",
         xgridvisible=true)
 
-    # -- plot all trajectories --
+    # -- plot all trajectories, shifting time to start at 0 --
     for (key, traj) in trajs
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
-        cum_rmse = rmse(traj, gt_traj)  # presumably computes cumulative RMSE
-        label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", cum_rmse[end]/total_distance(gt_traj)))"
-        lines!(ax, traj.t[1:n], cum_rmse, label=label)
+        cum_rmse = rmse(traj, gt_traj)
+        Δrmse = cum_rmse[end] - cum_rmse[1]
+        t_shifted = traj.t[1:n] .- traj.t[1]
+        label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", Δrmse/total_distance(gt_traj)))"
+        lines!(ax, t_shifted, cum_rmse, label=label)
     end
-    axislegend(ax)
+
+    axislegend(ax; position=:lt)
 
     # -- add a twin x-axis for index (top) --
     if show_index_ticks
-        # pick the first trajectory to get a representative time vector
         first_traj = first(values(trajs))
         n = min(size(first_traj.pos, 2), size(gt_traj.pos, 2))
-        t_vec = first_traj.t[1:n]
+        t_shifted = first_traj.t[1:n] .- first_traj.t[1]
 
-        # choose a reasonable number of index ticks (e.g., ~10)
         step = max(1, n ÷ 10)
         idx_ticks = 1:step:n
-        time_ticks = t_vec[idx_ticks]
+        time_ticks = t_shifted[idx_ticks]
 
-        # create the top axis, linked to the main axis
         ax_top = Axis(fig[1, 1];
             xaxisposition=:top,
-            yaxisposition=:right,        # avoids overlapping y-axis
+            yaxisposition=:right,
             ylabelvisible=false,
+            yticksvisible=false,
+            yticklabelsvisible=false,
             xlabel="Sample index",
-            xticks=(time_ticks, string.(idx_ticks)),
-            xticklabelrotation=0,
-        )
+            xticks=(time_ticks, string.(collect(idx_ticks))),
+            xticklabelrotation=0)
+
         linkxaxes!(ax, ax_top)
     end
 
     return fig
+end
+
+function plot_position_rmse(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory,
+    train_ratio::Float64;
+    show_index_ticks::Bool=true
+)
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
+    N = length(gt_traj)
+    n_train_cutoff = max(1, floor(Int, train_ratio * N))
+
+    truncated_trajs = OrderedDict{String,Trajectory}()
+    for (name, traj) in trajs
+        @assert length(traj) == N "Incompatible trajectory $name with ground truth"
+        truncated_trajs[name] = traj[n_train_cutoff:end]
+    end
+    plot_position_rmse(truncated_trajs, gt_traj[n_train_cutoff:end]; show_index_ticks=show_index_ticks)
 end
 
 
@@ -388,7 +454,50 @@ function plot_position_distance_error(
     axislegend(ax; position=:rt)
     return fig
 end
+function plot_position_distance_error(
+    trajs::Union{AbstractDict{String,Trajectory},Trajectory},
+    gt_traj::Trajectory,
+    bools::AbstractVector{Bool}
+)
+    # Wrap single trajectory in a dict
+    if trajs isa Trajectory
+        trajs = Dict("Estimation" => trajs)
+    end
 
+    # Find indices where bools is true
+    idxs = findall(bools)
+    if isempty(idxs)
+        @warn "No true values in bools; plotting without markers."
+    end
+
+    fig = Figure(size=(800, 600))
+    ax = Axis(fig[1, 1];
+        xlabel="Time (s)",
+        ylabel="Position error (m)",
+        title="Absolute Distance Error",
+        xgridvisible=true)
+
+    for (key, traj) in trajs
+        n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
+        # Horizontal distance error per sample (no cumulative sum)
+        diff = traj.pos[1:2, 1:n] .- gt_traj.pos[1:2, 1:n]
+        dist = sqrt.(sum(diff .^ 2, dims=1))[:]   # (n,)
+
+        # Plot the error line
+        lines!(ax, traj.t[1:n], dist; linewidth=1.2, label=key)
+
+        # Overlay dots at positions where bools is true and within the valid time range
+        valid_idxs = filter(i -> i ≤ n, idxs)
+        if !isempty(valid_idxs)
+            scatter!(ax, traj.t[valid_idxs], dist[valid_idxs];
+                marker=:circle, color=:black, markersize=8,
+                strokewidth=1, strokecolor=:white)
+        end
+    end
+
+    axislegend(ax; position=:rt)
+    return fig
+end
 
 function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
     """
@@ -427,6 +536,7 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     return fig
 end
+
 function indices_and_ages_within_lifetime(times::Vector{Float64}, current_idx::Int, lifetime::Float64)
     current_time = times[current_idx]
     ages = current_time .- times[1:current_idx]
@@ -455,7 +565,7 @@ function make_ring_data(
     alpha_fn=x -> 1f0 - x,
     z_phase::Float32=0.0f0
 )
-    ff = footfall_idxs[footfall_idxs.≤current_idx]
+    ff = footfall_idxs[footfall_idxs .≤ current_idx]
     isempty(ff) && return (Point3f[], RGBAf[])
 
     ages = times[current_idx] .- times[ff]
@@ -493,6 +603,7 @@ function make_ring_data(
     return (pts, colors)
 end
 
+
 function animate_trajectory(
     traj::Trajectory, segs::Vector{Int};
     lifetime::Float64=1.0,
@@ -501,11 +612,9 @@ function animate_trajectory(
     padding::Float64=0.3,
     scale::Float32=2.1f0
 )
-    set_theme!(theme_black())
-
-    inferno = cgrad(:inferno)
-
-    current_color = get(inferno, 0.95)
+    inferno = cgrad(:viridis)
+    curr_color_frac = 0.9f0
+    current_color = get(inferno, curr_color_frac)
     current_color_rgba = RGBAf(current_color.r, current_color.g, current_color.b, 1f0)
 
     positions = traj.pos
@@ -520,7 +629,7 @@ function animate_trajectory(
         trail_idxs, _ = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
         length(trail_idxs) < 2 && return Point3f[]
         pts = Point3f[]
-        for k in 1:length(trail_idxs)-1
+        for k in 1:(length(trail_idxs)-1)
             push!(pts,
                 Point3f(positions[:, trail_idxs[k]]...),
                 Point3f(positions[:, trail_idxs[k+1]]...))
@@ -531,11 +640,11 @@ function animate_trajectory(
     trail_colors = @lift begin
         trail_idxs, trail_ages = indices_and_ages_within_lifetime(times, $current_idx, lifetime)
         length(trail_idxs) < 2 && return RGBAf[]
-        map(1:length(trail_idxs)-1) do k
+        map(1:(length(trail_idxs)-1)) do k
             # Use the older end of each segment to determine color
             frac = Float32(trail_ages[k+1] / lifetime)
             # Sample inferno: newest near 0.95, oldest near 0.0
-            cmap_pos = 0.95f0 * (1f0 - frac)
+            cmap_pos = curr_color_frac * (1f0 - frac)
             c = get(inferno, cmap_pos)
             α = clamp(1f0 - frac, 0f0, 1f0)
             RGBAf(c.r, c.g, c.b, α)
@@ -566,7 +675,7 @@ function animate_trajectory(
     azimuth = @lift deg2rad(30 + 30 * sin(2π * $current_idx / (framerate * 30)))
 
     # ── Figure & plots ────────────────────────────────────────────────────────
-    fig = Figure(size=(800, 600))
+    fig = Figure(size=(1000, 800))
     ax = Axis3(fig[1, 1]; aspect=:data, title="Trajectory Animation")
     limits!(ax,
         minimum(positions[1, :]) - padding, maximum(positions[1, :]) + padding,
@@ -587,8 +696,114 @@ function animate_trajectory(
     )
     connect!(ax.azimuth, azimuth)
 
-    record(fig, filepath, 1:N; framerate=framerate) do i
+    record(fig, filepath, 1:N; framerate=framerate, profile="high", pixel_format="yuv420p") do i
         current_idx[] = i
+    end
+
+    return fig
+end
+
+function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix}; axis_len=0.3)
+    N = length(positions)
+    @assert length(Rs) == N
+
+    fig = Figure(size=(900, 700))
+    ax = Axis3(fig[1, 1], aspect=:data, title="Trajectory")
+
+    # slider – use update_while_dragging=false if desired
+    sl = Slider(fig[2, 1], range=1:N, startvalue=1, update_while_dragging=true)
+
+    # --- Trail: lift on slider value ---
+    trail = lift(sl.value) do idx
+        positions[1:idx]     # returns Vector{Point3f}
+    end
+    lines!(ax, trail, color=:dodgerblue, linewidth=3)
+
+    # --- full path: lift on slider value ---
+    trail = lift(sl.value) do idx
+        positions[(idx):end]     # returns Vector{Point3f}
+    end
+    lines!(ax, trail, color=:gray70, linewidth=1)
+
+    # --- Current point ---
+    current_pos = lift(sl.value) do idx
+        positions[idx]       # returns Point3f
+    end
+    scatter!(ax, current_pos, color=:black, markersize=12)
+
+    # --- Body axes segments ---
+    for (i, col) in enumerate(1:3)
+        color = (:red, :green, :blue)[i]
+        seg = lift(sl.value) do idx
+            p = positions[idx]
+            R = Rs[idx]
+            dir = Point3f(R[:, col])            # force Float32
+            Point3f[p, p+dir*Float32(axis_len)]   # concretely typed vector
+        end
+        lines!(ax, seg, color=color, linewidth=4)
+    end
+
+    # --- Label (can also use @lift or lift) ---
+    lbl = lift(sl.value) do idx
+        "Step: $idx / $N"
+    end
+    Label(fig[0, 1], lbl, tellwidth=false)
+
+    fig
+end
+
+function plot_trajectory(traj::Trajectory; axis_len=0.3)
+    n = length(traj)
+    points = Vector{Point3f}(undef, n)
+    mats = Vector{Matrix{Float32}}(undef, n)
+    for i in 1:n
+        points[i] = Point3f(traj.pos[:, i])
+        mats[i] = traj.R_nb[:, :, i]
+    end
+    plot_trajectory(points, mats; axis_len=axis_len)
+end
+
+"""
+Plot multiple channels (rows of `data`) versus `time`.
+
+# Arguments
+- `data`: `n_channel × N` matrix, each row is a channel.
+- `time`: time vector of length N (defaults to indices 1:N).
+- `labels`: vector of strings of length `n_channel` for legend.
+            Defaults to "ch1", "ch2", ...
+- `offset`: if `nothing`, all lines are overlaid.
+            If a number, each channel is shifted vertically by
+            `(i-1) * offset` (e.g., for stacked EEG).
+- `colormap`: any Makie colormap (Symbol or vector of colors) – 
+                for categorical colors use `:tab10`, `:Set1`, etc.
+- `kwargs...`: passed to `lines!` (e.g., `linewidth=1.5`).
+"""
+function plot_channels(data::Matrix, time::AbstractVector=axes(data, 2);
+    labels::Union{AbstractVector,Nothing}=nothing,
+    offset::Union{Real,Nothing}=nothing,
+    colormap::Union{Symbol,AbstractVector}=:tab10,
+    kwargs...)
+
+    n_ch, N = size(data)
+    labels = isnothing(labels) ? ["ch$i" for i in 1:n_ch] : labels
+    time = collect(time)
+
+    fig = Figure(size=(800, 600))
+    ax = Axis(fig[1, 1], xlabel="Time", ylabel="Amplitude",
+        title="Channel Plot")
+
+    # Get categorical colors – this replaces the deprecated `to_colormap`
+    colors = Makie.categorical_colors(colormap, n_ch)
+
+    offsets = isnothing(offset) ? zeros(n_ch) : (0:(n_ch-1)) * offset
+
+    for i in 1:n_ch
+        y = data[i, :] .+ offsets[i]
+        lines!(ax, time, y; color=colors[i], label=labels[i], kwargs...)
+    end
+
+    if n_ch > 1
+        Legend(fig[2, :], ax, "Channels"; orientation=:horizontal, tellwidth=false)
     end
 
     return fig

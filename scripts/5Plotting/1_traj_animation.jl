@@ -1,5 +1,6 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+using GLMakie
 
 data_key = "ANG2"
 data_dir = Dict{String,String}(
@@ -15,5 +16,7 @@ ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ = HybridZuptInsJl.compute_al
 
 
 filepath = joinpath("out/Media", "trajectory.mp4")
-fig = HybridZuptInsJl.animate_trajectory(gt_traj_aligned, segs; lifetime=1.2, filepath=filepath)
-display(fig)
+with_theme() do
+    fig = HybridZuptInsJl.animate_trajectory(gt_traj_aligned, segs; lifetime=1.2, filepath=filepath)
+    display(fig)
+end

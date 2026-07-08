@@ -1,32 +1,25 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
-data_key = "ANG"
+data_key = "DCSC"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "MT" => "data/mti-100-recordings",
-    "ANG2" => "data/angermann_v2"
+    "ANG2" => "data/angermann_v2",
+    "DCSC" => "data/dcsc_optitrack"
 )[data_key]
-trial_id = 15
-inertial = HybridZuptInsJl.InertialData(data_dir, trial_id)
+trial_id = 8
 
-# fig_gt = HybridZuptInsJl.plot_trajectory_xyz_euler(gt_traj)
-# Δt = -0.0
-# gt_traj = HybridZuptInsJl.Trajectory(
-#     (gt.t .+ Δt),
-#     gt.pos,
-#     gt.R_nb,
-#     gt.vel
-# )
-
-sim_config = HybridZuptInsJl.InsConfig()
-
-# Compute INS trajectory from inertial data
-zupt, ins_traj, segs = HybridZuptInsJl.smoothed_zupt_aided_ins(inertial, sim_config)
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj, nothing; samples=10000000000000)
+ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
+    data_dir, trial_id
+)
 
 
 ##
-fig_segs = HybridZuptInsJl.plot_inertialdata_and_stepsegm(inertial, segs; zupt=zupt)
-fig_3d = HybridZuptInsJl.plot_trajectory_3d(ins_traj)
-fig_steps = HybridZuptInsJl.plot_step_lengths(ins_traj, nothing, segs)
+fig_segs = HybridZuptInsJl.plot_inertialdata_and_stepsegm(inertial_updated, segs; zupt=zupt)
+fig_3d = HybridZuptInsJl.plot_trajectory_3d(ins_traj_aligned)
+fig_steps = HybridZuptInsJl.plot_step_lengths(ins_traj_aligned, nothing, segs)
+fig_rmse = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned[segs], gt_traj_aligned[segs])
+fig_dist = HybridZuptInsJl.plot_position_distance_error(ins_traj_aligned, gt_traj_aligned)
+fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj_aligned, gt_traj_aligned; stop=2000)
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)

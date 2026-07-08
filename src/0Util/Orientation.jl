@@ -298,7 +298,7 @@ normalize_quat(q::AbstractVector{<:Integer}) = normalize_quat(float.(q))
 normalize_quat(q::AbstractMatrix{<:Integer}) = normalize_quat(float.(q))
 
 
-function quat_multiply(p::AbstractVector, q::AbstractVector)
+function quat_multiply(p::AbstractVector{T}, q::AbstractVector{T})::AbstractVector{T} where T<:Real
     pw, px, py, pz = p
     qw, qx, qy, qz = q
     return [
@@ -354,6 +354,11 @@ function skew(v::AbstractMatrix{T}) where T<:Real
     return S_batch
 end
 
+function skew2vec(S::AbstractMatrix{T}) where T<:Real
+    @assert size(S) == (3, 3)
+    return [S[3, 2], S[1, 3], S[2, 1]]
+end
+
 
 function quat_conjugate(q::AbstractVector{T}) where T<:Real
     length(q) == 4 || throw(DimensionMismatch("Expected vector of length 4, got $(length(q))"))
@@ -361,41 +366,19 @@ function quat_conjugate(q::AbstractVector{T}) where T<:Real
     return [qw, -qx, -qy, -qz]
 end
 
+function quat_conjugate(q::AbstractMatrix{T}) where T<:Real
+    size(q, 1) == 4 || throw(DimensionMismatch("Expected 4 rows, got $(size(q,1))"))
+    q_out = similar(q)
+    q_out[1, :] .= q[1, :]   # scalar part stays unchanged
+    q_out[2, :] .= -q[2, :]   # negate x
+    q_out[3, :] .= -q[3, :]   # negate y
+    q_out[4, :] .= -q[4, :]   # negate z
+    return q_out
+end
+
 function quat_exp(v::Vector{T}) where T<:Real
     length(v) == 3 || throw(DimensionMismatch("Expected vector of length 3, got $(length(v))"))
     ϕ = LinearAlgebra.norm(v)
     ϕ < 1e-9 && return [1.0, 0.0, 0.0, 0.0]
     return vcat(cos(ϕ / 2), v ./ ϕ .* sin(ϕ / 2))
-end
-
-function jacobian_∂θ3_∂δθ_right(R::AbstractMatrix{T})::AbstractVector{T} where T<:Real
-    size(R) == (3, 3) || throw(DimensionMismatch("Expected matrix of size (3,3), got $(size(R))"))
-    denom = (R[1, 1]^2 + R[2, 1]^2)
-    denom < 1e-9 && @warn "`jacobian_∂θ3_∂δθ_right` Close to singular division, denom = $(denom)"
-    return [
-        0,
-        (R[2, 1] * R[1, 3] - R[1, 1] * R[2, 3]) / (denom),
-        (R[1, 1] * R[2, 2] - R[2, 1] * R[1, 2]) / (denom)
-    ]
-end
-
-function jacobian_∂θ3_∂δθ_right(q::AbstractVector{T})::AbstractVector{T} where T<:Real
-    length(q) == 4 || throw(DimensionMismatch("Expected vector of length 4, got $(length(q))"))
-    return jacobian_∂θ3_∂δθ_right(quat_to_matrix(q))
-end
-
-function jacobian_∂θ3_∂δθ_left(R::AbstractMatrix{T})::AbstractVector{T} where T<:Real
-    size(R) == (3, 3) || throw(DimensionMismatch("Expected matrix of size (3,3), got $(size(R))"))
-    denom = (R[1, 1]^2 + R[2, 1]^2)
-    denom < 1e-9 && @warn "`jacobian_∂θ3_∂δθ_left` Close to singular division, denom = $(denom)"
-    return [
-        (-R[1, 1] * R[3, 1]) / denom,
-        (-R[2, 1] * R[3, 1]) / denom,
-        1.0
-    ]
-end
-
-function jacobian_∂θ3_∂δθ_left(q::AbstractVector{T})::AbstractVector{T} where T<:Real
-    length(q) == 4 || throw(DimensionMismatch("Expected vector of length 4, got $(length(q))"))
-    return jacobian_∂θ3_∂δθ_left(quat_to_matrix(q))
 end

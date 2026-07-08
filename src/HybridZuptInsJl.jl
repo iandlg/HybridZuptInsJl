@@ -3,7 +3,7 @@ module HybridZuptInsJl
 using LinearAlgebra, Statistics
 import Quaternions
 using Rotations, DSP
-import Interpolations
+import Interpolations, FFTW
 using CSV, DataFrames, JSON, OrderedCollections
 using GLMakie, Makie.Colors
 import Optim
@@ -21,12 +21,14 @@ include("0Util/IO.jl")
 include("0Util/Util.jl")
 include("0Util/HSGP.jl")
 include("0Util/KalmanFilter.jl")
+include("0Util/Derivatives.jl")
 
 include("1Data/TimeSeries.jl")
 include("1Data/Trajectory.jl")
 include("1Data/InertialData.jl")
 include("1Data/Structs.jl")
 include("1Data/CollectTrialIO.jl")
+include("1Data/Preprocessing.jl")
 
 include("2ZuptIns/Equations.jl")
 include("2ZuptIns/Zupt.jl")
@@ -40,9 +42,9 @@ include("4OnlineCorrection/NominalCorrectors.jl")
 include("4OnlineCorrection/NominalHybridZuptIns.jl")
 include("4OnlineCorrection/HybridZuptIns.jl")
 include("4OnlineCorrection/HyrbridGpZuptIns.jl")
-include("4OnlineCorrection/VariabilityAnalysis.jl")
 include("4OnlineCorrection/Correctors.jl")
 include("4OnlineCorrection/HybridZuptInsV2.jl")
+include("4OnlineCorrection/VariabilityAnalysis.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")
