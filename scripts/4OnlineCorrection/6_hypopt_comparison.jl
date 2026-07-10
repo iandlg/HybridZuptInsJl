@@ -1,6 +1,6 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using GLMakie, OrderedCollections, Statistics
+using GLMakie, OrderedCollections, Statistics, Random
 
 # --- Choose Parameters file
 hsgp_p_key = 30
@@ -31,6 +31,7 @@ normalize_y = false
 
 trial_id = 15 # meta["trial_id"]
 train_ratio = 0.45
+rng = Random.Xoshiro(123)
 
 ## --- Load Data ---
 res = HybridZuptInsJl.collect_trial_io_online(data_dir, trial_id; frame=FRAME, feature_type=FEATURE_TYPE)
@@ -76,12 +77,19 @@ for (idx, symb) in enumerate(output_symbols)
     # Noise lower bound (original -> normalized)
     noise_lower_orig = max(target.data_std[idx, 1:n_train_cutoff]...)
     noise_lower_norm = noise_lower_orig / σ_y[idx]
-    if symb == "yaw"
-        noise_lower_norm += 0.1
-    end
+
     @info "Lower noise bound for $symb : σn ≥ $noise_lower_orig (original), $noise_lower_norm (normalized)"
-    default_lower = 1e-9
-    lower = [noise_lower_norm; 0.1; fill(default_lower, 2)]
+    default_lower = 1e-4
+    default_upper = 1e3
+    lower = [noise_lower_norm; fill(default_lower, 3)]
+    upper = fill(default_upper, 4)
+    if symb == "yaw"
+        lower[2] = 0.05
+        upper[2] = 0.1
+
+        lower[3] = 0.05
+        upper[3] = 0.5
+    end
     @show lower
 
     # First fit in normalized space
@@ -89,7 +97,7 @@ for (idx, symb) in enumerate(output_symbols)
         HybridZuptInsJl.hsgp_regression(
             input_norm[:, 1:n_train_cutoff]', target_norm[idx, 1:n_train_cutoff],
             input_norm[:, (n_train_cutoff+1):end]', m;
-            use_linear=false, LL=LL_norm, lower=lower
+            use_linear=false, LL=LL_norm, lower=lower, rng=rng, upper=upper
         )
 
     # Input uncertainty in normalized space
@@ -109,13 +117,23 @@ for (idx, symb) in enumerate(output_symbols)
     # Update noise bound with input uncertainty and re‑run
     noise_lower_norm += sqrt(max(var_x_norm...))
     lower = [noise_lower_norm; fill(default_lower, 3)]
-    @show lower
+    upper = fill(default_upper, 4)
+    if symb == "yaw"
+        # lower[1] = max(noise_lower_norm, 0.2)
+        # upper[1] = 2.0
 
+        lower[2] = 0.05
+        upper[2] = 0.1
+
+        lower[3] = 0.05
+        upper[3] = 0.1
+    end
+    @show lower
     pred_norm, pred_var_norm, theta, lik, _, _, _, _ =
         HybridZuptInsJl.hsgp_regression(
             input_norm[:, 1:n_train_cutoff]', target_norm[idx, 1:n_train_cutoff],
             input_norm[:, (n_train_cutoff+1):end]', m;
-            use_linear=false, LL=LL_norm, lower=lower
+            use_linear=false, LL=LL_norm, lower=lower, rng=rng, upper=upper
         )
 
     # Unnormalize predictions
@@ -130,7 +148,7 @@ end
 pred = HybridZuptInsJl.CorrectionIO(
     target.t[(n_train_cutoff+1):end], pred_data, sqrt.(pred_var)
 )
-
+# hyps["yaw"] = hsgp_base.hp.yaw
 hsgp_opt = HybridZuptInsJl.HsgpParameters(
     HybridZuptInsJl.SeHyperparams(hyps), d, m, Lvec_norm;
     input_stats=input_stats, output_stats=output_stats, mid_norm=mid_norm
@@ -217,7 +235,7 @@ fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_tr
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
 with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=true)
+    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
 end
 with_theme(theme_ggplot2()) do
     fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])

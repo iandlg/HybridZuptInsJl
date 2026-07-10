@@ -983,18 +983,18 @@ function stride_measurement_update!(c::SlamCorrector;
     # c.H[:, 1:6] .= 0.0
     c.H[:, 1:6] += c.∂y∂z * ∂feature_norm∂δpδθ(
         feature_type; σ_input=c.params.input_stats[2], R_aug_wl=R_aug_wl, q_curr=c.quat[:, c.i])
-    c.H[:, 1:6] .= 0.0
+    # c.H[:, 1:6] .= 0.0
 
     D = Diagonal(σ_n(c.params) .^ 2)
-    α = tr(D) / tr(Σ_err)
+    # α = tr(D) / tr(Σ_err)
 
     c.δx, c.Σ = measurement_update(
         c.δx, c.Σ,
         stride_err,
         c.H,
-        (D + α * Σ_err)
+        Σ_err # (D + α * Σ_err)
     )
-    return stride_err, diag((D + α * Σ_err))
+    return stride_err, Σ_err # diag((D + α * Σ_err))
 end
 
 function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
