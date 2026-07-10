@@ -180,7 +180,12 @@ function hybrid_zupt_aided_insv2(
         if has_params
             feat_norm = deepcopy(feature)
             Σ_feat_norm = deepcopy(Σ_feature)
-            normalize_feature!(feature_type; feature=feat_norm, Σ_feature=Σ_feat_norm, input_stats=corrector.params.input_stats)
+            normalize_feature!(feature_type;
+                feature=feat_norm,
+                Σ_feature=Σ_feat_norm,
+                input_stats=corrector.params.input_stats,
+                mid_norm=corrector.params.mid_norm
+            )
 
             target_norm = deepcopy(stride_err)
             target_norm = (target_norm .- corrector.params.output_stats[1]) ./ corrector.params.output_stats[2]

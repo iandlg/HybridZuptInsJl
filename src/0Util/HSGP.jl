@@ -347,6 +347,9 @@ optional linear kernel component plus a squared-exponential kernel.
 - `opt`          : which of `theta` to optimise — length-4 `Bool` vector (default all `true`)
 - `use_linear`   : include the linear kernel component (default `true`)
 - `predcf`       : kernel components for prediction — `[1]` = linear, `[2]` = SE (default `[1, 2]`)
+- `lower`        : lower bounds for `[σₙ, ℓ, σ_f, σ_lin]` (default `1e-6`)
+- `upper`        : upper bounds for `[σₙ, ℓ, σ_f, σ_lin]` (default `1e6`)
+- `rng`          : optional RNG; when provided and `theta` is empty, sample `theta` uniformly in log-space from the bounds
 - `optimizer`    : `Optim.jl` optimizer (default `LBFGS()`)
 - `optim_options`: `Optim.Options` (default `Optim.Options()`)
 
@@ -369,7 +372,8 @@ function hsgp_regression(
     use_linear::Bool=true,
     predcf::AbstractVector{Int}=[1, 2],
     lower::AbstractVector{T}=fill(T(1e-6), 4),
-    upper::AbstractVector{T}=fill(T(Inf), 4),
+    upper::AbstractVector{T}=fill(T(1e6), 4),
+    rng::Optional{Random.AbstractRNG}=nothing,
     optimizer=Optim.LBFGS(),
     optim_options=Optim.Options()
 ) where {T<:Real}
@@ -392,7 +396,18 @@ function hsgp_regression(
 
     # ---------- Default hyperparameters ----------
     if isempty(theta)
-        theta = T[1.0, 0.1, 1.0, 1e-9]   # σ_n, ℓ, σ_f, σ_lin
+        if rng === nothing
+            theta = clamp.(T[0.8, 0.2, 1.0, 1e-9], lower, upper)   # σ_n, ℓ, σ_f, σ_lin
+        else
+            if any(!isfinite, lower) || any(!isfinite, upper)
+                error("random start requires finite lower and upper bounds")
+            end
+            if any(lower .<= zero(T)) || any(upper .<= zero(T))
+                error("random start requires positive lower and upper bounds")
+            end
+            theta = exp.(log.(lower) .+ rand(rng, length(lower)) .* (log.(upper) .- log.(lower)))
+            @info "random start : " theta
+        end
     end
 
     # ---------- Scale inputs to [-Lᵢ, Lᵢ] ----------

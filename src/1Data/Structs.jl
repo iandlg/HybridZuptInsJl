@@ -212,6 +212,7 @@ struct HsgpParameters
     LL::Vector{Float64}
     input_stats::Vector{Vector{Float64}}   # [mean(d,), std(d,)]
     output_stats::Vector{Vector{Float64}}  # [[mean_pos(3,), mean_yaw], [std_pos(3,), std_yaw]]
+    mid_norm::Vector{Float64}
 
     function HsgpParameters(
         hp::SeHyperparams,
@@ -219,7 +220,8 @@ struct HsgpParameters
         m::Int,
         LL::Union{Float64,Vector{Float64}};
         input_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
-        output_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing
+        output_stats::Union{Nothing,Vector{Vector{Float64}}}=nothing,
+        mid_norm::Optional{Vector{Float64}}=nothing
     )
         LL_vec = LL isa Float64 ? fill(LL, d) : copy(LL)
         length(LL_vec) == d ||
@@ -244,7 +246,9 @@ struct HsgpParameters
             output_stats_ = [mean_vec, _safe_std(std_vec)]
         end
 
-        new(hp, d, m, LL_vec, input_stats_, output_stats_)
+        mid_norm_ = isnothing(mid_norm) ? fill(0.0, d) : mid_norm
+
+        new(hp, d, m, LL_vec, input_stats_, output_stats_, mid_norm_)
     end
 end
 
@@ -256,13 +260,18 @@ function HsgpParameters(d::Dict{String,Union{Any,Vector{Any}}})
 
     output_stats = haskey(d, "output_stats") && !isnothing(d["output_stats"]) ?
                    [Float64.(d["output_stats"][1]), Float64.(d["output_stats"][2])] : nothing
+
+    mid_norm = haskey(d, "mid_norm") && !isnothing(d["mid_norm"]) ?
+               Float64.(d["mid_norm"]) : nothing
+
     HsgpParameters(
         hp,
         d["d"],
         d["m"],
         Float64.(d["LL"]);
         input_stats=input_stats,
-        output_stats=output_stats
+        output_stats=output_stats,
+        mid_norm
     )
 end
 
@@ -273,7 +282,8 @@ function basecopy(
     new_output_stats=nothing,
     new_LL=nothing,
     new_d=nothing,
-    new_m=nothing
+    new_m=nothing,
+    new_mid=nothing
 )
     hp = isnothing(new_hp) ? base.hp : new_hp
     d = isnothing(new_d) ? base.d : new_d
@@ -281,7 +291,8 @@ function basecopy(
     LL = isnothing(new_LL) ? base.LL : new_LL
     ins = isnothing(new_input_stats) ? base.input_stats : new_input_stats
     outs = isnothing(new_output_stats) ? base.output_stats : new_output_stats
-    return HsgpParameters(hp, d, m, LL; input_stats=ins, output_stats=outs)
+    mid = isnothing(new_mid) ? base.mid_norm : new_mid
+    return HsgpParameters(hp, d, m, LL; input_stats=ins, output_stats=outs, mid_norm=mid)
 end
 
 function to_json(

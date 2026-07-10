@@ -72,34 +72,34 @@ function compute_feature(feature_type::FeatureType;
     return feature_fun(), isnothing(Σ_ins_stride) ? nothing : feature_cov_fun()
 end
 
-function ∂feature_∂δpδθ(feature_type::FeatureType; σ_output::AbstractVector{T}, R_aug_wl::AbstractMatrix{T}, q_curr::AbstractVector{T}) where T<:Real
+function ∂feature_norm∂δpδθ(feature_type::FeatureType; σ_input::AbstractVector{T}, R_aug_wl::AbstractMatrix{T}, q_curr::AbstractVector{T}) where T<:Real
     feature_deriv_fun = Dict{FeatureType,Function}(
-        THREED_STEP => () -> ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3]),
+        THREED_STEP => () -> ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3]),
         TWOD_STEP_DT => () -> [
-            ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3])[1:2, :];
-            ∂featureΔT_∂δpδθ(T)'
+            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3])[1:2, :];
+            ∂feature_normΔT_∂δpδθ(T)'
         ],
         THREED_STEP_DT => () -> [
-            ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3]);
-            ∂featureΔT_∂δpδθ(T)'
+            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3]);
+            ∂feature_normΔT_∂δpδθ(T)'
         ],
         AUG_STEP => () -> [
-            ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3]);
-            ∂featureΔθ3_∂δpδθ(q_curr, σ_output[4])'
+            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3]);
+            ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
         ],
         TWOD_STEP_YAW => () -> [
-            ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3])[1:2, :];
-            ∂featureΔθ3_∂δpδθ(q_curr, σ_output[4])'
+            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3])[1:2, :];
+            ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
         ],
         TWOD_STEP_DT_YAW => () -> [
-            ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3])[1:2, :];
-            ∂featureΔT_∂δpδθ(T)';
-            ∂featureΔθ3_∂δpδθ(q_curr, σ_output[4])'
+            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3])[1:2, :];
+            ∂feature_normΔT_∂δpδθ(T)';
+            ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
         ],
         THREED_STEP_DT_YAW => () -> [
-            ∂feature𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_output[1:3]);
-            ∂featureΔT_∂δpδθ(T)';
-            ∂featureΔθ3_∂δpδθ(q_curr, σ_output[4])'
+            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3]);
+            ∂feature_normΔT_∂δpδθ(T)';
+            ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
         ]
     )[feature_type]
     return feature_deriv_fun()
@@ -109,7 +109,8 @@ function normalize_feature!(
     feature_type::FeatureType;
     feature::AbstractVector{Float64},
     Σ_feature::Union{Nothing,AbstractMatrix{Float64}}=nothing,
-    input_stats::Vector{Vector{Float64}}
+    input_stats::Vector{Vector{Float64}},
+    mid_norm::Vector{Float64}
 )::Tuple{AbstractVector{Float64},Union{Nothing,AbstractMatrix{Float64}}}
 
     μ = input_stats[1]
@@ -136,6 +137,9 @@ function normalize_feature!(
 
     # Scale features in-place
     feature ./= σ
+
+    # Center feature
+    feature .-= mid_norm
 
     # Covariance normalization
     Σ_feature_norm = if isnothing(Σ_feature)
@@ -733,7 +737,8 @@ function stride_measurement_update!(c::SplitHybridCorrector;
     Σ_err = Diagonal(1 ./ c.params.output_stats[2]) * (Σ_err) * Diagonal(1 ./ c.params.output_stats[2])
 
     # Compute input feature and normalize
-    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+    normalize_feature!(feature_type;
+        feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
     # ------------ Construct Feature Covariance ---------
     for output_d in axes(c.∂y∂z, 1)
@@ -783,7 +788,8 @@ function learned_measurement_update!(c::SplitHybridCorrector;
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
 
     # Normalise estimated feature and feature covariance
-    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+    normalize_feature!(feature_type;
+        feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
     for output_d in axes(c.∂y∂z, 1)
         for input_d in axes(c.∂y∂z, 2)
@@ -940,7 +946,8 @@ function stride_measurement_update!(c::SlamCorrector;
 
     # ------ Construct measurement --------
     # Normalise input feature
-    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+    normalize_feature!(feature_type;
+        feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
     # Compute eigenvector
     c.ϕ = calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
@@ -963,7 +970,7 @@ function stride_measurement_update!(c::SlamCorrector;
     c.∂y∂z = Diagonal(c.params.output_stats[2]) * c.∂y∂z # denormalize prediction
 
     # Construct Hβ
-    kron!(view(c.H, 1:4, 7:(6+4*c.params.m)), Matrix{Float64}(I, 4, 4), c.ϕ)
+    kron!(view(c.H, 1:4, 7:(6+4*c.params.m)), Diagonal(c.params.output_stats[2]), c.ϕ)
 
     # Construct Hp
     c.H[:, 1:6] .= 0.0
@@ -973,18 +980,21 @@ function stride_measurement_update!(c::SlamCorrector;
     # c.H[4, 4:6] = ∂θ3_∂δθ_left(c.quat[:, c.i])
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
     # Add GP contribution to δp and δθ
-    c.H[:, 1:6] += c.∂y∂z * ∂feature_∂δpδθ(feature_type; σ_output=c.params.output_stats[2], R_aug_wl=R_aug_wl, q_curr=c.quat[:, c.i])
+    # c.H[:, 1:6] .= 0.0
+    c.H[:, 1:6] += c.∂y∂z * ∂feature_norm∂δpδθ(
+        feature_type; σ_input=c.params.input_stats[2], R_aug_wl=R_aug_wl, q_curr=c.quat[:, c.i])
+    # c.H[:, 1:6] .= 0.0
 
     D = Diagonal(σ_n(c.params) .^ 2)
-    α = tr(D) / tr(Σ_err)
+    # α = tr(D) / tr(Σ_err)
 
     c.δx, c.Σ = measurement_update(
         c.δx, c.Σ,
         stride_err,
         c.H,
-        (D + α * Σ_err)
+        Σ_err # (D + α * Σ_err)
     )
-    return stride_err, diag((D + α * Σ_err))
+    return stride_err, Σ_err # diag((D + α * Σ_err))
 end
 
 function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -1012,7 +1022,8 @@ function learned_measurement_update!(c::SlamCorrector;
 
     # ------ Construct Pseudo Measurement ------
     # Normalise input feature
-    normalize_feature!(feature_type; feature=feature, Σ_feature=Σ_feature, c.params.input_stats)
+    normalize_feature!(feature_type;
+        feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
     # Compute basis function values
     c.ϕ = calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
@@ -1033,19 +1044,18 @@ function learned_measurement_update!(c::SlamCorrector;
         end
     end
 
+    # --- Compute covariance in normalized output space
     Σ_pred = Matrix{Float64}(undef, 4, 4)
     for row in axes(Σ_pred, 1)
         for col in axes(Σ_pred, 2)
             Σ_pred[row:row, col:col] = c.ϕ * c.Σ[((row-1)*c.params.m+7):(row*c.params.m+6), ((col-1)*c.params.m+7):(col*c.params.m+6)] * c.ϕ'
         end
     end
-    # kron!(view(c.H, 1:4, 7:(6+c.params.m*4)), I(4), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
 
-    # Compute prediction and prediction covariance
-    # Σ_pred = c.H[1:4, 7:end] * c.Σ[7:end, 7:end] * c.H[1:4, 7:end]' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
-    # Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
     Σ_pred += c.∂y∂z * Σ_feature * c.∂y∂z' # input uncertainty
     Σ_pred_norm = deepcopy(Σ_pred)
+
+    # --- Denormalise prediction covariance ---
     Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2]) # Denormalise
 
     # Update measurement matrix H_update
@@ -1053,6 +1063,8 @@ function learned_measurement_update!(c::SlamCorrector;
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
 
+    # Σ_pred[4, :] .*= 1e-4
+    # Σ_pred[:, 4] .*= 1e-4
 
     c.δx, c.Σ = measurement_update(
         c.δx, c.Σ,
@@ -1069,10 +1081,11 @@ function relinearize!(c::SlamCorrector)
     c.β += c.δx[7:end]
     c.δx .= 0.0
 
-    # c.Σ[1:6, 7:end] .= 0.0
-    # c.Σ[7:end, 1:6] .= 0.0
+    c.Σ[1:6, 7:end] .= 0.0
+    c.Σ[7:end, 1:6] .= 0.0
 end
 
 function get_β_Σβ(c::SlamCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return c.β, c.Σ[7:end, 7:end]
 end
+

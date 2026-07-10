@@ -5,14 +5,14 @@ using Printf, LinearAlgebra
 using GLMakie, Statistics
 
 
-data_key = "ANG2"
+data_key = "DCSC"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "MTI" => "data/mti-100-recordings",
     "ANG2" => "data/angermann_v2",
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
-trial_id = 14
+trial_id = 1
 imu = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 # gt = HybridZuptInsJl.Trajectory(gt.t, gt.pos[[1, 3, 2], :], gt.R_nb)
@@ -66,9 +66,8 @@ R = HybridZuptInsJl.fit_constant_rotation(ω_imu, ω_opti)
 residuals = ω_opti .- R * ω_imu
 rms_error = sqrt(mean(sum(residuals .^ 2, dims=1)))
 
-fig = HybridZuptInsJl.plot_inertial_data(gt_aligned.t[2:(end-1)], ω_opti, R * ω_imu)
-fig = HybridZuptInsJl.plot_inertial_data(imu_sync.t[2:(end-1)], R * ω_imu)
-
+display(GLMakie.Screen(), HybridZuptInsJl.plot_inertial_data(gt_aligned.t[2:(end-1)], ω_opti, R * ω_imu))
+display(GLMakie.Screen(), HybridZuptInsJl.plot_inertial_data(imu_sync.t[2:(end-1)], R * ω_imu))
 mats = similar(gt_aligned.R_nb)
 for i in axes(mats, 3)
     mats[:, :, i] = gt_aligned.R_nb[:, :, i] * R

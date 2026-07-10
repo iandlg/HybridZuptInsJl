@@ -109,13 +109,14 @@ function plot_regression_results(
             end
         end
     end
-
-    # ── Legends / grid ────────────────────────────────────────────────
+    # Legend(fig[n_cols+1, :], axes[1]; orientation=:horizontal, tellwidth=false)
+    # # ── Legends / grid ────────────────────────────────────────────────
     for ax in axes
         axislegend(ax; position=:rt, framevisible=true)
         ax.xgridvisible = true
         ax.ygridvisible = true
     end
+
 
     return fig
 end
