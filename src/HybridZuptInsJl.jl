@@ -44,6 +44,7 @@ include("4OnlineCorrection/HybridZuptIns.jl")
 include("4OnlineCorrection/HyrbridGpZuptIns.jl")
 include("4OnlineCorrection/Correctors.jl")
 include("4OnlineCorrection/HybridZuptInsV2.jl")
+include("4OnlineCorrection/DataProcessing.jl")
 include("4OnlineCorrection/VariabilityAnalysis.jl")
 
 include("Plotting/Trajectory.jl")

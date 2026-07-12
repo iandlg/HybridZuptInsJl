@@ -368,6 +368,8 @@ mutable struct StaticCorrector <: AbstractCorrector
 
     # Corrector specific Arguments
     stride_err_mean::AbstractMatrix{Float64}
+
+    ws::KalmanWorkspace{Float64}
 end
 
 function StaticCorrector(N::Int)::StaticCorrector
@@ -382,7 +384,8 @@ function StaticCorrector(N::Int)::StaticCorrector
         zeros(Float64, 4, 10),      # H
         1,                          # i
         zeros(Float64, 10, 10),     # F
-        zeros(Float64, 4, N)        # stride_err_mean
+        zeros(Float64, 4, N),        # stride_err_mean
+        KalmanWorkspace{Float64}(10, 4)
     )
 end
 
@@ -437,11 +440,12 @@ function stride_measurement_update!(c::StaticCorrector;
     stride_err -= c.stride_err_mean[:, c.i]
     # stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
 
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
+    measurement_update!(
+        view(c.δx, 1:10, c.i), c.Σ,
         stride_err,
         c.H,
-        Σ_err
+        Σ_err,
+        c.ws
     )
     return stride_err, nothing
 end
@@ -455,11 +459,12 @@ function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector
     # @info "Measurement matrix H" c.H[:, :, c.i]
     # @info "Covariance matrix before meas upd" c.Σ
 
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
+    measurement_update!(
+        view(c.δx, 1:10, c.i), c.Σ,
         vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
         c.H,
-        Σy
+        Σy,
+        c.ws
     )
 end
 
@@ -469,11 +474,12 @@ function learned_measurement_update!(c::StaticCorrector;
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
     c.H[:, 7:end] .= 0.0
 
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
+    measurement_update!(
+        view(c.δx, 1:10, c.i), c.Σ,
         c.stride_err_mean[:, c.i],
         c.H,
-        c.Σ[7:end, 7:end]
+        c.Σ[7:end, 7:end],
+        c.ws
     )
     return c.stride_err_mean[:, c.i], diag(c.Σ[7:end, 7:end]), nothing, nothing
 end
@@ -630,6 +636,9 @@ mutable struct SplitHybridCorrector <: AbstractCorrector
     Φ::AbstractMatrix{Float64}
     per_dim_eigvals::AbstractMatrix{Float64}
     σ_n::AbstractVector{Float64}
+
+    ws_state::KalmanWorkspace{Float64}
+    ws_hsgp::KalmanWorkspace{Float64}
 end
 
 function SplitHybridCorrector(N::Int, params::HsgpParameters)::SplitHybridCorrector
@@ -650,7 +659,9 @@ function SplitHybridCorrector(N::Int, params::HsgpParameters)::SplitHybridCorrec
         zeros(Float64, 4, params.d),
         zeros(Float64, 4, params.m * 4),
         zeros(Float64, params.m, params.d),
-        zeros(Float64, 4)
+        zeros(Float64, 4),
+        KalmanWorkspace{Float64}(6, 4),
+        KalmanWorkspace{Float64}(params.m * 4, 4)
     )
 end
 
@@ -756,9 +767,10 @@ function stride_measurement_update!(c::SplitHybridCorrector;
     )
 
     α = tr(Diagonal(c.σ_n .^ 2)) / tr(Σ_err)
-    c.β, c.Σβ = measurement_update(
-        c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err # Diagonal(noise_vect .^ 2)
-    )
+    # c.β, c.Σβ = measurement_update(
+    #     c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err # Diagonal(noise_vect .^ 2)
+    # )
+    measurement_update!(c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err, c.ws_hsgp)
 
     return nothing, nothing
 end
@@ -772,11 +784,18 @@ function posyaw_measurement_update!(c::SplitHybridCorrector; curr_pos::AbstractV
     # @info "Measurement matrix H" c.H[:, :, c.i]
     # @info "Covariance matrix before meas upd" c.Σ[:, :, c.i]
 
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
+    # c.δx[:, c.i], c.Σ = measurement_update(
+    #     c.δx[:, c.i], c.Σ,
+    #     [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
+    #     c.H[:, :, c.i],
+    #     Σy
+    # )
+    measurement_update!(
+        view(c.δx, 1:6, c.i), c.Σ,
         [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
         c.H[:, :, c.i],
-        Σy
+        Σy,
+        c.ws_state
     )
 end
 
@@ -814,11 +833,18 @@ function learned_measurement_update!(c::SplitHybridCorrector;
     pred = R_aug_wl * pred
     Σ_pred = R_aug_wl * Σ_pred * R_aug_wl'
 
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
+    # c.δx[:, c.i], c.Σ = measurement_update(
+    #     c.δx[:, c.i], c.Σ,
+    #     pred,
+    #     c.H[:, :, c.i],
+    #     Σ_pred
+    # )
+    measurement_update!(
+        view(c.δx, 1:6, c.i), c.Σ,
         pred,
         c.H[:, :, c.i],
-        Σ_pred
+        Σ_pred,
+        c.ws_state
     )
     return pred, diag(Σ_pred), nothing, nothing
 end
@@ -850,6 +876,8 @@ mutable struct SlamCorrector <: AbstractCorrector
     ∂y∂z::AbstractMatrix{Float64}
     ϕ::AbstractMatrix{Float64}
     per_dim_eigvals::AbstractMatrix{Float64}
+
+    ws::KalmanWorkspace{Float64}
 end
 
 function SlamCorrector(N::Int, params::HsgpParameters)::SlamCorrector
@@ -869,6 +897,7 @@ function SlamCorrector(N::Int, params::HsgpParameters)::SlamCorrector
         Matrix{Float64}(undef, 4, params.d),                        # ∂y∂z
         Matrix{Float64}(undef, 1, params.m),                           # ϕ
         Matrix{Float64}(undef, params.m, params.d),                 # per_dim_eigvals
+        KalmanWorkspace{Float64}(6 + 4 * params.m, 4)
     )
 end
 
@@ -988,12 +1017,8 @@ function stride_measurement_update!(c::SlamCorrector;
     D = Diagonal(σ_n(c.params) .^ 2)
     # α = tr(D) / tr(Σ_err)
 
-    c.δx, c.Σ = measurement_update(
-        c.δx, c.Σ,
-        stride_err,
-        c.H,
-        Σ_err # (D + α * Σ_err)
-    )
+    measurement_update!(c.δx, c.Σ, stride_err, c.H, Σ_err, c.ws)
+
     return stride_err, Σ_err # diag((D + α * Σ_err))
 end
 
@@ -1007,11 +1032,11 @@ function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{F
     # @info "Measurement matrix H" c.H[:, :, c.i]
     # @info "Covariance matrix before meas upd" c.Σ[:, :, c.i]
 
-    c.δx, c.Σ = measurement_update(
+    measurement_update!(
         c.δx, c.Σ,
         [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
-        c.H,
-        Σy
+        c.H, Σy,
+        c.ws
     )
 end
 
@@ -1057,7 +1082,7 @@ function learned_measurement_update!(c::SlamCorrector;
 
     # --- Denormalise prediction covariance ---
     Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2]) # Denormalise
-
+    # Σ_pred .*= 1e-3
     # Update measurement matrix H_update
     c.H[:, :] .= 0.0
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
@@ -1066,12 +1091,7 @@ function learned_measurement_update!(c::SlamCorrector;
     # Σ_pred[4, :] .*= 1e-4
     # Σ_pred[:, 4] .*= 1e-4
 
-    c.δx, c.Σ = measurement_update(
-        c.δx, c.Σ,
-        pred,
-        c.H,
-        Σ_pred
-    )
+    measurement_update!(c.δx, c.Σ, pred, c.H, Σ_pred, c.ws)
     return pred, diag(Σ_pred), pred_norm, diag(Σ_pred_norm)
 end
 

@@ -408,6 +408,8 @@ function hsgp_regression(
             theta = exp.(log.(lower) .+ rand(rng, length(lower)) .* (log.(upper) .- log.(lower)))
             @info "random start : " theta
         end
+    else
+        theta = clamp.(theta, lower, upper)
     end
 
     # ---------- Scale inputs to [-Lᵢ, Lᵢ] ----------

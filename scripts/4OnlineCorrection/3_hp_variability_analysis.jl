@@ -2,13 +2,14 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
 # Choose Parameters file
-hsgp_p_key = 30
+hsgp_p_key = 40
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     12 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-26T13:06:11.411.json",
     20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
     21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
-    30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json"
+    30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json",
+    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T14:24:26.288.json"
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -35,9 +36,9 @@ train_ratio = 0.45
 rmse_fun = HybridZuptInsJl.make_rmse_evaluator(data_dir, trial_id, train_ratio, FEATURE_TYPE, FRAME, m)
 
 # Experiment variables
-groups = [:pos_1, :pos_2, :pos_3, :yaw]
+groups = [:yaw]
 log_range = (-1.0, 1.0)
-n_steps = 20
+n_steps = 3
 baseline_included = true
 
 specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
@@ -105,11 +106,11 @@ basename = Dict(
 csv_file = joinpath(outdir, "$basename.csv")
 json_file = joinpath(outdir, "$basename.json")
 
-df, meta = HybridZuptInsJl.load_hp_variation_results(csv_file, json_file)
+df, metadata = HybridZuptInsJl.load_hp_variation_results(csv_file, json_file)
 
-grid = HybridZuptInsJl.grid_from_dict(meta["grid"])
+grid = HybridZuptInsJl.grid_from_dict(metadata["grid"])
 log_range = (
-    float(meta["log10_range"][1]), float(meta["log10_range"][2]))
+    float(metadata["log10_range"][1]), float(metadata["log10_range"][2]))
 with_theme(theme_ggplot2()) do
     HybridZuptInsJl.plot_hp_sensitivity(df, grid, log_range; save_path="out/4OnlineCorrection/3HpVariabilityAnalysis/plots/$basename.svg")
 end

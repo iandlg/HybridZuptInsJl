@@ -3,14 +3,15 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 30
+hsgp_p_key = 40
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
     21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
     22 => "out/3OfflineCorrection/3_HsgpResults/ANG215_BODY_THREED_STEP_2026-06-06T17:33:50.999.json",
-    30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json"
+    30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json",
+    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json"
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -25,9 +26,8 @@ data_dir = Dict{String,String}(
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 m = 200
-margin = meta["margin"]
 var_pos = 1e-2
-var_yaw = 1e-5
+var_yaw = 1e-3
 
 trial_id = 15 # meta["trial_id"]
 train_ratio = 0.45
@@ -35,7 +35,7 @@ train_ratio = 0.45
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
 )
-sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
+# sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
@@ -70,10 +70,11 @@ zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zu
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-tatic_corr2 = HybridZuptInsJl.StaticCorrectorV2(round(Int, N / 60))
-zupt, step_seg, stat_corr_traj2, io_data["Static2"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr2;
+tatic_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
+zupt, step_seg, stat_corr_traj, io_data["Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+
 
 splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_p)
 zupt, step_seg, hsgp1_corr_traj, io_data["SplitHsgp"], split_β_Σβ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
@@ -95,7 +96,7 @@ end
 
 trajs = OrderedDict(
     "zupt ins" => def_corr_traj,
-    "static correction" => stat_corr_traj2,
+    "static correction" => stat_corr_traj,
     "split hsgp correction" => hsgp1_corr_traj,
     "slam hsgp" => slamHsgp_corr_traj
 )
