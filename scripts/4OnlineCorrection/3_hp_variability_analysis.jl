@@ -9,7 +9,7 @@ hsgp_p_path = Dict{Int,String}(
     20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
     21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
     30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json",
-    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T14:24:26.288.json"
+    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json"
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -37,8 +37,8 @@ rmse_fun = HybridZuptInsJl.make_rmse_evaluator(data_dir, trial_id, train_ratio, 
 
 # Experiment variables
 groups = [:yaw]
-log_range = (-1.0, 1.0)
-n_steps = 3
+log_range = (-4.0, 1.0)
+n_steps = 10
 baseline_included = true
 
 specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
@@ -94,13 +94,16 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using CairoMakie
 outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
-basename_key = 32
+basename_key = 52
 basename = Dict(
     11 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T13:47:42.748",
     16 => "ANG15_BODY_TWOD_STEP_DT_2026-06-01T10:20:18.078",
     30 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T16:36:18.693",
     31 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T17:59:58.069",
-    32 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T18:47:22.051"
+    32 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T18:47:22.051",
+    50 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:00:16.347",
+    51 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:04:45.711",
+    52 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:13:58.727"
 )[basename_key]
 
 csv_file = joinpath(outdir, "$basename.csv")
