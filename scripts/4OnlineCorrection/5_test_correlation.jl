@@ -10,7 +10,7 @@ data_dir = Dict{String,String}(
     "ANG2" => "data/angermann_v2"
 )[data_key]
 
-trial_ids = collect(1:2)
+trial_ids = [1, 2, 3, 4, 5, 6, 12, 13, 14, 15, 16]
 
 
 frames = [
@@ -43,6 +43,11 @@ for frame in frames
         output_io = HybridZuptInsJl.CorrectionIO(
             output_io.t, output_io.data[[1, 2, 4], :], output_io.data_std[[1, 2, 4], :]
         )
+
+        # Remove outliers
+        input_io, output_io = HybridZuptInsJl.remove_outliers(input_io, output_io;
+            method="mahalanobis", threshold=3.0, alpha=0.975, dims=:output)
+
 
         # Compute training IO and CCA (reuse run_correlation_analysis but only return CCA results)
         fig, canonical_corrs, _ = HybridZuptInsJl.run_correlation_analysis(input_io, output_io;

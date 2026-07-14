@@ -76,7 +76,7 @@ function ∂feature_norm∂δpδθ(feature_type::FeatureType; σ_input::Abstract
     feature_deriv_fun = Dict{FeatureType,Function}(
         THREED_STEP => () -> ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3]),
         TWOD_STEP_DT => () -> [
-            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3])[1:2, :];
+            ∂feature_norm𝑥𝑦_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:2]);
             ∂feature_normΔT_∂δpδθ(T)'
         ],
         THREED_STEP_DT => () -> [
@@ -88,11 +88,11 @@ function ∂feature_norm∂δpδθ(feature_type::FeatureType; σ_input::Abstract
             ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
         ],
         TWOD_STEP_YAW => () -> [
-            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3])[1:2, :];
-            ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
+            ∂feature_norm𝑥𝑦_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:2]);
+            ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[3])'
         ],
         TWOD_STEP_DT_YAW => () -> [
-            ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:3])[1:2, :];
+            ∂feature_norm𝑥𝑦_∂δpδθ(R_aug_wl[1:3, 1:3], σ_input[1:2]);
             ∂feature_normΔT_∂δpδθ(T)';
             ∂feature_normΔθ3_∂δpδθ(q_curr, σ_input[4])'
         ],

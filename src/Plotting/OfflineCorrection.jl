@@ -1,4 +1,22 @@
 """
+    plot_line_with_std!(ax, t, data, data_std; color, label=nothing, linewidth=1.4, kwargs...)
+
+Add a line plot to `ax` with two uncertainty bands (1σ and 2σ) drawn from `data_std`.
+If `data_std` is `nothing`, only the line is plotted.
+
+Only the line carries the `label` – the bands are silent in the legend.
+"""
+function plot_line_with_std!(ax, t, data, data_std; color, label=nothing, linewidth=1.4, kwargs...)
+    if !isnothing(data_std)
+        # 2σ band (lighter)
+        # band!(ax, t, data .- 2data_std, data .+ 2data_std; color=(color, 0.1), label=label)
+        # 1σ band
+        band!(ax, t, data .- data_std, data .+ data_std; color=(color, 0.15), label=label)
+    end
+    lines!(ax, t, data; color=color, linewidth=linewidth, label=label, kwargs...)
+end
+
+"""
     plot_regression_results(
         pred_data::Union{Nothing,AbstractDict{String,Union{CorrectionIO, Dict}}},
         true_data::Union{CorrectionIO, Matrix{Float64}})
@@ -17,14 +35,11 @@ function plot_regression_results(
     pred_data::Union{Nothing,AbstractDict{String,CorrectionIO}},
     true_data::Union{Nothing,CorrectionIO}=nothing
 )
-    # ── Time axis: prefer true_data, else first pred ──────────────────
     ref = isnothing(true_data) ? first(values(pred_data)) : true_data
     t = ref.t
-    N = length(t)
     n_dim = size(ref.data, 1)
     @assert 1 <= n_dim <= 4
 
-    # ── Determine grid layout ─────────────────────────────────────────
     n_cols = min(2, n_dim)
     n_rows = ceil(Int, n_dim / n_cols)
     fig = Figure(size=(1200, 900))
@@ -35,42 +50,35 @@ function plot_regression_results(
         col = (idx - 1) % n_cols + 1
         ax = Axis(fig[row, col])
 
-        # ylabel: meters for first 3, radians for 4th (if exists)
         if idx <= 3
             ax.ylabel = "meters"
         elseif idx == 4
             ax.ylabel = "radians"
         end
-        # xlabel only on bottom row
         if row == n_rows
             ax.xlabel = "Time (s)"
         end
         axes[idx] = ax
     end
 
-    # ── Ground truth ──────────────────────────────────────────────────
+    # Ground truth
     if !isnothing(true_data)
         for (plot_idx, row) in enumerate(1:n_dim)
-            lines!(axes[plot_idx], true_data.t, true_data.data[row, :];
+            std_vals = isnothing(true_data.data_std) ? nothing : true_data.data_std[row, :]
+            plot_line_with_std!(axes[plot_idx], true_data.t, true_data.data[row, :],
+                std_vals;
                 color=:black, linewidth=0.9, label="Target")
-
-            if !isnothing(true_data.data_std)
-                μ = true_data.data[row, :]
-                σ = true_data.data_std[row, :]
-                band!(axes[plot_idx], true_data.t, μ .- σ, μ .+ σ;
-                    color=(:black, 0.15))
-            end
         end
     end
 
-    # ── Predictions ───────────────────────────────────────────────────
+    # Predictions
     if !isnothing(pred_data)
         colors = [:red, :blue, :green, :orange, :purple]
 
         for (method_idx, (method_name, pred)) in enumerate(pred_data)
             color = colors[(method_idx-1)%length(colors)+1]
 
-            # ── RMSE on overlapping interval ──────────────────────────
+            # RMSE on overlapping interval
             rmse = fill(NaN, 4)
             if !isnothing(true_data)
                 res = truncate_to_overlap(true_data, pred)
@@ -81,7 +89,6 @@ function plot_regression_results(
                             "Series '$method_name' is not compatible with ground truth " *
                             "(different lengths or timestamps differ > 1e-9). " *
                             "Truncate first or resample."))
-
                     for (plot_idx, row) in enumerate(1:n_dim)
                         rmse[plot_idx] = sqrt(mean(
                             (pred_trim.data[row, :] .- gt_trim.data[row, :]) .^ 2))
@@ -92,34 +99,26 @@ function plot_regression_results(
             for (plot_idx, row) in enumerate(1:n_dim)
                 rmse_str = isnan(rmse[plot_idx]) ? "" :
                            " (RMSE=$(round(rmse[plot_idx]; digits=4)))"
-                label = "$method_name$rmse_str"
-
-                lines!(axes[plot_idx], pred.t, pred.data[row, :];
-                    color=color,
-                    linewidth=1.4,
-                    label=label)
-
-                # ── Confidence band (±1 std) ──────────────────────────
-                if !isnothing(pred.data_std)
-                    μ = pred.data[row, :]
-                    σ = pred.data_std[row, :]
-                    band!(axes[plot_idx], pred.t, μ .- σ, μ .+ σ;
-                        color=(color, 0.15))
-                end
+                std_vals = isnothing(pred.data_std) ? nothing : pred.data_std[row, :]
+                std_str = isnothing(std_vals) ? "" : " (Mean Std=$(round(mean(std_vals);digits=3)))"
+                label = "$method_name$rmse_str$std_str"
+                plot_line_with_std!(axes[plot_idx], pred.t, pred.data[row, :],
+                    std_vals;
+                    color=color, label=label)
             end
         end
     end
-    # Legend(fig[n_cols+1, :], axes[1]; orientation=:horizontal, tellwidth=false)
-    # # ── Legends / grid ────────────────────────────────────────────────
+
     for ax in axes
-        axislegend(ax; position=:rt, framevisible=true)
+        axislegend(ax; position=:rt, merge=true)
         ax.xgridvisible = true
         ax.ygridvisible = true
     end
-
+    # Legend(fig[n_rows+1, :], [ax for ax in axes]; orientation=:horizontal, merge=true)
 
     return fig
 end
+
 
 function plot_regression_results(
     pred_data::CorrectionIO,

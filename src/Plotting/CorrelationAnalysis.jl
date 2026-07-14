@@ -71,7 +71,6 @@ function run_correlation_analysis(
     feature_type::Union{FeatureType,Nothing}=nothing,
     output_labels::Vector{String}=["Δx", "Δy", "Δz", "Δψ"]
 )
-
     # Extract data matrices
     input_feature = input_io.data
     output_matrix = output_io.data
@@ -154,6 +153,15 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
     # z matrix: rows = outputs (y-axis), columns = inputs (x-axis)
     hm = heatmap!(ax, 1:n_in, 1:n_out, (corr_mat) .^ 2)
 
+    # Add text annotations
+    for i in 1:n_in, j in 1:n_out
+        val = corr_mat[i, j]^2
+        if val >= 0.1
+            text!(ax, i, j, text="$(round(val, digits=2))";
+                color=:black,
+                align=(:center, :center))
+        end
+    end
     # Horizontal colorbar below the heatmap
     Colorbar(fig[2, 1], hm, label="R²", vertical=false)
 
