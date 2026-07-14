@@ -137,7 +137,7 @@ function make_rmse_evaluator(
             input_stats=hsgp_params.input_stats,
             output_stats=hsgp_params.output_stats
         )
-        slamHsgp_corr = SlamCorrector(round(Int, 300), hsgp_params)
+        slamHsgp_corr = JointHsgpEstimator(round(Int, 300), hsgp_params)
         _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
             inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)

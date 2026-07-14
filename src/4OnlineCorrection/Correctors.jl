@@ -355,7 +355,7 @@ function get_β_Σβ(c::DefaultCorrector)::Optional{Tuple{AbstractVector{Float64
     return nothing
 end
 
-mutable struct StaticCorrector <: AbstractCorrector
+mutable struct JointStaticEstimator <: AbstractCorrector
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -372,9 +372,9 @@ mutable struct StaticCorrector <: AbstractCorrector
     ws::KalmanWorkspace{Float64}
 end
 
-function StaticCorrector(N::Int)::StaticCorrector
+function JointStaticEstimator(N::Int)::JointStaticEstimator
     @assert N > 1 "Invalid number of "
-    return StaticCorrector(
+    return JointStaticEstimator(
         zeros(Float64, N),          # t
         zeros(Float64, 3, N),       # pos
         zeros(Float64, 4, N),       # quat
@@ -389,7 +389,7 @@ function StaticCorrector(N::Int)::StaticCorrector
     )
 end
 
-function initialize_corrector!(c::StaticCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+function initialize_corrector!(c::JointStaticEstimator; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
@@ -404,7 +404,7 @@ function initialize_corrector!(c::StaticCorrector; t::Float64, pos_init::Abstrac
     c.i = 1
 end
 
-function dynamic_update!(c::StaticCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+function dynamic_update!(c::JointStaticEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
     c.i += 1
     c.t[c.i] = t
 
@@ -430,7 +430,7 @@ function dynamic_update!(c::StaticCorrector; t::Float64, Δp::AbstractVector{Flo
     c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
 end
 
-function stride_measurement_update!(c::StaticCorrector;
+function stride_measurement_update!(c::JointStaticEstimator;
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
@@ -450,7 +450,7 @@ function stride_measurement_update!(c::StaticCorrector;
     return stride_err, nothing
 end
 
-function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+function posyaw_measurement_update!(c::JointStaticEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
     c.H[:, 7:end] .= 0.0
@@ -468,7 +468,7 @@ function posyaw_measurement_update!(c::StaticCorrector; curr_pos::AbstractVector
     )
 end
 
-function learned_measurement_update!(c::StaticCorrector;
+function learned_measurement_update!(c::JointStaticEstimator;
     R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
     c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
@@ -484,19 +484,158 @@ function learned_measurement_update!(c::StaticCorrector;
     return c.stride_err_mean[:, c.i], diag(c.Σ[7:end, 7:end]), nothing, nothing
 end
 
-function relinearize!(c::StaticCorrector)
+function relinearize!(c::JointStaticEstimator)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     c.stride_err_mean[:, c.i] += c.δx[7:end, c.i]
     # c.δx[:, c.i] .= 0.0
 
-    c.Σ[1:6, 7:10] .= 0.0
-    c.Σ[7:10, 1:6] .= 0.0 # zero cross covs
+    # c.Σ[1:6, 7:10] .= 0.0
+    # c.Σ[7:10, 1:6] .= 0.0 # zero cross covs
 end
 
-function get_β_Σβ(c::StaticCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_β_Σβ(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return nothing
 end
+
+mutable struct DecoupledStaticEstimator <: AbstractCorrector
+    t::AbstractVector{Float64}
+    pos::AbstractMatrix{Float64}
+    quat::AbstractMatrix{Float64}
+    δx::AbstractVector{Float64}
+    Σ::AbstractMatrix{Float64}
+    G::AbstractMatrix{Float64}
+    H::AbstractMatrix{Float64}
+    i::Int
+    F::AbstractMatrix{Float64}
+
+    # Corrector specific Arguments
+    stride_bias::AbstractVector{Float64}
+    Σ_bias::AbstractMatrix{Float64}
+
+
+    ws_state::KalmanWorkspace{Float64}
+    ws_bias::KalmanWorkspace{Float64}
+end
+
+function DecoupledStaticEstimator(N::Int)::DecoupledStaticEstimator
+    @assert N > 1 "Invalid number of "
+    return DecoupledStaticEstimator(
+        zeros(Float64, N),          # t
+        zeros(Float64, 3, N),       # pos
+        zeros(Float64, 4, N),       # quat
+        zeros(Float64, 6),      # δx
+        zeros(Float64, 6, 6),     # Σ
+        zeros(Float64, 6, 6),      # G
+        zeros(Float64, 4, 6),      # H
+        1,                          # i
+        zeros(Float64, 6, 6),     # F
+        zeros(Float64, 4),        # stride_bias
+        zeros(Float64, 4, 4),
+        KalmanWorkspace{Float64}(6, 4),
+        KalmanWorkspace{Float64}(4, 4),
+    )
+end
+
+function initialize_corrector!(c::DecoupledStaticEstimator; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+    c.t[1] = t
+    c.pos[:, 1] = pos_init
+    c.quat[:, 1] = quat_init
+    c.δx[:, 1] .= 0.0
+    c.Σ .= Σpq_init
+
+    c.stride_bias .= 0.0
+    c.Σ_bias = Matrix{Float64}(I, 4, 4) .* 1e2
+
+    c.G .= Matrix{Float64}(I, 6, 6)
+    c.H .= 0.0
+    c.F .= 0.0
+    c.i = 1
+end
+
+function dynamic_update!(c::DecoupledStaticEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+    c.i += 1
+    c.t[c.i] = t
+
+    R_prev = quat_to_matrix(c.quat[:, c.i-1])
+
+    # Nominal update
+    c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
+    c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
+
+    c.G .= 0.0
+    c.G[1:3, 1:3] = R_prev
+    c.G[4:6, 4:6] = quat_to_matrix(c.quat[:, c.i])
+
+    c.F .= 0.0
+    c.F[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
+    c.F[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
+    c.F[1:3, 4:6] .= -skew(R_prev * Δp)
+
+    # Covariance update
+    c.δx .= 0.0
+    c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
+end
+
+function stride_measurement_update!(c::DecoupledStaticEstimator;
+    stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
+    kwargs...)
+    c.H .= 0.0
+    for i in 1:4
+        c.H[i, i] = 1.0
+    end
+
+    measurement_update!(
+        c.stride_bias, c.Σ_bias,
+        stride_err,
+        c.H[1:4, 1:4],
+        Σ_err,
+        c.ws_bias
+    )
+    return stride_err - c.stride_bias, nothing
+end
+
+function posyaw_measurement_update!(c::DecoupledStaticEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+    c.H .= 0.0
+    c.H[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
+
+    measurement_update!(
+        c.δx, c.Σ,
+        vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
+        c.H,
+        Σy,
+        c.ws_state
+    )
+end
+
+function learned_measurement_update!(c::DecoupledStaticEstimator;
+    R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
+    c.H .= 0.0
+    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+
+    measurement_update!(
+        c.δx, c.Σ,
+        c.stride_bias,
+        c.H,
+        c.Σ_bias,
+        c.ws_state
+    )
+    return c.stride_bias, diag(c.Σ_bias), nothing, nothing
+end
+
+function relinearize!(c::DecoupledStaticEstimator)
+    c.pos[:, c.i] += c.δx[1:3]
+    c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6]), c.quat[:, c.i])
+    c.δx .= 0.0
+end
+
+function get_β_Σβ(c::DecoupledStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return nothing
+end
+
 
 mutable struct StaticCorrectorV2 <: AbstractCorrector
     t::AbstractVector{Float64}
@@ -617,7 +756,7 @@ function get_β_Σβ(c::StaticCorrectorV2)::Optional{Tuple{AbstractVector{Float6
     return nothing
 end
 
-mutable struct SplitHybridCorrector <: AbstractCorrector
+mutable struct DecoupledHsgpEstimator <: AbstractCorrector
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -641,9 +780,9 @@ mutable struct SplitHybridCorrector <: AbstractCorrector
     ws_hsgp::KalmanWorkspace{Float64}
 end
 
-function SplitHybridCorrector(N::Int, params::HsgpParameters)::SplitHybridCorrector
+function DecoupledHsgpEstimator(N::Int, params::HsgpParameters)::DecoupledHsgpEstimator
     @assert N > 1 "Invalid number of "
-    return SplitHybridCorrector(
+    return DecoupledHsgpEstimator(
         zeros(Float64, N),                              # t
         zeros(Float64, 3, N),                           # pos
         zeros(Float64, 4, N),                           # quat
@@ -665,7 +804,7 @@ function SplitHybridCorrector(N::Int, params::HsgpParameters)::SplitHybridCorrec
     )
 end
 
-function initialize_corrector!(c::SplitHybridCorrector;
+function initialize_corrector!(c::DecoupledHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
     β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.t[1] = t
@@ -712,7 +851,7 @@ function initialize_corrector!(c::SplitHybridCorrector;
     c.i = 1
 end
 
-function dynamic_update!(c::SplitHybridCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+function dynamic_update!(c::DecoupledHsgpEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
     c.i += 1
     c.t[c.i] = t
 
@@ -736,7 +875,7 @@ function dynamic_update!(c::SplitHybridCorrector; t::Float64, Δp::AbstractVecto
     c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
 end
 
-function stride_measurement_update!(c::SplitHybridCorrector;
+function stride_measurement_update!(c::DecoupledHsgpEstimator;
     feature_type::FeatureType,
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64},
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64},
@@ -770,13 +909,13 @@ function stride_measurement_update!(c::SplitHybridCorrector;
     # c.β, c.Σβ = measurement_update(
     #     c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err # Diagonal(noise_vect .^ 2)
     # )
-    measurement_update!(c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err, c.ws_hsgp)
+    measurement_update!(c.β, c.Σβ, stride_err, c.Φ, Σ_err, c.ws_hsgp) # Diagonal(c.σ_n .^ 2) + α * Σ_err
 
     return nothing, nothing
 end
 
 
-function posyaw_measurement_update!(c::SplitHybridCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+function posyaw_measurement_update!(c::DecoupledHsgpEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
@@ -799,7 +938,7 @@ function posyaw_measurement_update!(c::SplitHybridCorrector; curr_pos::AbstractV
     )
 end
 
-function learned_measurement_update!(c::SplitHybridCorrector;
+function learned_measurement_update!(c::DecoupledHsgpEstimator;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
@@ -849,17 +988,17 @@ function learned_measurement_update!(c::SplitHybridCorrector;
     return pred, diag(Σ_pred), nothing, nothing
 end
 
-function relinearize!(c::SplitHybridCorrector)
+function relinearize!(c::DecoupledHsgpEstimator)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     # c.δx[:, c.i] .= 0.0
 end
 
-function get_β_Σβ(c::SplitHybridCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_β_Σβ(c::DecoupledHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return c.β, c.Σβ
 end
 
-mutable struct SlamCorrector <: AbstractCorrector
+mutable struct JointHsgpEstimator <: AbstractCorrector
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -880,9 +1019,9 @@ mutable struct SlamCorrector <: AbstractCorrector
     ws::KalmanWorkspace{Float64}
 end
 
-function SlamCorrector(N::Int, params::HsgpParameters)::SlamCorrector
+function JointHsgpEstimator(N::Int, params::HsgpParameters)::JointHsgpEstimator
     @assert N > 1 "Invalid number of prealocations"
-    return SlamCorrector(
+    return JointHsgpEstimator(
         Vector{Float64}(undef, N),                                  # t
         Matrix{Float64}(undef, 3, N),                               # pos
         Matrix{Float64}(undef, 4, N),                               # quat
@@ -901,7 +1040,7 @@ function SlamCorrector(N::Int, params::HsgpParameters)::SlamCorrector
     )
 end
 
-function initialize_corrector!(c::SlamCorrector;
+function initialize_corrector!(c::JointHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
     β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.i = 1
@@ -944,7 +1083,7 @@ function initialize_corrector!(c::SlamCorrector;
 
 end
 
-function dynamic_update!(c::SlamCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+function dynamic_update!(c::JointHsgpEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
     c.i += 1
     c.t[c.i] = t
 
@@ -967,7 +1106,7 @@ function dynamic_update!(c::SlamCorrector; t::Float64, Δp::AbstractVector{Float
     c.Σ[1:6, 1:6] = c.F * c.Σ[1:6, 1:6] * c.F' + c.G * Σpq * c.G'
 end
 
-function stride_measurement_update!(c::SlamCorrector;
+function stride_measurement_update!(c::JointHsgpEstimator;
     feature_type::FeatureType,
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64},
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
@@ -1022,7 +1161,7 @@ function stride_measurement_update!(c::SlamCorrector;
     return stride_err, Σ_err # diag((D + α * Σ_err))
 end
 
-function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+function posyaw_measurement_update!(c::JointHsgpEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6] = [0.0, 0.0, 1.0]
     c.H[:, 7:end] .= 0.0
@@ -1040,7 +1179,7 @@ function posyaw_measurement_update!(c::SlamCorrector; curr_pos::AbstractVector{F
     )
 end
 
-function learned_measurement_update!(c::SlamCorrector;
+function learned_measurement_update!(c::JointHsgpEstimator;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
@@ -1095,7 +1234,7 @@ function learned_measurement_update!(c::SlamCorrector;
     return pred, diag(Σ_pred), pred_norm, diag(Σ_pred_norm)
 end
 
-function relinearize!(c::SlamCorrector)
+function relinearize!(c::JointHsgpEstimator)
     c.pos[:, c.i] += c.δx[1:3]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6]), c.quat[:, c.i])
     c.β += c.δx[7:end]
@@ -1105,7 +1244,7 @@ function relinearize!(c::SlamCorrector)
     c.Σ[7:end, 1:6] .= 0.0
 end
 
-function get_β_Σβ(c::SlamCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_β_Σβ(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return c.β, c.Σ[7:end, 7:end]
 end
 

@@ -210,7 +210,7 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
 
-slamHsgp_corr_opt = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_opt)
+slamHsgp_corr_opt = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_opt)
 _, _, slamHsgpOpt_corr_traj, io_data["SlamHsgp Opt"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr_opt;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
@@ -220,17 +220,17 @@ zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zu
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-tatic_corr = HybridZuptInsJl.StaticCorrector(round(Int, N / 60))
+tatic_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60))
 _, _, stat_corr_traj, io_data["Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-slamHsgp_corr_base = HybridZuptInsJl.SlamCorrector(round(Int, N / 60), hsgp_base)
+slamHsgp_corr_base = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_base)
 _, _, slamHsgpBase_corr_traj, io_data["SlamHsgp Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr_base;
     x_init=x_init, gt_available=gt_available, ref_frame=base_FRAME, feature_type=base_FEATURE_TYPE)
 
-# splitHsgp_corr = HybridZuptInsJl.SplitHybridCorrector(round(Int, N / 60), hsgp_base)
+# splitHsgp_corr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_base)
 # _, _, hsgp1_corr_traj, io_data["SplitHsgp Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
 #     inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
 #     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
