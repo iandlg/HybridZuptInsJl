@@ -152,19 +152,19 @@ function normalize_feature!(
     return feature, Σ_feature_norm
 end
 
-abstract type AbstractCorrector end
+abstract type AbstractEstimator end
 
 function initialize_corrector!(
-    c::AbstractCorrector;
+    c::AbstractEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwarg...)
     error("initialize_corrector! not implemented for $(typeof(c))")
 end
 
-function dynamic_update!(c::AbstractCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwarg...)
+function dynamic_update!(c::AbstractEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwarg...)
     error("dynamic_update! not implemented for $(typeof(c))")
 end
 
-function stride_measurement_update!(c::AbstractCorrector; feature_type::FeatureType,
+function stride_measurement_update!(c::AbstractEstimator; feature_type::FeatureType,
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64},
     ins_stride::AbstractVector{Float64}, Σ_ins_stride::AbstractMatrix{Float64},
     kwargs...
@@ -172,38 +172,38 @@ function stride_measurement_update!(c::AbstractCorrector; feature_type::FeatureT
     error("stride_measurement_update! not implemented for $(typeof(c))")
 end
 
-function posyaw_measurement_update!(c::AbstractCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+function posyaw_measurement_update!(c::AbstractEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     error("posyaw_measurement_update! not implemented for $(typeof(c))")
 end
 
-function learned_measurement_update!(c::AbstractCorrector;
+function learned_measurement_update!(c::AbstractEstimator;
     kwargs...
 )::NTuple{4,Optional{AbstractVector{Float64}}}
     error("learned_measurement_update! not implemented for $(typeof(c))")
 end
 
-function relinearize!(c::AbstractCorrector; kwarg...)
+function relinearize!(c::AbstractEstimator; kwarg...)
     error("relinearize! not implemented for $(typeof(c))")
 end
 
-function get_β_Σβ(c::AbstractCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_β_Σβ(c::AbstractEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     error("get_β_Σβ not implemented for $(typeof(c))")
 end
 
 # Accessors
-function get_time(c::AbstractCorrector)::AbstractVector{Float64}
+function get_time(c::AbstractEstimator)::AbstractVector{Float64}
     return c.t[1:c.i]
 end
 
-function get_pos(c::AbstractCorrector)::AbstractMatrix{Float64}
+function get_pos(c::AbstractEstimator)::AbstractMatrix{Float64}
     return c.pos[:, 1:c.i]
 end
 
-function get_quat(c::AbstractCorrector)::AbstractMatrix{Float64}
+function get_quat(c::AbstractEstimator)::AbstractMatrix{Float64}
     return c.quat[:, 1:c.i]
 end
 
-function get_trajectory(c::AbstractCorrector)::Trajectory
+function get_trajectory(c::AbstractEstimator)::Trajectory
     Trajectory(
         get_time(c),
         get_pos(c),
@@ -253,7 +253,7 @@ function stride_error(ref_frame::ReferenceFrame;
 end
 
 # ── Concrete correctors ───────────────────────────────────────────────────
-mutable struct DefaultCorrector <: AbstractCorrector
+mutable struct DefaultCorrector <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -355,7 +355,7 @@ function get_β_Σβ(c::DefaultCorrector)::Optional{Tuple{AbstractVector{Float64
     return nothing
 end
 
-mutable struct JointStaticEstimator <: AbstractCorrector
+mutable struct JointStaticEstimator <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -498,7 +498,7 @@ function get_β_Σβ(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Flo
     return nothing
 end
 
-mutable struct DecoupledStaticEstimator <: AbstractCorrector
+mutable struct DecoupledStaticEstimator <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -637,7 +637,7 @@ function get_β_Σβ(c::DecoupledStaticEstimator)::Optional{Tuple{AbstractVector
 end
 
 
-mutable struct StaticCorrectorV2 <: AbstractCorrector
+mutable struct StaticCorrectorV2 <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -756,7 +756,7 @@ function get_β_Σβ(c::StaticCorrectorV2)::Optional{Tuple{AbstractVector{Float6
     return nothing
 end
 
-mutable struct DecoupledHsgpEstimator <: AbstractCorrector
+mutable struct DecoupledHsgpEstimator <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -998,7 +998,7 @@ function get_β_Σβ(c::DecoupledHsgpEstimator)::Optional{Tuple{AbstractVector{F
     return c.β, c.Σβ
 end
 
-mutable struct JointHsgpEstimator <: AbstractCorrector
+mutable struct JointHsgpEstimator <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}

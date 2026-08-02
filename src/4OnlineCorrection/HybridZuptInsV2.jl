@@ -2,7 +2,7 @@ function hybrid_zupt_aided_insv2(
     inertial::InertialData,
     simdata::InsConfig,
     gt_traj::Trajectory,
-    corrector::AbstractCorrector;
+    corrector::AbstractEstimator;
     step_detector::AbstractSegmentDetector=StepDetector(),
     x_init::Vector{Float64}=zeros(9),
     gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),

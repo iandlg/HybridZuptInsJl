@@ -33,7 +33,7 @@ FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta[
 
 trial_ids = HybridZuptInsJl.list_trial_ids(data_dir)
 train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-correctors = OrderedDict{String,HybridZuptInsJl.AbstractCorrector}(
+correctors = OrderedDict{String,HybridZuptInsJl.AbstractEstimator}(
     "Default" => HybridZuptInsJl.DefaultCorrector(300),
     "Static" => HybridZuptInsJl.StaticCorrectorV2(300),
     "Split" => HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, 300), hsgp_p),
