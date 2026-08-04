@@ -100,13 +100,12 @@ function KalmanWorkspace{T}(dim_x::Int, dim_z::Int) where T<:Real
         Matrix{T}(undef, dim_z, dim_x),
     )
 end
-
 """
     measurement_update!(state, stateCov, measurement, H, R, ws)
 
 In-place Kalman measurement update (Joseph form), no heap allocation.
-`state` and `stateCov` are updated in place. `ws` is a pre-allocated
-`KalmanWorkspace` sized for (dim_x, dim_z) and must be reused across calls.
+`ws` must be sized for the maximum `dim_z` you'll ever call with; smaller
+`dim_z` calls transparently use a sub-view of the workspace buffers.
 """
 function measurement_update!(state::AbstractVector{T}, stateCov::AbstractMatrix{T},
     measurement::AbstractVector{T}, H::AbstractMatrix{T},
@@ -114,11 +113,20 @@ function measurement_update!(state::AbstractVector{T}, stateCov::AbstractMatrix{
 
     dim_x = length(state)
     dim_z = length(measurement)
-    # @assert size(stateCov) == (dim_x, dim_x)
-    # @assert size(H) == (dim_z, dim_x) "Expected $((dim_z, dim_x)) got $(size(H))"
-    # @assert size(R) == (dim_z, dim_z) "Expected $((dim_z, dim_z)) got $(size(R))"
+    max_dim_z = length(ws.innovation)
 
-    innovation, HP, S, Kt, A, AP, RKt = ws.innovation, ws.HP, ws.S, ws.Kt, ws.A, ws.AP, ws.RKt
+    @assert dim_z <= max_dim_z "Workspace sized for dim_z<=$max_dim_z, got $dim_z"
+    @assert size(stateCov) == (dim_x, dim_x)
+    @assert size(H) == (dim_z, dim_x) "Expected $((dim_z, dim_x)) got $(size(H))"
+    @assert size(R) == (dim_z, dim_z) "Expected $((dim_z, dim_z)) got $(size(R))"
+
+    # Slice workspace buffers down to the actual dim_z for this call
+    innovation = view(ws.innovation, 1:dim_z)
+    HP = view(ws.HP, 1:dim_z, 1:dim_x)
+    S = view(ws.S, 1:dim_z, 1:dim_z)
+    Kt = view(ws.Kt, 1:dim_z, 1:dim_x)
+    RKt = view(ws.RKt, 1:dim_z, 1:dim_x)
+    A, AP = ws.A, ws.AP   # always dim_x-sized, no slicing needed
 
     # innovation = measurement - H*state
     mul!(innovation, H, state)

@@ -85,7 +85,7 @@ zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], split_β_Σβ = Hybr
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
-slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_p)
+slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_p; corrected_channels=[:yaw])
 zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], slam_β_Σβ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)

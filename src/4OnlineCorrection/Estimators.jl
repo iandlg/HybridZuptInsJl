@@ -152,6 +152,8 @@ function normalize_feature!(
     return feature, Σ_feature_norm
 end
 
+const _OUTPUT_NAMES = ["pos_1", "pos_2", "pos_3", "yaw"]
+
 abstract type AbstractEstimator end
 
 function initialize_corrector!(
@@ -780,8 +782,19 @@ mutable struct DecoupledHsgpEstimator <: AbstractEstimator
     ws_hsgp::KalmanWorkspace{Float64}
 end
 
-function DecoupledHsgpEstimator(N::Int, params::HsgpParameters)::DecoupledHsgpEstimator
-    @assert N > 1 "Invalid number of "
+function DecoupledHsgpEstimator(N::Int, params::HsgpParameters;
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw])::DecoupledHsgpEstimator
+    @assert N > 1 "Invalid number of allocations, got $N"
+
+    correction_mask = Int[]
+    for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw])
+        if sym in corrected_channels
+            push!(correction_mask, idx)
+        end
+    end
+    p = length(correction_mask)
+    @assert p >= 1 "Must correct at least one channel"
+
     return DecoupledHsgpEstimator(
         zeros(Float64, N),                              # t
         zeros(Float64, 3, N),                           # pos
@@ -793,14 +806,14 @@ function DecoupledHsgpEstimator(N::Int, params::HsgpParameters)::DecoupledHsgpEs
         1,                                              # i
         zeros(Float64, 6, 6),                           # F
         params,                                         # params
-        zeros(Float64, params.m * 4),                   # β
-        zeros(Float64, params.m * 4, params.m * 4),     # Σβ
-        zeros(Float64, 4, params.d),
-        zeros(Float64, 4, params.m * 4),
-        zeros(Float64, params.m, params.d),
-        zeros(Float64, 4),
+        zeros(Float64, params.m * p),                   # β
+        zeros(Float64, params.m * p, params.m * p),     # Σβ
+        zeros(Float64, p, params.d),                    # ∂y∂z
+        zeros(Float64, p, params.m * p),                # Φ
+        zeros(Float64, params.m, params.d),             # per_dim_eigvals
+        zeros(Float64, p),                              # σ_n
         KalmanWorkspace{Float64}(6, 4),
-        KalmanWorkspace{Float64}(params.m * 4, 4)
+        KalmanWorkspace{Float64}(params.m * p, p)
     )
 end
 
@@ -830,7 +843,6 @@ function initialize_corrector!(c::DecoupledHsgpEstimator;
         c.σ_n[idx] = getfield(c.params.hp, field)[1]
     end
 
-    output_names = ["pos_1", "pos_2", "pos_3", "yaw"]
     if isnothing(β_Σβ_0)
         c.β .= 0.0
     else
@@ -919,16 +931,7 @@ function posyaw_measurement_update!(c::DecoupledHsgpEstimator; curr_pos::Abstrac
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
-    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
-    # @info "Measurement matrix H" c.H[:, :, c.i]
-    # @info "Covariance matrix before meas upd" c.Σ[:, :, c.i]
 
-    # c.δx[:, c.i], c.Σ = measurement_update(
-    #     c.δx[:, c.i], c.Σ,
-    #     [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
-    #     c.H[:, :, c.i],
-    #     Σy
-    # )
     measurement_update!(
         view(c.δx, 1:6, c.i), c.Σ,
         [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
@@ -1016,14 +1019,16 @@ mutable struct JointHsgpEstimator <: AbstractEstimator
     ϕ::AbstractMatrix{Float64}
     per_dim_eigvals::AbstractMatrix{Float64}
     ws::KalmanWorkspace{Float64}
+
+    # Channel-selection
+    correction_mask::Vector{Int}   # indices into [:pos_1, :pos_2, :pos_3, :yaw] that are corrected
+    p::Int                          # number of corrected channels (length(correction_mask))
 end
 
 function JointHsgpEstimator(N::Int, params::HsgpParameters;
     corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
 )::JointHsgpEstimator
     @assert N > 1 "Invalid number of prealocations"
-    p = length(corrected_channels)
-    @assert p == 1 || p == 4 "Invalid number of correction channels, got $p"
 
     correction_mask = Int[]
     for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw])
@@ -1031,58 +1036,85 @@ function JointHsgpEstimator(N::Int, params::HsgpParameters;
             push!(correction_mask, idx)
         end
     end
+    p = length(correction_mask)
+    @assert p >= 1 "Must correct at least one channel"
+
     return JointHsgpEstimator(
         Vector{Float64}(undef, N),                                  # t
         Matrix{Float64}(undef, 3, N),                               # pos
         Matrix{Float64}(undef, 4, N),                               # quat
-        Vector{Float64}(undef, 6 + 4 * params.m),                   # δx
-        Matrix{Float64}(undef, 6 + 4 * params.m, 6 + 4 * params.m), # Σ
+        Vector{Float64}(undef, 6 + p * params.m),                   # δx
+        Matrix{Float64}(undef, 6 + p * params.m, 6 + p * params.m), # Σ
         Matrix{Float64}(undef, 6, 6),                               # G
-        Matrix{Float64}(undef, 4, 6 + 4 * params.m),                # H
+        Matrix{Float64}(undef, 4, 6 + p * params.m),                # H (4 rows = max(measurement dims: p for stride/learned, 4 for posyaw))
         1,                                                          # i
         Matrix{Float64}(undef, 6, 6),                               # F
         params,                                                     # params
-        Vector{Float64}(undef, params.m * 4),                       # β
-        Matrix{Float64}(undef, 4, params.d),                        # ∂y∂z
-        Matrix{Float64}(undef, 1, params.m),                           # ϕ
+        Vector{Float64}(undef, params.m * p),                       # β
+        Matrix{Float64}(undef, p, params.d),                        # ∂y∂z
+        Matrix{Float64}(undef, 1, params.m),                        # ϕ
         Matrix{Float64}(undef, params.m, params.d),                 # per_dim_eigvals
-        KalmanWorkspace{Float64}(6 + 4 * params.m, 4)
+        KalmanWorkspace{Float64}(6 + p * params.m, 4),
+        correction_mask,
+        p
     )
 end
+
+# Helper: full-size (4m) index range for a given physical channel (1=pos_1 ... 4=yaw)
+_full_range(orig_idx::Int, m::Int) = ((orig_idx-1)*m+1):(orig_idx*m)
 
 function initialize_corrector!(c::JointHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
     β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.i = 1
     c.t[1] = t
+    m = c.params.m
+    p = c.p
+    mask = c.correction_mask
+
     # Initialize nominal states
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
+
     if isnothing(β_Σβ_0)
         c.β .= 0.0
     else
-        copyto!(c.β, β_Σβ_0[1])
+        β_full, _ = β_Σβ_0
+        @assert length(β_full) == 4 * m "β_Σβ_0[1] must have length 4m = $(4*m), got $(length(β_full))"
+        for j in 1:p
+            orig_idx = mask[j]
+            c.β[((j-1)*m+1):(j*m)] = β_full[_full_range(orig_idx, m)]
+        end
     end
+
     # Initialize error state
     c.δx .= 0.0
     # Initialize HSGP
     c.per_dim_eigvals = calc_eigenvalues(c.params.LL, c.params.m, c.params.d)
 
-    psd = zeros(Float64, 4 * c.params.m)
-    for (idx, field) in enumerate(fieldnames(SeHyperparams))
-        psd[((idx-1)*c.params.m+1):(idx*c.params.m)] = power_spectral_density(
+    psd = zeros(Float64, p * m)
+    for (j, orig_idx) in enumerate(mask)
+        field = Symbol(_OUTPUT_NAMES[orig_idx])
+        psd[((j-1)*m+1):(j*m)] = power_spectral_density(
             sqrt.(c.per_dim_eigvals),
             getfield(c.params.hp, field)[2],
             getfield(c.params.hp, field)[3]
         )
     end
+
     # Initialize state covariance
     c.Σ .= 0.0
     c.Σ[1:6, 1:6] = Σpq_init
     if isnothing(β_Σβ_0)
         c.Σ[7:end, 7:end] = Diagonal(psd)
     else
-        c.Σ[7:end, 7:end] .= β_Σβ_0[2]
+        _, Σβ_full = β_Σβ_0
+        @assert size(Σβ_full) == (4 * m, 4 * m) "β_Σβ_0[2] must be (4m,4m) = $((4*m,4*m)), got $(size(Σβ_full))"
+        for j1 in 1:p, j2 in 1:p
+            r1 = _full_range(mask[j1], m)
+            r2 = _full_range(mask[j2], m)
+            c.Σ[(6+(j1-1)*m+1):(6+j1*m), (6+(j2-1)*m+1):(6+j2*m)] = Σβ_full[r1, r2]
+        end
     end
 
     c.∂y∂z .= 0.0
@@ -1102,7 +1134,6 @@ function dynamic_update!(c::JointHsgpEstimator; t::Float64, Δp::AbstractVector{
     # Nominal update
     c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
     c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
-    # c.β = c.β
 
     c.G[1:3, 1:3] = R_prev
     c.G[4:6, 4:6] = quat_to_matrix(c.quat[:, c.i])
@@ -1122,53 +1153,55 @@ function stride_measurement_update!(c::JointHsgpEstimator;
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)
 
-    # ------ Construct measurement --------
-    # Normalise input feature
+    p = c.p
+    mask = c.correction_mask
+    m = c.params.m
+
+    # ------ Construct measurement (masked to corrected channels) --------
     normalize_feature!(feature_type;
         feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
-    # Compute eigenvector
     c.ϕ = calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
 
-    # Compute denormalised prediction
-    for i in 1:4
-        stride_err[i] -= c.params.output_stats[2][i] * dot(c.ϕ, c.β[((i-1)*c.params.m+1):(i*c.params.m)]) + c.params.output_stats[1][i]
-    end
-    # Σ_err stays the same ie stride error measurement covariance
-    # ---> nominal measurement is done
+    stride_err_masked = stride_err[mask]
+    Σ_err_masked = Σ_err[mask, mask]
 
-    # ------- Construct measurement matrix 𝐇 = [Hp, Hθ, Hβ] ∈ R^{4 × (6 + 4 m)}
-    for output_d in axes(c.∂y∂z, 1)
+    # Compute denormalised prediction residual for corrected channels only
+    for j in 1:p
+        orig_idx = mask[j]
+        stride_err_masked[j] -= c.params.output_stats[2][orig_idx] * dot(c.ϕ, c.β[((j-1)*m+1):(j*m)]) +
+                                c.params.output_stats[1][orig_idx]
+    end
+
+    # ------- Construct measurement matrix 𝐇 = [Hp, Hθ, Hβ] ∈ R^{p × (6 + p m)}
+    for output_d in 1:p
         for input_d in axes(c.∂y∂z, 2)
             c.∂y∂z[output_d, input_d] = dot(calc_eigenvectors_dx(
                     reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
-                ), c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)])
+                ), c.β[((output_d-1)*m+1):(output_d*m)])
         end
     end
-    c.∂y∂z = Diagonal(c.params.output_stats[2]) * c.∂y∂z # denormalize prediction
+    c.∂y∂z = Diagonal(c.params.output_stats[2][mask]) * c.∂y∂z # denormalize prediction
 
     # Construct Hβ
-    kron!(view(c.H, 1:4, 7:(6+4*c.params.m)), Diagonal(c.params.output_stats[2]), c.ϕ)
+    kron!(view(c.H, 1:p, 7:(6+p*m)), Diagonal(c.params.output_stats[2][mask]), c.ϕ)
 
-    # Construct Hp
-    c.H[:, 1:6] .= 0.0
-    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    # Template Hp / Hθ over all 4 physical channels, then select the corrected rows
+    Hfull = zeros(Float64, 4, 6)
+    Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    Hfull[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[1:p, 1:6] .= Hfull[mask, :]
 
-    # Construct Hθ
-    # c.H[4, 4:6] = ∂θ3_∂δθ_left(c.quat[:, c.i])
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
     # Add GP contribution to δp and δθ
-    # c.H[:, 1:6] .= 0.0
-    c.H[:, 1:6] += c.∂y∂z * ∂feature_norm∂δpδθ(
+    c.H[1:p, 1:6] .+= c.∂y∂z * ∂feature_norm∂δpδθ(
         feature_type; σ_input=c.params.input_stats[2], R_aug_wl=R_aug_wl, q_curr=c.quat[:, c.i])
-    # c.H[:, 1:6] .= 0.0
 
-    D = Diagonal(σ_n(c.params) .^ 2)
-    # α = tr(D) / tr(Σ_err)
-
-    measurement_update!(c.δx, c.Σ, stride_err, c.H, Σ_err, c.ws)
-
-    return stride_err, Σ_err # diag((D + α * Σ_err))
+    measurement_update!(c.δx, c.Σ, stride_err_masked, view(c.H, 1:p, :), Σ_err_masked, c.ws)
+    stride_err_full = zeros(4)
+    Σ_err_full = zeros(4, 4)
+    stride_err_full[mask] = stride_err_masked
+    Σ_err_full[mask, mask] = Σ_err_masked
+    return stride_err_full, Σ_err_full
 end
 
 function posyaw_measurement_update!(c::JointHsgpEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -1177,14 +1210,11 @@ function posyaw_measurement_update!(c::JointHsgpEstimator; curr_pos::AbstractVec
     c.H[:, 7:end] .= 0.0
 
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
-    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
-    # @info "Measurement matrix H" c.H[:, :, c.i]
-    # @info "Covariance matrix before meas upd" c.Σ[:, :, c.i]
 
     measurement_update!(
         c.δx, c.Σ,
         [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
-        c.H, Σy,
+        view(c.H, 1:4, :), Σy,
         c.ws
     )
 end
@@ -1194,35 +1224,36 @@ function learned_measurement_update!(c::JointHsgpEstimator;
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
 
-    # ------ Construct Pseudo Measurement ------
-    # Normalise input feature
+    p = c.p
+    mask = c.correction_mask
+    m = c.params.m
+
+    # ------ Construct Pseudo Measurement (corrected channels only) ------
     normalize_feature!(feature_type;
         feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
-    # Compute basis function values
     c.ϕ = calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
 
-    # Compute prediction estimate
-    pred = Vector{Float64}(undef, 4)
-    for i in eachindex(pred)
-        pred[i] = dot(c.ϕ, c.β[((i-1)*c.params.m+1):(i*c.params.m)])
+    pred = Vector{Float64}(undef, p)
+    for j in 1:p
+        pred[j] = dot(c.ϕ, c.β[((j-1)*m+1):(j*m)])
     end
     pred_norm = deepcopy(pred)
-    pred = c.params.output_stats[2] .* pred .+ c.params.output_stats[1]
+    pred = c.params.output_stats[2][mask] .* pred .+ c.params.output_stats[1][mask]
 
-    for output_d in axes(c.∂y∂z, 1)
+    for output_d in 1:p
         for input_d in axes(c.∂y∂z, 2)
             c.∂y∂z[output_d, input_d:input_d] = calc_eigenvectors_dx(
                 reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
-            ) * c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)]
+            ) * c.β[((output_d-1)*m+1):(output_d*m)]
         end
     end
 
     # --- Compute covariance in normalized output space
-    Σ_pred = Matrix{Float64}(undef, 4, 4)
-    for row in axes(Σ_pred, 1)
-        for col in axes(Σ_pred, 2)
-            Σ_pred[row:row, col:col] = c.ϕ * c.Σ[((row-1)*c.params.m+7):(row*c.params.m+6), ((col-1)*c.params.m+7):(col*c.params.m+6)] * c.ϕ'
+    Σ_pred = Matrix{Float64}(undef, p, p)
+    for row in 1:p
+        for col in 1:p
+            Σ_pred[row:row, col:col] = c.ϕ * c.Σ[((row-1)*m+7):(row*m+6), ((col-1)*m+7):(col*m+6)] * c.ϕ'
         end
     end
 
@@ -1230,18 +1261,23 @@ function learned_measurement_update!(c::JointHsgpEstimator;
     Σ_pred_norm = deepcopy(Σ_pred)
 
     # --- Denormalise prediction covariance ---
-    Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2]) # Denormalise
-    # Σ_pred .*= 1e-3
+    Σ_pred = Diagonal(c.params.output_stats[2][mask]) * Σ_pred * Diagonal(c.params.output_stats[2][mask])
+
     # Update measurement matrix H_update
-    c.H[:, :] .= 0.0
-    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[1:p, :] .= 0.0
+    Hfull = zeros(Float64, 4, 6)
+    Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    Hfull[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[1:p, 1:6] .= Hfull[mask, :]
 
-    # Σ_pred[4, :] .*= 1e-4
-    # Σ_pred[:, 4] .*= 1e-4
-
-    measurement_update!(c.δx, c.Σ, pred, c.H, Σ_pred, c.ws)
-    return pred, diag(Σ_pred), pred_norm, diag(Σ_pred_norm)
+    measurement_update!(c.δx, c.Σ, pred, view(c.H, 1:p, :), Σ_pred, c.ws)
+    pred_norm_full, pred_full = zeros(4), zeros(4)
+    Σ_pred_norm_full, Σ_pred_full = zeros(4, 4), zeros(4, 4)
+    pred_norm_full[mask] = pred_norm
+    pred_full[mask] = pred
+    Σ_pred_norm_full[mask, mask] = Σ_pred_norm
+    Σ_pred_full[mask, mask] = Σ_pred
+    return pred_full, diag(Σ_pred_full), pred_norm_full, diag(Σ_pred_norm_full)
 end
 
 function relinearize!(c::JointHsgpEstimator)
@@ -1255,6 +1291,24 @@ function relinearize!(c::JointHsgpEstimator)
 end
 
 function get_β_Σβ(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
-    return c.β, c.Σ[7:end, 7:end]
-end
+    m = c.params.m
+    p = c.p
+    mask = c.correction_mask
 
+    β_full = zeros(Float64, 4 * m)
+    Σβ_full = zeros(Float64, 4 * m, 4 * m)
+
+    for j in 1:p
+        orig_idx = mask[j]
+        β_full[_full_range(orig_idx, m)] = c.β[((j-1)*m+1):(j*m)]
+    end
+
+    Σβ_internal = c.Σ[7:end, 7:end]
+    for j1 in 1:p, j2 in 1:p
+        r1 = _full_range(mask[j1], m)
+        r2 = _full_range(mask[j2], m)
+        Σβ_full[r1, r2] = Σβ_internal[((j1-1)*m+1):(j1*m), ((j2-1)*m+1):(j2*m)]
+    end
+
+    return β_full, Σβ_full
+end
