@@ -20,7 +20,7 @@ hsgp_base, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, h
 base_FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 base_FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])  # # 
 
-data_key = "ANG2" # meta["data_key"]
+data_key = "DCSC" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -31,8 +31,8 @@ m = 200
 
 
 ## --- Load Data ---
-train_ids = [1, 2, 3, 4, 8, 9, 13, 14, 16]
-test_ids = [3, 13, 15]
+train_ids = [4] # [1, 2, 3, 4, 8, 9, 13, 14, 16]
+test_ids = [4] # [3, 13, 15]
 trial_ids = vcat(train_ids, test_ids)
 FRAME = HybridZuptInsJl.HEADING
 FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_YAW
@@ -186,7 +186,7 @@ hsgp_base = HybridZuptInsJl.HsgpParameters(
 
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
-trial_id = 15
+trial_id = 4
 train_ratio = 0.45
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -220,7 +220,7 @@ zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zu
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-tatic_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60))
+tatic_corr = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60))
 _, _, stat_corr_traj, io_data["Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
@@ -261,7 +261,7 @@ fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_tr
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
 with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=true)
+    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
 end
 with_theme(theme_ggplot2()) do
     fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])

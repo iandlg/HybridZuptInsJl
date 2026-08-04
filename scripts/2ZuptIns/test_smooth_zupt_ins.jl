@@ -1,12 +1,13 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
-data_key = "ANG2"
+data_key = "DCSC"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2"
+    "ANG2" => "data/angermann_v2",
+    "DCSC" => "data/dcsc_optitrack"
 )[data_key]
-trial_id = 4
+trial_id = 1
 inertial = HybridZuptInsJl.InertialData(data_dir, trial_id)
 gt_traj = HybridZuptInsJl.Trajectory(data_dir, trial_id)
 
@@ -53,7 +54,7 @@ fig_ins_align = HybridZuptInsJl.plot_trajectory_xyz_euler(ins_traj_aligned)
 fig = HybridZuptInsJl.plot_inertialdata_and_stepsegm(inertial_trunc, segs; zupt=zupt)
 fig = HybridZuptInsJl.plot_position_distance_error(ins_traj_aligned, gt_traj_aligned)
 fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj_aligned, gt_traj_aligned)
-fig_calib = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj_aligned[1:(calib_idxs[end]+500)], gt_traj_aligned[1:calib_idxs[end]])
+fig_calib = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(ins_traj_aligned[1:(calib_idxs[end]+2000)], gt_traj_aligned[1:(2000+calib_idxs[end])])
 fig_rmse = HybridZuptInsJl.plot_position_rmse(ins_traj_aligned, gt_traj_aligned)
 fig_orientation = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(ins_traj_aligned, gt_traj_aligned)
 fig_steps = HybridZuptInsJl.plot_step_lengths(ins_traj_aligned, gt_traj_aligned, segs)

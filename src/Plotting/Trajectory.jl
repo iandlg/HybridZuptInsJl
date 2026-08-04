@@ -73,7 +73,7 @@ function plot_groundtruth_vs_inertial_positions(
             end
 
             arrows2d!(ax, pts, dirs;
-                color=:black)
+                color=:black, label="Ground truth")
         end
     end
 
@@ -90,13 +90,13 @@ function plot_groundtruth_vs_inertial_positions(
             color=c, linewidth=1, label=key)
 
         scatter!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
-            color=c, marker=:circle, markersize=5, alpha=0.6)
+            color=c, marker=:circle, markersize=5, alpha=0.6, label=key)
 
         scatter!(ax, [traj.pos[1, start]], [traj.pos[2, start]];
-            color=c, marker=:circle, markersize=12)
+            color=c, marker=:circle, markersize=12, label=key)
 
         scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
-            color=c, marker=:rect, markersize=12)
+            color=c, marker=:rect, markersize=12, label=key)
 
         if show_heading
             idx = start:heading_stride:n
@@ -110,11 +110,11 @@ function plot_groundtruth_vs_inertial_positions(
             end
 
             arrows2d!(ax, pts, dirs;
-                color=c)
+                color=c, label=key)
         end
     end
 
-    axislegend(ax; position=:rt)
+    axislegend(ax; position=:rt, merge=true)
     return fig
 end
 

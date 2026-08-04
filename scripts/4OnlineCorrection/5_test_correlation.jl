@@ -7,10 +7,11 @@ using OrderedCollections, DataFrames, Statistics, GLMakie
 data_key = "ANG2"
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2"
+    "ANG2" => "data/angermann_v2",
+    "DCSC" => "data/dcsc_optitrack"
 )[data_key]
 
-trial_ids = [1, 2, 3, 4, 5, 6, 12, 13, 14, 15, 16]
+trial_ids = [1, 2, 3, 4, 5, 6, 8, 10, 12]
 
 
 frames = [
