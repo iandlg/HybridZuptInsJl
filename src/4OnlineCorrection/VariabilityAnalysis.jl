@@ -149,9 +149,11 @@ function make_rmse_evaluator(
 
     return rmse_evaluator
 end
-function make_hp_param_grid(base_hp::SeHyperparams, groups::Vector{Symbol};
+function make_hp_param_grid(
+    base_hp::SeHyperparams, groups::Vector{Symbol};
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
-    n_steps::Int=9)::Tuple{Vector{ParamSpec},ParamGrid}
+    n_steps::Int=9
+)::Tuple{Vector{ParamSpec},ParamGrid}
 
     group_names = [string(g) for g in groups]
     max_indices = [length(getfield(base_hp, g)) for g in groups]

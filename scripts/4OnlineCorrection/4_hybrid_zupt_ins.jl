@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 30
+hsgp_p_key = 40
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
@@ -16,7 +16,7 @@ hsgp_p_path = Dict{Int,String}(
 
 # Load parameters with corresponding metatdata
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-data_key = "DCSC" # meta["data_key"]
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -29,7 +29,7 @@ m = 200
 var_pos = 1e-2
 var_yaw = 1e-3
 
-trial_id = 12 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 train_ratio = 0.45
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -64,7 +64,7 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
+default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
@@ -157,7 +157,7 @@ hsgp_p = HybridZuptInsJl.HsgpParameters(
 
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
+default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)

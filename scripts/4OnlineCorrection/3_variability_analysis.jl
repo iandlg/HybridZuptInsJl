@@ -37,12 +37,12 @@ rmse_fun = HybridZuptInsJl.make_rmse_evaluator(data_dir, trial_id, train_ratio, 
 
 # Experiment variables
 groups = [:yaw]
-log_range = (-4.0, 1.0)
-n_steps = 10
+log_range = (-1.0, 1.0)
+n_steps = 3
 baseline_included = true
 
 specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
-# specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps)
+specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps)
 
 ##
 # Now vary hyperparameters

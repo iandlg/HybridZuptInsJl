@@ -31,8 +31,8 @@ m = 200
 
 
 ## --- Load Data ---
-train_ids = [4] # [1, 2, 3, 4, 8, 9, 13, 14, 16]
-test_ids = [4] # [3, 13, 15]
+train_ids = [1, 2, 3, 4, 5, 6, 8, 10, 12] # [1, 2, 3, 4, 8, 9, 13, 14, 16]
+test_ids = [14] # [3, 13, 15]
 trial_ids = vcat(train_ids, test_ids)
 FRAME = HybridZuptInsJl.HEADING
 FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_YAW
@@ -186,7 +186,7 @@ hsgp_base = HybridZuptInsJl.HsgpParameters(
 
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
-trial_id = 4
+trial_id = 8
 train_ratio = 0.45
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -215,7 +215,7 @@ _, _, slamHsgpOpt_corr_traj, io_data["SlamHsgp Opt"], _ = HybridZuptInsJl.hybrid
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr_opt;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-default_corr = HybridZuptInsJl.DefaultCorrector(round(Int, N / 60))
+default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)

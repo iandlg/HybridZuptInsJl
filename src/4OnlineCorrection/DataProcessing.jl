@@ -11,7 +11,7 @@ function collect_trial_io_online(
     frame::ReferenceFrame=BODY,
     feature_type::FeatureType=THREED_STEP,
     train_ratio::Float64=0.0,
-    corrector::AbstractEstimator=DefaultCorrector(300)
+    corrector::AbstractEstimator=BaseEstimator(300)
 )::Optional{Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
     try
         ins_traj_aligned, gt_traj_aligned, _, _, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(

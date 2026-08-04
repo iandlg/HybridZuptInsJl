@@ -253,7 +253,7 @@ function stride_error(ref_frame::ReferenceFrame;
 end
 
 # ── Concrete correctors ───────────────────────────────────────────────────
-mutable struct DefaultCorrector <: AbstractEstimator
+mutable struct BaseEstimator <: AbstractEstimator
     t::AbstractVector{Float64}
     pos::AbstractMatrix{Float64}
     quat::AbstractMatrix{Float64}
@@ -265,14 +265,14 @@ mutable struct DefaultCorrector <: AbstractEstimator
     F::AbstractMatrix{Float64}
 end
 
-function DefaultCorrector(N::Int)::DefaultCorrector
+function BaseEstimator(N::Int)::BaseEstimator
     @assert N > 1 "Invalid number of "
-    return DefaultCorrector(
+    return BaseEstimator(
         zeros(Float64, N), zeros(Float64, 3, N), zeros(Float64, 4, N), zeros(Float64, 6, N),
         zeros(Float64, 6, 6), zeros(Float64, 6, 6), zeros(Float64, 4, 6, N), 1, zeros(Float64, 6, 6))
 end
 
-function initialize_corrector!(c::DefaultCorrector; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+function initialize_corrector!(c::BaseEstimator; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
@@ -283,7 +283,7 @@ function initialize_corrector!(c::DefaultCorrector; t::Float64, pos_init::Abstra
     c.i = 1
 end
 
-function dynamic_update!(c::DefaultCorrector; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+function dynamic_update!(c::BaseEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
     c.i += 1
     c.t[c.i] = t
 
@@ -307,7 +307,7 @@ function dynamic_update!(c::DefaultCorrector; t::Float64, Δp::AbstractVector{Fl
     c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
 end
 
-function stride_measurement_update!(c::DefaultCorrector;
+function stride_measurement_update!(c::BaseEstimator;
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...
 )
@@ -324,7 +324,7 @@ function stride_measurement_update!(c::DefaultCorrector;
     return nothing, nothing
 end
 
-function posyaw_measurement_update!(c::DefaultCorrector; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
+function posyaw_measurement_update!(c::BaseEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
     c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0] #  ∂θ3_∂δθ_left(c.quat[:, c.i])
     θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
@@ -340,18 +340,18 @@ function posyaw_measurement_update!(c::DefaultCorrector; curr_pos::AbstractVecto
     )
 end
 
-function learned_measurement_update!(c::DefaultCorrector; kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
+function learned_measurement_update!(c::BaseEstimator; kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
     # Do nothing
     return nothing, nothing, nothing, nothing
 end
 
-function relinearize!(c::DefaultCorrector)
+function relinearize!(c::BaseEstimator)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     c.δx[:, c.i] .= 0.0
 end
 
-function get_β_Σβ(c::DefaultCorrector)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_β_Σβ(c::BaseEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return nothing
 end
 
@@ -1015,12 +1015,22 @@ mutable struct JointHsgpEstimator <: AbstractEstimator
     ∂y∂z::AbstractMatrix{Float64}
     ϕ::AbstractMatrix{Float64}
     per_dim_eigvals::AbstractMatrix{Float64}
-
     ws::KalmanWorkspace{Float64}
 end
 
-function JointHsgpEstimator(N::Int, params::HsgpParameters)::JointHsgpEstimator
+function JointHsgpEstimator(N::Int, params::HsgpParameters;
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+)::JointHsgpEstimator
     @assert N > 1 "Invalid number of prealocations"
+    p = length(corrected_channels)
+    @assert p == 1 || p == 4 "Invalid number of correction channels, got $p"
+
+    correction_mask = Int[]
+    for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw])
+        if sym in corrected_channels
+            push!(correction_mask, idx)
+        end
+    end
     return JointHsgpEstimator(
         Vector{Float64}(undef, N),                                  # t
         Matrix{Float64}(undef, 3, N),                               # pos

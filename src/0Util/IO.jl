@@ -112,3 +112,19 @@ function load_hp_variation_results(csv_path::String, json_path::String)::Tuple{D
     metadata = JSON.parsefile(json_path)
     return df, metadata
 end
+
+format_vec(v::Vector{Float64}) = "[" * join((@sprintf("%.0e", x) for x in v), ", ") * "]"
+
+function se_vec_str(v::Vector{Float64}, label)
+    if length(v) >= 3
+        σ_n = v[1]
+        σ_f = v[end]
+        ℓ = v[2:(end-1)]
+        ℓ_str = isempty(ℓ) ? "[]" : "[" * join((@sprintf("%.0e", x) for x in ℓ), ", ") * "]"
+        return "$label: σ_n=" * @sprintf("%.0e", σ_n) *
+               ", ℓ=" * ℓ_str *
+               ", σ_f=" * @sprintf("%.0e", σ_f)
+    else
+        return "$label: " * format_vec(v)
+    end
+end
