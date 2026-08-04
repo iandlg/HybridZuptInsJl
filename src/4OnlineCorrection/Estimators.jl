@@ -153,6 +153,7 @@ function normalize_feature!(
 end
 
 const _OUTPUT_NAMES = ["pos_1", "pos_2", "pos_3", "yaw"]
+_full_range(orig_idx::Int, m::Int) = ((orig_idx-1)*m+1):(orig_idx*m)
 
 abstract type AbstractEstimator end
 
@@ -369,25 +370,45 @@ mutable struct JointStaticEstimator <: AbstractEstimator
     F::AbstractMatrix{Float64}
 
     # Corrector specific Arguments
-    stride_err_mean::AbstractMatrix{Float64}
+    stride_bias::AbstractMatrix{Float64}
 
+    # Kalman worspace
     ws::KalmanWorkspace{Float64}
+
+    # Channel-selection
+    correction_mask::Vector{Int}   # indices into [:pos_1, :pos_2, :pos_3, :yaw] that are corrected
+    p::Int                          # number of corrected channels
+
 end
 
-function JointStaticEstimator(N::Int)::JointStaticEstimator
-    @assert N > 1 "Invalid number of "
+function JointStaticEstimator(N::Int;
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+)::JointStaticEstimator
+    @assert N > 1 "Invalid number of allocations, got $N"
+
+    correction_mask = Int[]
+    for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw])
+        if sym in corrected_channels
+            push!(correction_mask, idx)
+        end
+    end
+    p = length(correction_mask)
+    @assert p >= 1 "Must correct at least one channel"
+
     return JointStaticEstimator(
         zeros(Float64, N),          # t
         zeros(Float64, 3, N),       # pos
         zeros(Float64, 4, N),       # quat
-        zeros(Float64, 10, N),      # δx
-        zeros(Float64, 10, 10),     # Σ
-        zeros(Float64, 10, 6),      # G
-        zeros(Float64, 4, 10),      # H
+        zeros(Float64, 6+p, N),      # δx
+        zeros(Float64, 6 + p, 6+p),     # Σ
+        zeros(Float64, 6+p, 6),      # G
+        zeros(Float64, 4, 6+p),      # H
         1,                          # i
-        zeros(Float64, 10, 10),     # F
-        zeros(Float64, 4, N),        # stride_err_mean
-        KalmanWorkspace{Float64}(10, 4)
+        zeros(Float64, 6+p, 6+p),     # F
+        zeros(Float64, p, N),        # stride_bias
+        KalmanWorkspace{Float64}(6+p, 4),
+        correction_mask,
+        p
     )
 end
 
@@ -395,12 +416,12 @@ function initialize_corrector!(c::JointStaticEstimator; t::Float64, pos_init::Ab
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
-    c.stride_err_mean[:, 1] .= 0.0
+    c.stride_bias[:, 1] .= 0.0
     c.δx[:, 1] .= 0.0
     c.Σ[1:6, 1:6] .= Σpq_init
-    c.Σ[7:10, 7:10] = Matrix{Float64}(I, 4, 4) .* 1e2
+    c.Σ[7:end, 7:end] = Matrix{Float64}(I, c.p, c.p) .* 1e2
     # c.Σ[10, 10] *= 1e2
-    c.G .= Matrix{Float64}(I, 10, 6)
+    c.G .= Matrix{Float64}(I, 6+c.p, 6)
     c.H .= 0.0
     c.F .= 0.0
     c.i = 1
@@ -415,7 +436,7 @@ function dynamic_update!(c::JointStaticEstimator; t::Float64, Δp::AbstractVecto
     # Nominal update
     c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
     c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
-    c.stride_err_mean[:, c.i] = c.stride_err_mean[:, c.i-1]
+    c.stride_bias[:, c.i] = c.stride_bias[:, c.i-1]
 
     c.G .= 0.0
     c.G[1:3, 1:3] = R_prev
@@ -425,7 +446,7 @@ function dynamic_update!(c::JointStaticEstimator; t::Float64, Δp::AbstractVecto
     c.F[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
     c.F[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
     c.F[1:3, 4:6] .= -skew(R_prev * Δp)
-    c.F[7:10, 7:10] = Matrix{Float64}(I, 4, 4)
+    c.F[7:end, 7:end] = Matrix{Float64}(I, c.p, c.p)
 
     # Covariance update
     c.δx[:, c.i] .= 0.0
@@ -435,21 +456,28 @@ end
 function stride_measurement_update!(c::JointStaticEstimator;
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)
-    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
-    c.H[:, 7:end] = Matrix{Float64}(I, 4, 4)
+    # c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
+    # c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    # c.H[:, 7:end] = Matrix{Float64}(I, 4, 4)
 
-    stride_err -= c.stride_err_mean[:, c.i]
-    # stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
+    # stride_err -= c.stride_bias[:, c.i]
+    # # stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
+
+    Hfull = zeros(Float64, 4, 6+c.p)
+    Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    Hfull[4, 4:6] = [0.0, 0.0, 1.0]
+    Hfull[:, 7:end] = Matrix{Float64}(I, 4, c.p)
+    c.H[1:c.p, :] .= Hfull[c.correction_mask, :]
+
 
     measurement_update!(
-        view(c.δx, 1:10, c.i), c.Σ,
-        stride_err,
-        c.H,
-        Σ_err,
+        view(c.δx, 1:(6+c.p), c.i), c.Σ,
+        stride_err[c.correction_mask] - c.stride_bias[:, c.i],
+        c.H[1:c.p, :],
+        Σ_err[c.correction_mask, c.correction_mask],
         c.ws
     )
-    return stride_err, nothing
+    return nothing, nothing
 end
 
 function posyaw_measurement_update!(c::JointStaticEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -462,7 +490,7 @@ function posyaw_measurement_update!(c::JointStaticEstimator; curr_pos::AbstractV
     # @info "Covariance matrix before meas upd" c.Σ
 
     measurement_update!(
-        view(c.δx, 1:10, c.i), c.Σ,
+        view(c.δx, 1:(6+c.p), c.i), c.Σ,
         vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
         c.H,
         Σy,
@@ -472,24 +500,34 @@ end
 
 function learned_measurement_update!(c::JointStaticEstimator;
     R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
-    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
-    c.H[:, 7:end] .= 0.0
+    # c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    # c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    # c.H[:, 7:end] .= 0.0
+
+    Hfull = zeros(Float64, 4, 6+c.p)
+    Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    Hfull[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[1:c.p, :] .= Hfull[c.correction_mask, :]
+
 
     measurement_update!(
-        view(c.δx, 1:10, c.i), c.Σ,
-        c.stride_err_mean[:, c.i],
-        c.H,
+        view(c.δx, 1:(6+c.p), c.i), c.Σ,
+        c.stride_bias[:, c.i],
+        c.H[1:c.p, :],
         c.Σ[7:end, 7:end],
         c.ws
     )
-    return c.stride_err_mean[:, c.i], diag(c.Σ[7:end, 7:end]), nothing, nothing
+    # get full pred
+    pred_full, Σ_pred_full = zeros(4), zeros(4, 4)
+    pred_full[c.correction_mask] = c.stride_bias[:, c.i]
+    Σ_pred_full[c.correction_mask, c.correction_mask] = c.Σ[7:end, 7:end]
+    return pred_full, diag(Σ_pred_full), nothing, nothing
 end
 
 function relinearize!(c::JointStaticEstimator)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
-    c.stride_err_mean[:, c.i] += c.δx[7:end, c.i]
+    c.stride_bias[:, c.i] += c.δx[7:end, c.i]
     # c.δx[:, c.i] .= 0.0
 
     # c.Σ[1:6, 7:10] .= 0.0
@@ -518,10 +556,27 @@ mutable struct DecoupledStaticEstimator <: AbstractEstimator
 
     ws_state::KalmanWorkspace{Float64}
     ws_bias::KalmanWorkspace{Float64}
+
+    # Channel-selection
+    correction_mask::Vector{Int}   # indices into [:pos_1, :pos_2, :pos_3, :yaw] that are corrected
+    p::Int                          # number of corrected channels
+
 end
 
-function DecoupledStaticEstimator(N::Int)::DecoupledStaticEstimator
-    @assert N > 1 "Invalid number of "
+function DecoupledStaticEstimator(N::Int;
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+)::DecoupledStaticEstimator
+    @assert N > 1 "Invalid number of allocations, got $N"
+
+    correction_mask = Int[]
+    for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw])
+        if sym in corrected_channels
+            push!(correction_mask, idx)
+        end
+    end
+    p = length(correction_mask)
+    @assert p >= 1 "Must correct at least one channel"
+
     return DecoupledStaticEstimator(
         zeros(Float64, N),          # t
         zeros(Float64, 3, N),       # pos
@@ -532,10 +587,12 @@ function DecoupledStaticEstimator(N::Int)::DecoupledStaticEstimator
         zeros(Float64, 4, 6),      # H
         1,                          # i
         zeros(Float64, 6, 6),     # F
-        zeros(Float64, 4),        # stride_bias
-        zeros(Float64, 4, 4),
+        zeros(Float64, p),        # stride_bias
+        zeros(Float64, p, p),
         KalmanWorkspace{Float64}(6, 4),
-        KalmanWorkspace{Float64}(4, 4),
+        KalmanWorkspace{Float64}(p, p),
+        correction_mask,
+        p
     )
 end
 
@@ -547,7 +604,7 @@ function initialize_corrector!(c::DecoupledStaticEstimator; t::Float64, pos_init
     c.Σ .= Σpq_init
 
     c.stride_bias .= 0.0
-    c.Σ_bias = Matrix{Float64}(I, 4, 4) .* 1e2
+    c.Σ_bias = Matrix{Float64}(I, c.p, c.p) .* 1e2
 
     c.G .= Matrix{Float64}(I, 6, 6)
     c.H .= 0.0
@@ -580,21 +637,22 @@ function dynamic_update!(c::DecoupledStaticEstimator; t::Float64, Δp::AbstractV
 end
 
 function stride_measurement_update!(c::DecoupledStaticEstimator;
-    stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
-    kwargs...)
+    stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, kwargs...)
     c.H .= 0.0
-    for i in 1:4
+    for i in 1:c.p
         c.H[i, i] = 1.0
     end
 
     measurement_update!(
         c.stride_bias, c.Σ_bias,
-        stride_err,
-        c.H[1:4, 1:4],
-        Σ_err,
+        stride_err[c.correction_mask],
+        c.H[1:c.p, 1:c.p],
+        Σ_err[c.correction_mask, c.correction_mask],
         c.ws_bias
     )
-    return stride_err - c.stride_bias, nothing
+    residual = zeros(4)
+    residual[c.correction_mask] .= stride_err[c.correction_mask] - c.stride_bias
+    return residual, nothing
 end
 
 function posyaw_measurement_update!(c::DecoupledStaticEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -614,18 +672,26 @@ end
 
 function learned_measurement_update!(c::DecoupledStaticEstimator;
     R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
+
+    # Update measurement matrix H_update
     c.H .= 0.0
-    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
+    Hfull = zeros(Float64, 4, 6)
+    Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    Hfull[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[1:c.p, 1:6] .= Hfull[c.correction_mask, :]
+
 
     measurement_update!(
         c.δx, c.Σ,
         c.stride_bias,
-        c.H,
+        c.H[1:c.p, 1:6],
         c.Σ_bias,
         c.ws_state
     )
-    return c.stride_bias, diag(c.Σ_bias), nothing, nothing
+    pred_full, Σ_pred_full = zeros(4), zeros(4, 4)
+    pred_full[c.correction_mask] = c.stride_bias
+    Σ_pred_full[c.correction_mask, c.correction_mask] = c.Σ_bias
+    return pred_full, diag(Σ_pred_full), nothing, nothing
 end
 
 function relinearize!(c::DecoupledStaticEstimator)
@@ -780,6 +846,10 @@ mutable struct DecoupledHsgpEstimator <: AbstractEstimator
 
     ws_state::KalmanWorkspace{Float64}
     ws_hsgp::KalmanWorkspace{Float64}
+
+    # Channel-selection
+    correction_mask::Vector{Int}   # indices into [:pos_1, :pos_2, :pos_3, :yaw] that are corrected
+    p::Int                          # number of corrected channels
 end
 
 function DecoupledHsgpEstimator(N::Int, params::HsgpParameters;
@@ -813,9 +883,12 @@ function DecoupledHsgpEstimator(N::Int, params::HsgpParameters;
         zeros(Float64, params.m, params.d),             # per_dim_eigvals
         zeros(Float64, p),                              # σ_n
         KalmanWorkspace{Float64}(6, 4),
-        KalmanWorkspace{Float64}(params.m * p, p)
+        KalmanWorkspace{Float64}(params.m * p, p),
+        correction_mask,
+        p
     )
 end
+
 
 function initialize_corrector!(c::DecoupledHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
@@ -827,33 +900,51 @@ function initialize_corrector!(c::DecoupledHsgpEstimator;
     c.Σ[1:6, 1:6] = Σpq_init
     c.G[:, :, 1] = Matrix{Float64}(I, 6, 6)
 
+    m = c.params.m
+    p = c.p
+    mask = c.correction_mask
+
     # Initialize HSGP
     c.per_dim_eigvals = calc_eigenvalues(c.params.LL, c.params.m, c.params.d)
-    psd = zeros(Float64, 4 * c.params.m)
-
-    for (idx, field) in enumerate(fieldnames(SeHyperparams))
-        psd[((idx-1)*c.params.m+1):(idx*c.params.m)] = power_spectral_density(
+    psd = zeros(Float64, p * m)
+    for (j, orig_idx) in enumerate(mask)
+        field = Symbol(_OUTPUT_NAMES[orig_idx])
+        psd[((j-1)*m+1):(j*m)] = power_spectral_density(
             sqrt.(c.per_dim_eigvals),
             getfield(c.params.hp, field)[2],
             getfield(c.params.hp, field)[3]
         )
     end
 
-    for (idx, field) in enumerate(fieldnames(SeHyperparams))
-        c.σ_n[idx] = getfield(c.params.hp, field)[1]
+    for (j, orig_idx) in enumerate(mask)
+        field = Symbol(_OUTPUT_NAMES[orig_idx])
+        c.σ_n[j] = getfield(c.params.hp, field)[1]
     end
 
+    # β_Σβ_0 is always full 4m-sized (matching JointHsgpEstimator's convention);
+    # extract only the masked sub-blocks into the reduced internal state.
     if isnothing(β_Σβ_0)
         c.β .= 0.0
     else
-        copyto!(c.β, β_Σβ_0[1])
+        β_full, _ = β_Σβ_0
+        @assert length(β_full) == 4 * m "β_Σβ_0[1] must have length 4m = $(4*m), got $(length(β_full))"
+        for j in 1:p
+            orig_idx = mask[j]
+            c.β[((j-1)*m+1):(j*m)] = β_full[_full_range(orig_idx, m)]
+        end
     end
 
     c.Σβ .= 0.0
     if isnothing(β_Σβ_0)
         c.Σβ[diagind(c.Σβ)] .= psd
     else
-        c.Σβ .= β_Σβ_0[2]
+        _, Σβ_full = β_Σβ_0
+        @assert size(Σβ_full) == (4 * m, 4 * m) "β_Σβ_0[2] must be (4m,4m) = $((4*m,4*m)), got $(size(Σβ_full))"
+        for j1 in 1:p, j2 in 1:p
+            r1 = _full_range(mask[j1], m)
+            r2 = _full_range(mask[j2], m)
+            c.Σβ[((j1-1)*m+1):(j1*m), ((j2-1)*m+1):(j2*m)] = Σβ_full[r1, r2]
+        end
     end
 
     c.∂y∂z .= 0.0
@@ -872,7 +963,6 @@ function dynamic_update!(c::DecoupledHsgpEstimator; t::Float64, Δp::AbstractVec
     # Nominal update
     c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
     c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
-    # c.β = c.β
     c.G .= 0.0
     c.G[1:3, 1:3] = R_prev
     c.G[4:6, 4:6] = quat_to_matrix(c.quat[:, c.i])
@@ -893,35 +983,35 @@ function stride_measurement_update!(c::DecoupledHsgpEstimator;
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64},
     kwargs...)
 
-    # Normalise target and target covariance
-    stride_err -= c.params.output_stats[1] # remove output mean
-    stride_err ./= c.params.output_stats[2] # normalize with output std deviation
-    Σ_err = Diagonal(1 ./ c.params.output_stats[2]) * (Σ_err) * Diagonal(1 ./ c.params.output_stats[2])
+    p = c.p
+    mask = c.correction_mask
+    m = c.params.m
+
+    # Mask down to corrected channels only — β/Σβ update is fully reduced-dim
+    stride_err_masked = (stride_err[mask] .- c.params.output_stats[1][mask]) ./ c.params.output_stats[2][mask]
+    Σ_err_masked = Diagonal(1 ./ c.params.output_stats[2][mask]) * Σ_err[mask, mask] * Diagonal(1 ./ c.params.output_stats[2][mask])
 
     # Compute input feature and normalize
     normalize_feature!(feature_type;
         feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
-    # ------------ Construct Feature Covariance ---------
-    for output_d in axes(c.∂y∂z, 1)
+    # ------------ Construct Feature Covariance (masked channels only) ---------
+    for output_d in 1:p
         for input_d in axes(c.∂y∂z, 2)
             c.∂y∂z[output_d, input_d] = dot(calc_eigenvectors_dx(
                     reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
-                ), c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)])
+                ), c.β[((output_d-1)*m+1):(output_d*m)])
         end
     end
-    Σ_err += c.∂y∂z * Σ_feature * c.∂y∂z'
+    Σ_err_masked += c.∂y∂z * Σ_feature * c.∂y∂z'
 
-    # ---------- Construct measurement matrix H_update --------------
-    kron!(c.Φ, I(4), calc_eigenvectors(
+    # ---------- Construct measurement matrix Φ (p × p*m) --------------
+    kron!(c.Φ, I(p), calc_eigenvectors(
         reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
     )
 
-    α = tr(Diagonal(c.σ_n .^ 2)) / tr(Σ_err)
-    # c.β, c.Σβ = measurement_update(
-    #     c.β, c.Σβ, stride_err, c.Φ, Diagonal(c.σ_n .^ 2) + α * Σ_err # Diagonal(noise_vect .^ 2)
-    # )
-    measurement_update!(c.β, c.Σβ, stride_err, c.Φ, Σ_err, c.ws_hsgp) # Diagonal(c.σ_n .^ 2) + α * Σ_err
+    # α = tr(Diagonal(c.σ_n .^ 2)) / tr(Σ_err_masked)
+    measurement_update!(c.β, c.Σβ, stride_err_masked, c.Φ, Σ_err_masked, c.ws_hsgp)
 
     return nothing, nothing
 end
@@ -945,50 +1035,55 @@ function learned_measurement_update!(c::DecoupledHsgpEstimator;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
-    c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
-    c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
+
+    p = c.p
+    mask = c.correction_mask
+    m = c.params.m
 
     # Normalise estimated feature and feature covariance
     normalize_feature!(feature_type;
         feature=feature, Σ_feature=Σ_feature, input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
 
-    for output_d in axes(c.∂y∂z, 1)
+    for output_d in 1:p
         for input_d in axes(c.∂y∂z, 2)
             c.∂y∂z[output_d, input_d:input_d] = calc_eigenvectors_dx(
                 reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals, input_d
-            ) * c.β[((output_d-1)*c.params.m+1):(output_d*c.params.m)]
+            ) * c.β[((output_d-1)*m+1):(output_d*m)]
         end
     end
 
-    kron!(c.Φ, I(4), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
+    kron!(c.Φ, I(p), calc_eigenvectors(reshape(feature, 1, c.params.d), c.params.LL, c.per_dim_eigvals))
 
-    # Compute prediction and prediction covariance
-    pred = c.Φ * c.β
-    Σ_pred = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z' # Predictive + Input uncertainty
+    # Compute prediction and prediction covariance (reduced p-dim)
+    pred_masked = c.Φ * c.β
+    Σ_pred_masked = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z'   # Predictive + input uncertainty
 
-    # Denormalise prediction and prediction covariance
-    pred = pred .* c.params.output_stats[2] .+ c.params.output_stats[1]
-    pred[4] = atan(sin(pred[4]), cos(pred[4]))
-    Σ_pred = Diagonal(c.params.output_stats[2]) * Σ_pred * Diagonal(c.params.output_stats[2])
+    # Denormalise (masked channels only)
+    pred_masked = pred_masked .* c.params.output_stats[2][mask] .+ c.params.output_stats[1][mask]
+    Σ_pred_masked = Diagonal(c.params.output_stats[2][mask]) * Σ_pred_masked * Diagonal(c.params.output_stats[2][mask])
 
-    # Rotate to body frame 
-    pred = R_aug_wl * pred
-    Σ_pred = R_aug_wl * Σ_pred * R_aug_wl'
+    # Update measurement matrix H_update
+    c.H[1:p, 1:6, c.i] .= 0.0
+    Hfull = zeros(Float64, 4, 6)
+    Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
+    Hfull[4, 4:6] = [0.0, 0.0, 1.0]
+    c.H[1:p, 1:6, c.i] .= Hfull[mask, :]
 
-    # c.δx[:, c.i], c.Σ = measurement_update(
-    #     c.δx[:, c.i], c.Σ,
-    #     pred,
-    #     c.H[:, :, c.i],
-    #     Σ_pred
-    # )
+
     measurement_update!(
         view(c.δx, 1:6, c.i), c.Σ,
-        pred,
-        c.H[:, :, c.i],
-        Σ_pred,
+        pred_masked,
+        c.H[1:p, 1:6, c.i],
+        Σ_pred_masked,
         c.ws_state
     )
-    return pred, diag(Σ_pred), nothing, nothing
+
+    # Output 4 channel convention
+    pred_full, Σ_pred_full = zeros(4), zeros(4, 4)
+    pred_full[mask] = pred_masked
+    Σ_pred_full[mask, mask] = Σ_pred_masked
+
+    return pred_full, diag(Σ_pred_full), nothing, nothing
 end
 
 function relinearize!(c::DecoupledHsgpEstimator)
@@ -998,7 +1093,25 @@ function relinearize!(c::DecoupledHsgpEstimator)
 end
 
 function get_β_Σβ(c::DecoupledHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
-    return c.β, c.Σβ
+    m = c.params.m
+    p = c.p
+    mask = c.correction_mask
+
+    β_full = zeros(Float64, 4 * m)
+    Σβ_full = zeros(Float64, 4 * m, 4 * m)
+
+    for j in 1:p
+        orig_idx = mask[j]
+        β_full[_full_range(orig_idx, m)] = c.β[((j-1)*m+1):(j*m)]
+    end
+
+    for j1 in 1:p, j2 in 1:p
+        r1 = _full_range(mask[j1], m)
+        r2 = _full_range(mask[j2], m)
+        Σβ_full[r1, r2] = c.Σβ[((j1-1)*m+1):(j1*m), ((j2-1)*m+1):(j2*m)]
+    end
+
+    return β_full, Σβ_full
 end
 
 mutable struct JointHsgpEstimator <: AbstractEstimator
@@ -1059,9 +1172,6 @@ function JointHsgpEstimator(N::Int, params::HsgpParameters;
         p
     )
 end
-
-# Helper: full-size (4m) index range for a given physical channel (1=pos_1 ... 4=yaw)
-_full_range(orig_idx::Int, m::Int) = ((orig_idx-1)*m+1):(orig_idx*m)
 
 function initialize_corrector!(c::JointHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
