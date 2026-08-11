@@ -463,11 +463,11 @@ function stride_measurement_update!(c::JointStaticEstimator;
     # stride_err -= c.stride_bias[:, c.i]
     # # stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
 
-    Hfull = zeros(Float64, 4, 6+c.p)
+    Hfull = zeros(Float64, 4, 6)
     Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
     Hfull[4, 4:6] = [0.0, 0.0, 1.0]
-    Hfull[:, 7:end] = Matrix{Float64}(I, 4, c.p)
-    c.H[1:c.p, :] .= Hfull[c.correction_mask, :]
+    c.H[1:c.p, 1:6] .= Hfull[c.correction_mask, :]
+    c.H[1:c.p, 7:(6+c.p)] .= Matrix{Float64}(I, c.p, c.p)
 
 
     measurement_update!(
@@ -530,8 +530,8 @@ function relinearize!(c::JointStaticEstimator)
     c.stride_bias[:, c.i] += c.δx[7:end, c.i]
     # c.δx[:, c.i] .= 0.0
 
-    # c.Σ[1:6, 7:10] .= 0.0
-    # c.Σ[7:10, 1:6] .= 0.0 # zero cross covs
+    # c.Σ[1:6, 7:end] .= 0.0
+    # c.Σ[7:end, 1:6] .= 0.0 # zero cross covs
 end
 
 function get_β_Σβ(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
@@ -701,126 +701,6 @@ function relinearize!(c::DecoupledStaticEstimator)
 end
 
 function get_β_Σβ(c::DecoupledStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
-    return nothing
-end
-
-
-mutable struct StaticCorrectorV2 <: AbstractEstimator
-    t::AbstractVector{Float64}
-    pos::AbstractMatrix{Float64}
-    quat::AbstractMatrix{Float64}
-    δx::AbstractMatrix{Float64}
-    Σ::AbstractMatrix{Float64}
-    G::AbstractMatrix{Float64}
-    H::AbstractMatrix{Float64}
-    i::Int
-    F::AbstractMatrix{Float64}
-
-    # Corrector specific Arguments
-    stride_err_sum::AbstractVector{Float64}
-    stride_count::Int
-end
-
-function StaticCorrectorV2(N::Int)::StaticCorrectorV2
-    @assert N > 1 "Invalid number of "
-    return StaticCorrectorV2(
-        zeros(Float64, N),          # t
-        zeros(Float64, 3, N),       # pos
-        zeros(Float64, 4, N),       # quat
-        zeros(Float64, 6, N),      # δx
-        zeros(Float64, 6, 6),     # Σ
-        zeros(Float64, 6, 6),      # G
-        zeros(Float64, 4, 6),      # H
-        1,                          # i
-        zeros(Float64, 6, 6),     # F
-        zeros(Float64, 4),        # stride_err_sum
-        0,
-    )
-end
-
-function initialize_corrector!(c::StaticCorrectorV2; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
-    c.t[1] = t
-    c.pos[:, 1] = pos_init
-    c.quat[:, 1] = quat_init
-    c.stride_err_sum .= 0.0
-    c.stride_count = 0
-    c.δx[:, 1] .= 0.0
-    c.Σ .= Σpq_init
-    c.G .= Matrix{Float64}(I, 6, 6)
-    c.H .= 0.0
-    c.F .= 0.0
-    c.i = 1
-end
-
-function dynamic_update!(c::StaticCorrectorV2; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
-    c.i += 1
-    c.t[c.i] = t
-
-    R_prev = quat_to_matrix(c.quat[:, c.i-1])
-
-    # Nominal update
-    c.pos[:, c.i] = c.pos[:, c.i-1] + R_prev * Δp
-    c.quat[:, c.i] = quat_multiply(c.quat[:, c.i-1], Δq)
-
-    c.G .= 0.0
-    c.G[1:3, 1:3] = R_prev
-    c.G[4:6, 4:6] = quat_to_matrix(c.quat[:, c.i])
-
-    c.F .= 0.0
-    c.F[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
-    c.F[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
-    c.F[1:3, 4:6] .= -skew(R_prev * Δp)
-
-    # Covariance update
-    c.δx[:, c.i] .= 0.0
-    c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
-end
-
-function stride_measurement_update!(c::StaticCorrectorV2;
-    stride_err::AbstractVector{Float64}, kwargs...)
-    c.stride_err_sum += stride_err
-    c.stride_count += 1
-    return stride_err - c.stride_err_sum / c.stride_count, nothing
-end
-
-function posyaw_measurement_update!(c::StaticCorrectorV2; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
-    c.H[1:3, 1:3] = Matrix{Float64}(I, 3, 3)
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
-    c.H[:, 7:end] .= 0.0
-    θ3_estim = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
-    # c.H[4, 4:6, c.i] = [0.0, 0.0, 1.0]
-    # @info "Measurement matrix H" c.H[:, :, c.i]
-    # @info "Covariance matrix before meas upd" c.Σ
-
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
-        vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
-        c.H,
-        Σy
-    )
-end
-
-function learned_measurement_update!(c::StaticCorrectorV2;
-    R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
-    c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
-    c.H[4, 4:6] = [0.0, 0.0, 1.0]
-    cov = I(4) .* 1e-6
-
-    c.δx[:, c.i], c.Σ = measurement_update(
-        c.δx[:, c.i], c.Σ,
-        (c.stride_count == 0) ? zeros(Float64, 4) : (c.stride_err_sum ./ c.stride_count),
-        c.H,
-        cov
-    )
-    return (c.stride_count == 0) ? zeros(Float64, 4) : (c.stride_err_sum ./ c.stride_count), diag(cov), nothing, nothing
-end
-
-function relinearize!(c::StaticCorrectorV2)
-    c.pos[:, c.i] += c.δx[1:3, c.i]
-    c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
-end
-
-function get_β_Σβ(c::StaticCorrectorV2)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return nothing
 end
 
@@ -1015,7 +895,6 @@ function stride_measurement_update!(c::DecoupledHsgpEstimator;
 
     return nothing, nothing
 end
-
 
 function posyaw_measurement_update!(c::DecoupledHsgpEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     c.H[1:3, 1:3, c.i] = Matrix{Float64}(I, 3, 3)
@@ -1396,8 +1275,8 @@ function relinearize!(c::JointHsgpEstimator)
     c.β += c.δx[7:end]
     c.δx .= 0.0
 
-    c.Σ[1:6, 7:end] .= 0.0
-    c.Σ[7:end, 1:6] .= 0.0
+    # c.Σ[1:6, 7:end] .= 0.0
+    # c.Σ[7:end, 1:6] .= 0.0
 end
 
 function get_β_Σβ(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
