@@ -529,9 +529,6 @@ function relinearize!(c::JointStaticEstimator)
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     c.stride_bias[:, c.i] += c.δx[7:end, c.i]
     # c.δx[:, c.i] .= 0.0
-
-    # c.Σ[1:6, 7:end] .= 0.0
-    # c.Σ[7:end, 1:6] .= 0.0 # zero cross covs
 end
 
 function get_β_Σβ(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
@@ -1274,9 +1271,6 @@ function relinearize!(c::JointHsgpEstimator)
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6]), c.quat[:, c.i])
     c.β += c.δx[7:end]
     c.δx .= 0.0
-
-    # c.Σ[1:6, 7:end] .= 0.0
-    # c.Σ[7:end, 1:6] .= 0.0
 end
 
 function get_β_Σβ(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
