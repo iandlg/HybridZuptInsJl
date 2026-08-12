@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections
 
 # Choose Parameters file
-hsgp_p_key = 40
+hsgp_p_key = 42
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
@@ -11,7 +11,9 @@ hsgp_p_path = Dict{Int,String}(
     21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
     22 => "out/3OfflineCorrection/3_HsgpResults/ANG215_BODY_THREED_STEP_2026-06-06T17:33:50.999.json",
     30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json",
-    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json"
+    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json",
+    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
+    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -29,8 +31,9 @@ m = 200
 var_pos = 1e-2
 var_yaw = 1e-3
 
-trial_id = 15 # meta["trial_id"]
+trial_id = 14 # meta["trial_id"]
 train_ratio = 0.45
+output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
@@ -59,7 +62,8 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 hsgp_p = HybridZuptInsJl.HsgpParameters(
     hsgp_p.hp, hsgp_p.d, m, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
-    output_stats=hsgp_p.output_stats
+    output_stats=hsgp_p.output_stats,
+    mid_norm=hsgp_p.mid_norm
 )
 
 io_data = OrderedDict()
@@ -69,23 +73,23 @@ zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_
     inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=[:yaw])
+decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
 zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-static_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=[:yaw])
+static_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
 zupt, step_seg, stat_corr_traj, io_data["Joint Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, static_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_p; corrected_channels=[:yaw])
+decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_p; corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], split_β_Σβ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
-slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_p; corrected_channels=[:yaw])
+slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_p; corrected_channels=output_channels)
 zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], slam_β_Σβ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)

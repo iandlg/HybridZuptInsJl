@@ -131,7 +131,7 @@ Returns a long-form DataFrame with columns:
   `value`     - individual sample value
 """
 function io_dataframe(
-    valid::Dict{Int,Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
+    valid::AbstractDict{Int,Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
 )
     @assert length(valid) > 0 "No trials in dataset."
 
@@ -297,4 +297,119 @@ function remove_outliers(
 
     @info "Removed $(sum(.!keep)) out of $n_samples samples ($(round(sum(keep)/n_samples*100, digits=1))% kept)"
     return input_clean, output_clean
+end
+
+"""
+    compute_input_preprocessing(data; normalize_x=true, margin=0.5)
+
+Compute normalisation constants and a normalised‑space bounding box for input features.
+
+# Arguments
+- `data::AbstractMatrix`: input matrix of size `(d, N)` (features × samples).
+- `normalize_x::Bool`: if `true`, subtract mean and divide by standard deviation.
+- `margin::Real`: fraction of the minimum feature range added to the bounding box
+  (applied *after* possible normalisation).
+
+# Returns
+A `NamedTuple` with fields:
+- `μ`: mean vector of length `d` (zero if `normalize_x = false`).
+- `σ`: standard deviation vector of length `d` (one if `normalize_x = false`).
+- `LL_norm`: `2×d` matrix; first row = lower bound, second row = upper bound
+  of the bounding box in the (possibly normalised) space.
+- `mid_norm`: midpoint of the bounding box, `1×d`.
+- `Lvec_norm`: half‑width of the bounding box, `1×d`.
+"""
+function compute_input_preprocessing(data::AbstractMatrix; normalize_x=true, margin=0.5)
+    d = size(data, 1)
+
+    if normalize_x
+        μ = vec(mean(data, dims=2))
+        σ = vec(std(data, dims=2))
+        data_norm = (data .- μ) ./ σ
+    else
+        μ = zeros(d)
+        σ = ones(d)
+        data_norm = data
+    end
+
+    xmin_norm = vec(minimum(data_norm, dims=2))
+    xmax_norm = vec(maximum(data_norm, dims=2))
+    pm = margin * minimum(xmax_norm - xmin_norm)
+    LL_norm = [xmin_norm' .- pm; xmax_norm' .+ pm]
+    mid_norm = (LL_norm[1, :] .+ LL_norm[2, :]) ./ 2
+    Lvec_norm = (LL_norm[2, :] .- LL_norm[1, :]) ./ 2
+
+    return (; μ, σ, LL_norm, mid_norm, Lvec_norm)
+end
+
+"""
+    compute_output_normalisation(data; normalize_y=true)
+
+Compute normalisation constants for output variables.
+
+# Arguments
+- `data::AbstractMatrix`: output matrix of size `(d_out, N)`.
+- `normalize_y::Bool`: if `true`, subtract mean and divide by standard deviation.
+
+# Returns
+A `NamedTuple` with fields:
+- `μ`: mean vector (zero if `normalize_y = false`).
+- `σ`: standard deviation vector (one if `normalize_y = false`).
+"""
+function compute_output_normalisation(data::AbstractMatrix; normalize_y=true)
+    if normalize_y
+        μ = vec(mean(data, dims=2))
+        σ = vec(std(data, dims=2))
+    else
+        μ = zeros(size(data, 1))
+        σ = ones(size(data, 1))
+    end
+    return (; μ, σ)
+end
+
+"""
+    display_preprocessing(inp, outp; input_labels=nothing, output_labels=nothing)
+
+Print a human‑readable summary of normalisation constants and the input bounding box
+to the terminal.
+
+# Arguments
+- `inp`: named tuple from [`compute_input_preprocessing`](@ref) with fields `μ`, `σ`,
+  `LL_norm`, `mid_norm`, `Lvec_norm`.
+- `outp`: named tuple from [`compute_output_normalisation`](@ref) with fields `μ`, `σ`.
+- `input_labels`: optional vector of strings naming each input feature (length `d`).
+- `output_labels`: optional vector of strings naming each output variable (length `d_out`).
+"""
+function display_preprocessing(inp, outp; input_labels=nothing, output_labels=nothing)
+    d_in = length(inp.μ)
+    d_out = length(outp.μ)
+
+    # Create default labels if not provided
+    in_lbls = isnothing(input_labels) ? ["Input_$i" for i in 1:d_in] : input_labels
+    out_lbls = isnothing(output_labels) ? ["Output_$i" for i in 1:d_out] : output_labels
+
+    println("="^60)
+    println("        INPUT NORMALISATION & BOUNDING BOX")
+    println("="^60)
+    println(rpad("Feature", 12), rpad("μ", 14), rpad("σ", 14),
+        rpad("Lower (LL)", 14), rpad("Upper (LL)", 14),
+        rpad("Mid", 14), rpad("Half-width", 14))
+    println("-"^60)
+    for i in 1:d_in
+        @printf("%-12s %-14.6g %-14.6g %-14.6g %-14.6g %-14.6g %-14.6g\n",
+            in_lbls[i], inp.μ[i], inp.σ[i],
+            inp.LL_norm[1, i], inp.LL_norm[2, i],
+            inp.mid_norm[i], inp.Lvec_norm[i])
+    end
+    println()
+
+    println("="^60)
+    println("        OUTPUT NORMALISATION")
+    println("="^60)
+    println(rpad("Variable", 12), rpad("μ", 14), rpad("σ", 14))
+    println("-"^60)
+    for i in 1:d_out
+        @printf("%-12s %-14.6g %-14.6g\n", out_lbls[i], outp.μ[i], outp.σ[i])
+    end
+    println("="^60)
 end

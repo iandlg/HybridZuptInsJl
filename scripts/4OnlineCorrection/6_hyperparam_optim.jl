@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections, Statistics, Random
 
 # --- Choose Parameters file
-hsgp_p_key = 40
+hsgp_p_key = 43
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
@@ -12,7 +12,9 @@ hsgp_p_path = Dict{Int,String}(
     22 => "out/3OfflineCorrection/3_HsgpResults/ANG215_BODY_THREED_STEP_2026-06-06T17:33:50.999.json",
     30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json",
     40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json",
-    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json"
+    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
+    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
+    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
 )[hsgp_p_key]
 
 # --- Load parameters with corresponding metatdata
@@ -20,7 +22,7 @@ hsgp_base, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, h
 base_FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 base_FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])  # # 
 
-data_key = "DCSC" # meta["data_key"]
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -31,8 +33,15 @@ m = 200
 
 
 ## --- Load Data ---
-train_ids = [1, 2, 3, 4, 5, 6, 8, 10, 12] # [1, 2, 3, 4, 8, 9, 13, 14, 16]
-test_ids = [14] # [3, 13, 15]
+train_ids = Dict{String,Vector{Int}}(
+    "ANG2" => [1, 2, 3, 4, 8, 9, 13, 15, 16],
+    "DCSC" => [1, 2, 3, 4, 5, 6, 8, 12, 14]
+)[data_key]
+test_ids = [14] # [3, 13, 15] 
+Dict{String,Vector{Int}}(
+    "ANG2" => [14],
+    "DCSC" => [10]
+)
 trial_ids = vcat(train_ids, test_ids)
 FRAME = HybridZuptInsJl.HEADING
 FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_YAW
@@ -77,36 +86,28 @@ end
 # test_in, test_out = HybridZuptInsJl.remove_outliers(test_in, test_out;
 #     method="zscore", threshold=3.0, dims=:both)
 ## --- Fit stats on TRAIN ONLY, apply to both train and test ---
-output_symbols = ["pos_1", "pos_2", "pos_3", "yaw"]
+
 d = size(train_in.data, 1)
 
 normalization_params = OrderedDict(
     "margin" => 0.5,
     "normalize_x" => true,
-    "normalize_y" => true
+    "normalize_y" => false
 )
 
-μ_x = vec(mean(train_in.data, dims=2))
-σ_x = vec(std(train_in.data, dims=2))
-train_in_norm = (train_in.data .- μ_x) ./ σ_x
-test_in_norm = (test_in.data .- μ_x) ./ σ_x
-train_in_stats = [μ_x, σ_x]
+# Input preprocessing
+inp = HybridZuptInsJl.compute_input_preprocessing(train_in.data;
+    normalize_x=normalization_params["normalize_x"], margin=normalization_params["margin"])
+train_in_norm = (train_in.data .- inp.μ) ./ inp.σ
+test_in_norm = (test_in.data .- inp.μ) ./ inp.σ
 
-μ_y = normalization_params["normalize_y"] ? vec(mean(train_out.data, dims=2)) : fill(0.0, 4)
-σ_y = normalization_params["normalize_y"] ? vec(std(train_out.data, dims=2)) : fill(1.0, 4)
-train_out_norm = (train_out.data .- μ_y) ./ σ_y
-train_out_stats = [μ_y, σ_y]
-
-# Bounding box in normalized space (based on TRAIN input range)
-xmin_norm = vec(minimum(train_in_norm, dims=2))
-xmax_norm = vec(maximum(train_in_norm, dims=2))
-pm = normalization_params["margin"] * minimum(xmax_norm - xmin_norm)
-LL_norm = [xmin_norm' .- pm; xmax_norm' .+ pm]
-mid_norm = (LL_norm[1, :] .+ LL_norm[2, :]) ./ 2
-Lvec_norm = (LL_norm[2, :] .- LL_norm[1, :]) ./ 2
-@show Lvec_norm
+# Output normalisation
+outp = HybridZuptInsJl.compute_output_normalisation(train_out.data; normalize_y=normalization_params["normalize_y"])
+train_out_norm = (train_out.data .- outp.μ) ./ outp.σ
 
 ## --- Optimize hyperparameters per output, predict on TEST ---
+output_symbols = ["pos_1", "pos_2", "pos_3", "yaw"]
+
 pred_data = similar(test_out.data)
 pred_var = similar(test_out.data)
 hyps = Dict{String,Any}()
@@ -114,7 +115,7 @@ rng = Random.Xoshiro(123)
 
 optim_params = OrderedDict(
     "use_output_std_as_sigma_n_bound" => true,
-    "use_input_std_as_sigma_n_bound" => true,
+    "use_input_std_as_sigma_n_bound" => false,
     "default_upper" => 1e3,
     "default_lower" => 1e-3
 )
@@ -123,7 +124,7 @@ for (idx, symb) in enumerate(output_symbols)
     lower = fill(optim_params["default_lower"], 4)
     if optim_params["use_output_std_as_sigma_n_bound"]
         noise_lower_orig = maximum(train_out.data_std[idx, :])
-        max_output_std = noise_lower_orig / σ_y[idx]
+        max_output_std = noise_lower_orig / outp.σ[idx]
         lower[1] = max_output_std
     end
     upper = fill(optim_params["default_upper"], 4)
@@ -133,18 +134,18 @@ for (idx, symb) in enumerate(output_symbols)
         HybridZuptInsJl.hsgp_regression(
             train_in_norm', train_out_norm[idx, :],
             test_in_norm', m;
-            use_linear=false, LL=LL_norm, lower=lower, rng=rng, upper=upper, #theta=[0.01, 0.01, 0.01, 1.0]
+            use_linear=false, LL=inp.LL_norm, lower=lower, rng=rng, upper=upper, #theta=[0.01, 0.01, 0.01, 1.0]
         )
 
     if optim_params["use_input_std_as_sigma_n_bound"]
         # Propagate train input uncertainty through the fitted GP derivative
-        x_scaled_norm = train_in_norm' .- mid_norm'
+        x_scaled_norm = train_in_norm' .- inp.mid_norm'
         dfdx = zeros(size(x_scaled_norm, 1), d)
         for di in 1:d
-            Phi_dx = HybridZuptInsJl.calc_eigenvectors_dx(x_scaled_norm, Lvec_norm, per_dim_eigvals, di)
+            Phi_dx = HybridZuptInsJl.calc_eigenvectors_dx(x_scaled_norm, inp.Lvec_norm, per_dim_eigvals, di)
             dfdx[:, di:di] = Phi_dx * β
         end
-        train_in_std_norm = train_in.data_std[:, :] ./ σ_x
+        train_in_std_norm = train_in.data_std[:, :] ./ inp.σ
         var_x_norm = sum(dfdx' .^ 2 .* train_in_std_norm .^ 2; dims=1)
 
         # Refine noise lower bound with propagated input uncertainty, refit on train, predict on TEST
@@ -154,14 +155,14 @@ for (idx, symb) in enumerate(output_symbols)
             HybridZuptInsJl.hsgp_regression(
                 train_in_norm', train_out_norm[idx, :],
                 test_in_norm', m;
-                use_linear=false, LL=LL_norm, lower=lower, rng=rng, upper=upper,
+                use_linear=false, LL=inp.LL_norm, lower=lower, rng=rng, upper=upper,
                 # theta=[0.01, 0.01, 0.01, 1.0]
             )
     end
 
 
-    pred_data[idx, :] = pred_norm .* σ_y[idx] .+ μ_y[idx]
-    pred_var[idx, :] = pred_var_norm .* σ_y[idx] .^ 2
+    pred_data[idx, :] = pred_norm .* outp.σ[idx] .+ outp.μ[idx]
+    pred_var[idx, :] = pred_var_norm .* outp.σ[idx] .^ 2
     hyps[symb] = theta[1:3]
 end
 
@@ -174,8 +175,10 @@ pred = HybridZuptInsJl.CorrectionIO(test_out.t, pred_data, sqrt.(pred_var))
 # hyps["pos_3"] = hsgp_base.hp.pos_3
 
 hsgp_opt = HybridZuptInsJl.HsgpParameters(
-    HybridZuptInsJl.SeHyperparams(hyps), d, m, Lvec_norm;
-    input_stats=train_in_stats, output_stats=train_out_stats, mid_norm=mid_norm
+    HybridZuptInsJl.SeHyperparams(hyps), d, m, inp.Lvec_norm;
+    input_stats=[inp.μ, inp.σ],
+    output_stats=[outp.μ, outp.σ],
+    mid_norm=inp.mid_norm
 )
 
 hsgp_base = HybridZuptInsJl.HsgpParameters(
@@ -186,8 +189,9 @@ hsgp_base = HybridZuptInsJl.HsgpParameters(
 
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
-trial_id = 8
+trial_id = 15
 train_ratio = 0.45
+output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
@@ -210,25 +214,27 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
 
-slamHsgp_corr_opt = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_opt)
-_, _, slamHsgpOpt_corr_traj, io_data["SlamHsgp Opt"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr_opt;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
-
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
+defaultEstimator = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, default_corr;
+    inertial_updated, sim_config_updated, gt_traj_aligned, defaultEstimator;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-tatic_corr = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60))
-_, _, stat_corr_traj, io_data["Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, tatic_corr;
+decoupledStatic = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
+_, _, stat_corr_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, decoupledStatic;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-slamHsgp_corr_base = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60), hsgp_base)
-_, _, slamHsgpBase_corr_traj, io_data["SlamHsgp Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr_base;
+
+jointHsgp_base = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_base; corrected_channels=output_channels)
+_, _, jointHsgp_base_traj, io_data["Joint HSGP Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, jointHsgp_base;
     x_init=x_init, gt_available=gt_available, ref_frame=base_FRAME, feature_type=base_FEATURE_TYPE)
+
+jointHsgp_opt = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_opt; corrected_channels=output_channels)
+_, _, jointHsgp_opt_traj, io_data["Joint HSGP Opt"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, gt_traj_aligned, jointHsgp_opt;
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
+
 
 # splitHsgp_corr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_base)
 # _, _, hsgp1_corr_traj, io_data["SplitHsgp Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
@@ -250,10 +256,10 @@ for (method_name, io_dict) in io_data
 end
 
 trajs = OrderedDict(
-    "Base" => def_corr_traj,
-    "Static" => stat_corr_traj,
-    "SLAM Base" => slamHsgpBase_corr_traj,
-    "SLAM Opt" => slamHsgpOpt_corr_traj,
+    "Default" => def_corr_traj,
+    "Decoupled Static" => stat_corr_traj,
+    "Joint HSGP Base" => jointHsgp_base_traj,
+    "Joint HSGP Opt" => jointHsgp_opt_traj,
     # "SPLIT Base" => hsgp1_corr_traj
 )
 
@@ -268,7 +274,7 @@ with_theme(theme_ggplot2()) do
 end
 
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
-fig_out_norm = HybridZuptInsJl.plot_regression_results(output_data_norm, io_data["SlamHsgp Opt"]["target_norm"])
+fig_out_norm = HybridZuptInsJl.plot_regression_results(output_data_norm, io_data["Joint HSGP Opt"]["target_norm"])
 
 fig_in = HybridZuptInsJl.plot_regression_results(input_data, io_data["Default"]["input"])
 # display(GLMakie.Screen(), fig_in)
@@ -285,7 +291,7 @@ mkpath(combo_dir)
 
 
 time = string(Dates.now())
-filename = "$(meta["data_key"])$(meta["trial_id"])_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
+filename = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
 HybridZuptInsJl.to_json(joinpath(combo_dir, filename), hsgp_opt;
     metadata=Dict(
         "data_key" => data_key,

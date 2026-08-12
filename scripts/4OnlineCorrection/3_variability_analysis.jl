@@ -2,14 +2,16 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 
 # Choose Parameters file
-hsgp_p_key = 40
+hsgp_p_key = 42
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
     12 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-26T13:06:11.411.json",
     20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
     21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
     30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json",
-    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json"
+    40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json",
+    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
+    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -18,8 +20,10 @@ hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp
 hsgp_p = HybridZuptInsJl.HsgpParameters(
     hsgp_p.hp, hsgp_p.d, m, hsgp_p.LL;
     input_stats=hsgp_p.input_stats,
-    output_stats=hsgp_p.output_stats
+    output_stats=hsgp_p.output_stats,
+    mid_norm=hsgp_p.mid_norm
 )
+@show hsgp_p
 
 data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
@@ -33,16 +37,21 @@ FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta[
 trial_id = 15
 train_ratio = 0.45
 
-rmse_fun = HybridZuptInsJl.make_rmse_evaluator(data_dir, trial_id, train_ratio, FEATURE_TYPE, FRAME, m)
+output_channel_idxs = [1, 2, 4]
+
+rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
+    data_dir, trial_id, train_ratio, FEATURE_TYPE, FRAME;
+    m=m, output_channel_idxs=output_channel_idxs, hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator)
 
 # Experiment variables
-groups = [:yaw]
+groups = [Symbol(HybridZuptInsJl._OUTPUT_NAMES[idx]) for idx in output_channel_idxs]
+
 log_range = (-1.0, 1.0)
 n_steps = 3
 baseline_included = true
 
-specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, groups; log_range=log_range, n_steps=n_steps)
-specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps)
+specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs; log_range=log_range, n_steps=n_steps)
+# specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps, output_channel_idxs=output_channel_idxs)
 
 ##
 # Now vary hyperparameters
@@ -94,7 +103,7 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using CairoMakie
 outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
-basename_key = 52
+basename_key = 56
 basename = Dict(
     11 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T13:47:42.748",
     16 => "ANG15_BODY_TWOD_STEP_DT_2026-06-01T10:20:18.078",
@@ -103,7 +112,11 @@ basename = Dict(
     32 => "ANG15_HEADING_TWOD_STEP_DT_2026-06-26T18:47:22.051",
     50 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:00:16.347",
     51 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:04:45.711",
-    52 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:13:58.727"
+    52 => "ANG215_HEADING_TWOD_STEP_DT_2026-07-13T10:13:58.727",
+    53 => "ANG215_HEADING_TWOD_STEP_DT_2026-08-11T11:44:58.145",
+    54 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:00:34.493",
+    55 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:07:04.513",
+    56 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:38:08.153"
 )[basename_key]
 
 csv_file = joinpath(outdir, "$basename.csv")

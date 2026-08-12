@@ -109,9 +109,14 @@ function make_rmse_evaluator(
     trial_id::Int,
     train_ratio::Float64,
     feature_type::FeatureType,
-    ref_frame::ReferenceFrame,
+    ref_frame::ReferenceFrame, ;
     m::Union{Nothing,Int}=nothing,
+    output_channel_idxs=[1, 2, 3, 4],
+    hsgp_estimator_factory::Type=JointHsgpEstimator
 )::Function
+    p = length(output_channel_idxs)
+    @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
+    @assert all(diff(output_channel_idxs) .> 0) "Output channels must be in ascending order, got $output_channel_idxs"
 
     # 1. Align INS and GT (same for all hyperparameter variations)
     ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated =
@@ -137,9 +142,9 @@ function make_rmse_evaluator(
             input_stats=hsgp_params.input_stats,
             output_stats=hsgp_params.output_stats
         )
-        slamHsgp_corr = JointHsgpEstimator(round(Int, 300), hsgp_params)
+        hsgp_estimator = hsgp_estimator_factory(300, hsgp_params; corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs])
         _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
-            inertial_updated, sim_config_updated, gt_traj_aligned, slamHsgp_corr;
+            inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_estimator;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)
 
         # Run online correction
@@ -149,23 +154,24 @@ function make_rmse_evaluator(
 
     return rmse_evaluator
 end
+
 function make_hp_param_grid(
-    base_hp::SeHyperparams, groups::Vector{Symbol};
+    base_hp::SeHyperparams, output_channel_idxs::Vector{Int};
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
     n_steps::Int=9
 )::Tuple{Vector{ParamSpec},ParamGrid}
 
-    group_names = [string(g) for g in groups]
-    max_indices = [length(getfield(base_hp, g)) for g in groups]
-    grid = ParamGrid(group_names, max_indices)
+    channel_names = [_OUTPUT_NAMES[idx] for idx in output_channel_idxs]
+    max_indices = [length(getfield(base_hp, Symbol(name))) for name in channel_names]
+    grid = ParamGrid(channel_names, max_indices)
     specs = ParamSpec[]
 
-    for (grp_idx, group) in enumerate(groups)
-        vec = getfield(base_hp, group)
+    for (grp_idx, chan_name) in enumerate(channel_names)
+        vec = getfield(base_hp, Symbol(chan_name))
         for (idx, base_val) in enumerate(vec)
-            name = "$group[$idx]"
-            getter(p) = getfield(p.hp, group)[idx]
-            setter(p, new_val) = basecopy(p; new_hp=modify_sehp(p.hp, group, idx, new_val))
+            name = "$(Symbol(chan_name))[$idx]"
+            getter(p) = getfield(p.hp, Symbol(chan_name))[idx]
+            setter(p, new_val) = basecopy(p; new_hp=modify_sehp(p.hp, Symbol(chan_name), idx, new_val))
             spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
             place_spec!(grid, grp_idx, idx, spec)
@@ -174,7 +180,6 @@ function make_hp_param_grid(
     return specs, grid
 end
 
-# Helper: modify input_stats (mean or std)
 function set_input_stat(p::HsgpParameters, which_stat::Int, dim::Int, new_val::Float64)
     new_vec = copy(p.input_stats[which_stat])
     new_vec[dim] = new_val
@@ -185,7 +190,6 @@ function set_input_stat(p::HsgpParameters, which_stat::Int, dim::Int, new_val::F
     end
 end
 
-# Helper: modify output_stats (mean or std)
 function set_output_stat(p::HsgpParameters, which_stat::Int, dim::Int, new_val::Float64)
     new_vec = copy(p.output_stats[which_stat])
     new_vec[dim] = new_val
@@ -196,14 +200,23 @@ function set_output_stat(p::HsgpParameters, which_stat::Int, dim::Int, new_val::
     end
 end
 
+function set_mid_norm_stat(p::HsgpParameters, dim::Int, new_val::Float64)
+    new_vec = copy(p.mid_norm)
+    new_vec[dim] = new_val
+    return basecopy(p; new_mid=new_vec)
+end
+
 function make_stats_param_grid(base_params::HsgpParameters;
+    output_channel_idxs::Vector{Int}=[1, 2, 3, 4],
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
     n_steps::Int=9)::Tuple{Vector{ParamSpec},ParamGrid}
 
     d = base_params.d
-    p = length(base_params.output_stats[1])
-    group_names = ["input_mean", "input_std", "output_mean", "output_std"]
-    max_indices = [d, d, p, p]
+    p = length(output_channel_idxs)
+    @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
+    @assert all(diff(output_channel_idxs) .> 0) "Output channels must be in ascending order, got $output_channel_idxs"
+    group_names = ["input_mean", "input_std", "input_center", "output_mean", "output_std"]
+    max_indices = [d, d, d, p, p]
     grid = ParamGrid(group_names, max_indices)
     specs = ParamSpec[]
 
@@ -227,24 +240,34 @@ function make_stats_param_grid(base_params::HsgpParameters;
         place_spec!(grid, 2, dim, spec)
     end
 
-    # Output means (group_idx=3)
-    for dim in 1:p
-        name = "output_mean[$dim]"
-        getter(p) = p.output_stats[1][dim]
-        setter(p, val) = set_output_stat(p, 1, dim, val)
+    # Input Center
+    for dim in 1:d
+        name = "input_center[$dim]"
+        getter(p) = p.mid_norm[dim]
+        setter(p, val) = set_mid_norm_stat(p, dim, val)
         spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
         push!(specs, spec)
         place_spec!(grid, 3, dim, spec)
     end
 
+    # Output means (group_idx=3)
+    for (i, dim) in enumerate(output_channel_idxs)
+        name = "output_mean[$dim]"
+        getter(p) = p.output_stats[1][dim]
+        setter(p, val) = set_output_stat(p, 1, dim, val)
+        spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
+        push!(specs, spec)
+        place_spec!(grid, 4, i, spec)
+    end
+
     # Output stds (group_idx=4)
-    for dim in 1:p
+    for (i, dim) in enumerate(output_channel_idxs)
         name = "output_std[$dim]"
         getter(p) = p.output_stats[2][dim]
         setter(p, val) = set_output_stat(p, 2, dim, val)
         spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
         push!(specs, spec)
-        place_spec!(grid, 4, dim, spec)
+        place_spec!(grid, 5, i, spec)
     end
 
     return specs, grid
