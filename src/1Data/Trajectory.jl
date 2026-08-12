@@ -25,13 +25,13 @@ Base.getindex(tr::Trajectory, mask) = Trajectory(
 )
 Base.lastindex(tr::Trajectory) = length(tr)
 
-function Trajectory(dir::AbstractString, id::Int)
+function Trajectory(dir::AbstractString, id::Int, kwargs...)
     src = resolve_source(dir)
-    t, pos, R_nb, vel = read_raw_trajectory(src, dir, id)
+    t, pos, R_nb, vel = read_raw_trajectory(src, dir, id, kwargs...)
     return clean(Trajectory(t, pos, R_nb, vel))
 end
 
-function read_raw_trajectory(::ANG, dir::AbstractString, id::Int)
+function read_raw_trajectory(::ANG, dir::AbstractString, id::Int, kwargs...)
     path = joinpath(dir, "$(id)_Synchronized_Reference.csv")
     @info "From DIR($dir) ID($id) reading file :\n  → $(path)"
 
@@ -53,11 +53,11 @@ function read_raw_trajectory(::ANG, dir::AbstractString, id::Int)
     return t, pos, R, nothing
 end
 
-function read_raw_trajectory(::MTI, dir::AbstractString, id::Int)
+function read_raw_trajectory(::MTI, dir::AbstractString, id::Int, kwargs...)
     error("Not implemented")
 end
 
-function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
+function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int, kwargs...)
     subdirs = filter(readdir(dir)) do entry
         isdir(joinpath(dir, entry)) || return false
         s = string(id)
@@ -127,7 +127,7 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int)
     return t[mask], pos[:, mask], R[:, :, mask], nothing
 end
 
-function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int)
+function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int, kwargs...)
     subdirs = filter(readdir(dir)) do entry
         isdir(joinpath(dir, entry)) || return false
         s = string(id)
@@ -148,8 +148,8 @@ function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int)
 
     df = CSV.read(
         path, DataFrame;
-        header=true,
-        comment="//",
+        header=false,
+        skipto=8,
     )
 
     # Drop NaN rows

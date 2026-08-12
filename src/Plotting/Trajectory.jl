@@ -73,7 +73,7 @@ function plot_groundtruth_vs_inertial_positions(
             end
 
             arrows2d!(ax, pts, dirs;
-                color=:black)
+                color=:black, label="Ground truth")
         end
     end
 
@@ -90,13 +90,13 @@ function plot_groundtruth_vs_inertial_positions(
             color=c, linewidth=1, label=key)
 
         scatter!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
-            color=c, marker=:circle, markersize=5, alpha=0.6)
+            color=c, marker=:circle, markersize=5, alpha=0.6, label=key)
 
         scatter!(ax, [traj.pos[1, start]], [traj.pos[2, start]];
-            color=c, marker=:circle, markersize=12)
+            color=c, marker=:circle, markersize=12, label=key)
 
         scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
-            color=c, marker=:rect, markersize=12)
+            color=c, marker=:rect, markersize=12, label=key)
 
         if show_heading
             idx = start:heading_stride:n
@@ -110,11 +110,11 @@ function plot_groundtruth_vs_inertial_positions(
             end
 
             arrows2d!(ax, pts, dirs;
-                color=c)
+                color=c, label=key)
         end
     end
 
-    axislegend(ax; position=:rt)
+    axislegend(ax; position=:rt, merge=true)
     return fig
 end
 
@@ -703,12 +703,12 @@ function animate_trajectory(
     return fig
 end
 
-function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix}; axis_len=0.3)
+function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix}; axis_len=0.3, title="Trajectory")
     N = length(positions)
     @assert length(Rs) == N
 
     fig = Figure(size=(900, 700))
-    ax = Axis3(fig[1, 1], aspect=:data, title="Trajectory")
+    ax = Axis3(fig[1, 1], aspect=:data, title=title)
 
     # slider – use update_while_dragging=false if desired
     sl = Slider(fig[2, 1], range=1:N, startvalue=1, update_while_dragging=true)
@@ -752,7 +752,7 @@ function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix
     fig
 end
 
-function plot_trajectory(traj::Trajectory; axis_len=0.3)
+function plot_trajectory(traj::Trajectory; axis_len=0.3, kwargs...)
     n = length(traj)
     points = Vector{Point3f}(undef, n)
     mats = Vector{Matrix{Float32}}(undef, n)
@@ -760,7 +760,7 @@ function plot_trajectory(traj::Trajectory; axis_len=0.3)
         points[i] = Point3f(traj.pos[:, i])
         mats[i] = traj.R_nb[:, :, i]
     end
-    plot_trajectory(points, mats; axis_len=axis_len)
+    plot_trajectory(points, mats; axis_len=axis_len, kwargs...)
 end
 
 """

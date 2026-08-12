@@ -205,6 +205,15 @@ function to_json(
     end
 end
 
+function Base.show(io::IO, ::MIME"text/plain", hp::SeHyperparams)
+    println(io, "SeHyperparams")
+    println(io, "  " * se_vec_str(hp.pos_1, "pos_1"))
+    println(io, "  " * se_vec_str(hp.pos_2, "pos_2"))
+    println(io, "  " * se_vec_str(hp.pos_3, "pos_3"))
+    # Use print for the last line to avoid trailing newline
+    print(io, "  " * se_vec_str(hp.yaw, "yaw"))
+end
+
 struct HsgpParameters
     hp::SeHyperparams
     d::Int
@@ -326,3 +335,29 @@ function from_json(::Type{T}, filename::AbstractString) where {T}
 end
 
 σ_n(p::HsgpParameters) = σ_n(p.hp)
+
+function Base.show(io::IO, ::MIME"text/plain", p::HsgpParameters)
+    println(io, "HsgpParameters")
+    println(io, "  d = $(p.d), m = $(p.m)")
+    println(io, "  LL = ", format_vec(p.LL))
+
+    println(io, "  input_stats:")
+    println(io, "    mean = ", format_vec(p.input_stats[1]))
+    println(io, "    std  = ", format_vec(p.input_stats[2]))
+
+    println(io, "  output_stats:")
+    out_mean = p.output_stats[1]
+    out_std = p.output_stats[2]
+    println(io, "    mean_pos = ", format_vec(out_mean[1:3]),
+        ", mean_yaw = ", @sprintf("%.2e", out_mean[4]))
+    println(io, "    std_pos  = ", format_vec(out_std[1:3]),
+        ",  std_yaw  = ", @sprintf("%.2e", out_std[4]))
+
+    println(io, "  mid_norm = ", format_vec(p.mid_norm))
+
+    println(io, "  hp = ")
+    hp_str = sprint((io_s, x) -> show(io_s, MIME("text/plain"), x), p.hp)
+    for line in split(hp_str, '\n')
+        println(io, "    ", line)
+    end
+end

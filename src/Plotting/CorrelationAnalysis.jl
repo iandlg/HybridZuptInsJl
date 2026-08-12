@@ -54,67 +54,67 @@ end
 
 
 """
-    run_correlation_analysis(trial_id::Int, data_key::String,
-                             ref_frame::ReferenceFrame, feature_type::FeatureType)
+    run_correlation_analysis(input_io::CorrectionIO, output_io::CorrectionIO;
+                             feature_type::Union{FeatureType,Nothing}=nothing)
 
-Load the specified trial, compute training input-output pairs, and display the
-correlation heatmap between each input feature and each output correction.
+Compute and display the correlation heatmap between each input feature and each output correction,
+using data already packaged in `CorrectionIO` structures.
+
+# Arguments
+- `input_io`: correction input features (`data` matrix of size n_features × n_steps)
+- `output_io`: correction outputs (`data` matrix of size 4 × n_steps)
+- `feature_type`: optional `FeatureType` to label input axes; if `nothing` generic names are used.
 """
 function run_correlation_analysis(
-    trial_id::Int, data_dir::String,
-    ref_frame::ReferenceFrame, feature_type::FeatureType
+    input_io::CorrectionIO,
+    output_io::CorrectionIO;
+    feature_type::Union{FeatureType,Nothing}=nothing,
+    output_labels::Vector{String}=["Δx", "Δy", "Δz", "Δψ"]
 )
+    # Extract data matrices
+    input_feature = input_io.data
+    output_matrix = output_io.data
 
-    ins_traj_aligned, gt_traj_aligned, zupt, segs, _, _ =
-        HybridZuptInsJl.compute_aligned_ins_trajectory(data_dir, trial_id)
-
-    # Compute training IO (outputs and input features)
-    true_outputs, input_feature = HybridZuptInsJl.compute_training_io(
-        ins_traj_aligned, gt_traj_aligned, segs;
-        ref_frame=ref_frame,
-        feature_type=feature_type
+    # Determine input labels
+    n_features = size(input_feature, 1)
+    feature_labels = Dict{Any,Vector{String}}(
+        HybridZuptInsJl.THREED_STEP => ["step_x", "step_y", "step_z"],
+        HybridZuptInsJl.TWOD_STEP_DT => ["step_x", "step_y", "dt"],
+        HybridZuptInsJl.THREED_STEP_DT => ["step_x", "step_y", "step_z", "dt"],
+        HybridZuptInsJl.TWOD_STEP_YAW => ["step_x", "step_y", "yaw"],
+        HybridZuptInsJl.TWOD_STEP_DT_YAW => ["step_x", "step_y", "dt", "yaw"],
+        HybridZuptInsJl.THREED_STEP_DT_YAW => ["step_x", "step_y", "step_z", "dt", "yaw"],
     )
 
-    # Get output correction matrix (4 × n_steps)
-    output_matrix = true_outputs.data
-
-    # Input feature dimensions depend on feature_type
     n_features = size(input_feature, 1)
-    input_labels = if feature_type == HybridZuptInsJl.THREED_STEP
-        ["step_x", "step_y", "step_z"]
-    elseif feature_type == HybridZuptInsJl.TWOD_STEP_DT
-        ["step_x", "step_y", "dt"]
-    else # THREED_STEP_DT
-        ["step_x", "step_y", "step_z", "dt"]
+    input_labels = if feature_type === nothing
+        ["Feature$i" for i in 1:n_features]
+    else
+        get(feature_labels, feature_type, ["Feature$i" for i in 1:n_features])
     end
 
-    output_labels = ["Δx", "Δy", "Δz", "Δψ"]
-
-    # Compute correlation matrix
+    # Correlation matrix
     corr_mat = compute_correlation_matrix(input_feature, output_matrix)
 
-    # Display heatmap
     fig = plot_correlation_heatmap(corr_mat, input_labels, output_labels;
-        title="Correlations ($ref_frame, $feature_type)")
+        title="Correlations ($(feature_type === nothing ? "generic" : feature_type))")
 
-    # Optional: print matrix to console
-    println("\nCorrelation matrix ($ref_frame, $feature_type):")
+    println("\nCorrelation matrix ($(feature_type === nothing ? "generic" : feature_type)):")
     println("Inputs: ", join(input_labels, ", "))
     println("Outputs: ", join(output_labels, ", "))
     display(round.(corr_mat, digits=3))
 
-    # Compute CCA
+    # CCA
     n_in, n_out = size(input_feature, 1), size(output_matrix, 1)
     n_components = min(n_in, n_out)
 
     canonical_corrs, x_proj, y_proj = perform_cca(input_feature, output_matrix)
 
-    # Print CCA results
     println("\nCCA Results:")
     println("Canonical correlations: ", round.(canonical_corrs[1:n_components], digits=4))
-    println("Total canonical correlation: ", round(sqrt(mean(canonical_corrs[1:n_components] .^ 2)), digits=4))
+    println("Total canonical correlation: ",
+        round(sqrt(mean(canonical_corrs[1:n_components] .^ 2)), digits=4))
 
-    # Visualizations
     fig_corr = plot_canonical_correlations(canonical_corrs, n_components)
 
     return fig, canonical_corrs, fig_corr
@@ -133,33 +133,38 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
     output_labels::Vector{String};
     title::String="Input-Output Correlation Heatmap")
 
-    n_in, n_out = size(corr_mat)
+    n_in, n_out = size(corr_mat)   # rows: input features, cols: outputs
     @assert length(input_labels) == n_in
     @assert length(output_labels) == n_out
 
     fig = Figure(size=(600, 500))
     ax = Axis(fig[1, 1],
-        xticks=(1:n_out, output_labels),
-        yticks=(1:n_in, input_labels),
-        xticklabelrotation=π / 4,
+        xaxisposition=:top,            # input labels at the top
+        yaxisposition=:left,           # output labels at the left
+        xticks=(1:n_in, input_labels),
+        yticks=(1:n_out, output_labels),
+        xticklabelrotation=0,          # no rotation
         title=title,
-        xlabel="Output corrections",
-        ylabel="Input features",
+        xlabel="Input features",
+        ylabel="Output corrections",
         xgridvisible=false,
         ygridvisible=false)
 
-    # Heatmap
-    hm = heatmap!(ax, 1:n_out, 1:n_in, corr_mat)
+    # z matrix: rows = outputs (y-axis), columns = inputs (x-axis)
+    hm = heatmap!(ax, 1:n_in, 1:n_out, (corr_mat) .^ 2)
 
     # Add text annotations
     for i in 1:n_in, j in 1:n_out
-        val = corr_mat[i, j]
-        text!(ax, j, i, text="$(round(val, digits=2))";
-            color=:white,
-            align=(:center, :center))
+        val = corr_mat[i, j]^2
+        if val >= 0.1
+            text!(ax, i, j, text="$(round(val, digits=2))";
+                color=:black,
+                align=(:center, :center))
+        end
     end
+    # Horizontal colorbar below the heatmap
+    Colorbar(fig[2, 1], hm, label="R²", vertical=false)
 
-    Colorbar(fig[1, 2], hm, label="Pearson correlation")
     return fig
 end
 

@@ -35,13 +35,17 @@ function ∂feature_norm𝑥𝑦𝑧_∂δpδθ(R_wl::AbstractMatrix{T}, σ_inpu
     return [Diagonal(1 ./ σ_input_𝑥𝑦𝑧) * R_wl' zeros(T, 3, 3)]
 end
 
+function ∂feature_norm𝑥𝑦_∂δpδθ(R_wl::AbstractMatrix{T}, σ_input_𝑥𝑦::AbstractVector{T})::AbstractMatrix{T} where T<:Real
+    return Diagonal(1 ./ σ_input_𝑥𝑦) * [R_wl[:, 1:2]' zeros(T, 2, 3)]
+end
+
 function ∂feature_normΔT_∂δpδθ(::Type{T})::AbstractVector{T} where T<:Real
     return zeros(T, 6)
 end
 
 function ∂feature_normΔθ3_∂δpδθ(R::AbstractMatrix{T}, σ_input_θ::T)::AbstractVector{T} where T<:Real
     # return [zeros(T, 1, 3) ∂θ3_∂δθ_left(R) ./ σ_output_θ]
-    return [zeros(T, 1, 3) [0.0, 0.0, 1.0] ./ σ_input_θ]
+    return vcat(zeros(T, 3), [0.0, 0.0, 1.0] ./ σ_input_θ)
 end
 
 function ∂feature_normΔθ3_∂δpδθ(q::AbstractVector{T}, σ_input_θ::T)::AbstractVector{T} where T<:Real

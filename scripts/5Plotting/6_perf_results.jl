@@ -33,11 +33,11 @@ FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta[
 
 trial_ids = HybridZuptInsJl.list_trial_ids(data_dir)
 train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-correctors = OrderedDict{String,HybridZuptInsJl.AbstractCorrector}(
-    "Default" => HybridZuptInsJl.DefaultCorrector(300),
+correctors = OrderedDict{String,HybridZuptInsJl.AbstractEstimator}(
+    "Default" => HybridZuptInsJl.BaseEstimator(300),
     "Static" => HybridZuptInsJl.StaticCorrectorV2(300),
-    "Split" => HybridZuptInsJl.SplitHybridCorrector(round(Int, 300), hsgp_p),
-    "Slam" => HybridZuptInsJl.SlamCorrector(round(Int, 300), hsgp_p)
+    "Split" => HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, 300), hsgp_p),
+    "Slam" => HybridZuptInsJl.JointHsgpEstimator(round(Int, 300), hsgp_p)
 )
 
 dataset = HybridZuptInsJl.collect_dataset(data_dir, trial_ids, train_ratios, correctors; frame=FRAME, feature_type=FEATURE_TYPE)
