@@ -500,9 +500,6 @@ end
 
 function learned_measurement_update!(c::JointStaticEstimator;
     R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
-    # c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
-    # c.H[4, 4:6] = [0.0, 0.0, 1.0]
-    # c.H[:, 7:end] .= 0.0
 
     Hfull = zeros(Float64, 4, 6+c.p)
     Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
@@ -528,7 +525,7 @@ function relinearize!(c::JointStaticEstimator)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
     c.stride_bias[:, c.i] += c.δx[7:end, c.i]
-    # c.δx[:, c.i] .= 0.0
+    c.δx[:, c.i] .= 0.0
 end
 
 function get_β_Σβ(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
