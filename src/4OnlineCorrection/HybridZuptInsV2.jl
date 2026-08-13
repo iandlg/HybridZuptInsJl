@@ -236,6 +236,6 @@ function hybrid_zupt_aided_insv2(
         relinearize!(corrector)
     end
 
-    return zupt, step_seg, get_trajectory(corrector), io_data, get_β_Σβ(corrector)
+    return zupt, step_seg, get_trajectory(corrector), io_data, get_model(corrector)
 end
 

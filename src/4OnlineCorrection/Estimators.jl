@@ -189,8 +189,8 @@ function relinearize!(c::AbstractEstimator; kwarg...)
     error("relinearize! not implemented for $(typeof(c))")
 end
 
-function get_β_Σβ(c::AbstractEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
-    error("get_β_Σβ not implemented for $(typeof(c))")
+function get_model(c::AbstractEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    error("get_model not implemented for $(typeof(c))")
 end
 
 # Accessors
@@ -354,7 +354,7 @@ function relinearize!(c::BaseEstimator)
     c.δx[:, c.i] .= 0.0
 end
 
-function get_β_Σβ(c::BaseEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_model(c::BaseEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return nothing
 end
 
@@ -532,7 +532,7 @@ function relinearize!(c::JointStaticEstimator)
 
 end
 
-function get_β_Σβ(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_model(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return nothing
 end
 
@@ -698,7 +698,7 @@ function relinearize!(c::DecoupledStaticEstimator)
     c.δx .= 0.0
 end
 
-function get_β_Σβ(c::DecoupledStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_model(c::DecoupledStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     return nothing
 end
 
@@ -969,7 +969,7 @@ function relinearize!(c::DecoupledHsgpEstimator)
     # c.δx[:, c.i] .= 0.0
 end
 
-function get_β_Σβ(c::DecoupledHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_model(c::DecoupledHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     m = c.params.m
     p = c.p
     mask = c.correction_mask
@@ -1277,7 +1277,7 @@ function relinearize!(c::JointHsgpEstimator)
     # c.Σ[7:end, 1:6] .= 0.0
 end
 
-function get_β_Σβ(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+function get_model(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
     m = c.params.m
     p = c.p
     mask = c.correction_mask
