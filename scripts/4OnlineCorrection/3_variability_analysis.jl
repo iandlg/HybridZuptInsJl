@@ -12,6 +12,7 @@ hsgp_p_path = Dict{Int,String}(
     40 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_DT/ANG15_HEADING_TWOD_STEP_DT_2026-07-10T15:06:17.927.json",
     41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
     42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
+    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
 )[hsgp_p_key]
 
 # Load parameters with corresponding metatdata
@@ -47,11 +48,11 @@ rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
 groups = [Symbol(HybridZuptInsJl._OUTPUT_NAMES[idx]) for idx in output_channel_idxs]
 
 log_range = (-1.0, 1.0)
-n_steps = 3
+n_steps = 11
 baseline_included = true
 
 specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs; log_range=log_range, n_steps=n_steps)
-# specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps, output_channel_idxs=output_channel_idxs)
+specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p; log_range=(-1.0, 1.0), n_steps=n_steps, output_channel_idxs=output_channel_idxs)
 
 ##
 # Now vary hyperparameters
@@ -71,7 +72,7 @@ outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
 # Construct filenames
 time = string(Dates.now())
 
-base_name = "$(meta["data_key"])$(trial_id)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
+base_name = "$(data_key)$(trial_id)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
 csv_path = joinpath(outdir, "$base_name.csv")
 json_path = joinpath(outdir, "$base_name.json")
 
@@ -88,7 +89,8 @@ metadata = Dict(
     "n_steps" => n_steps,
     "baseline_included" => baseline_included,
     "grid" => HybridZuptInsJl.grid_to_dict(specs[2]),
-    "timestamp" => time
+    "timestamp" => time,
+    "base_parameters_metadata" => meta
 )
 
 open(json_path, "w") do f
@@ -103,7 +105,7 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using CairoMakie
 outdir = "out/4OnlineCorrection/3HpVariabilityAnalysis"
-basename_key = 56
+basename_key = 58
 basename = Dict(
     11 => "ANG15_BODY_TWOD_STEP_DT_2026-05-29T13:47:42.748",
     16 => "ANG15_BODY_TWOD_STEP_DT_2026-06-01T10:20:18.078",
@@ -116,7 +118,9 @@ basename = Dict(
     53 => "ANG215_HEADING_TWOD_STEP_DT_2026-08-11T11:44:58.145",
     54 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:00:34.493",
     55 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:07:04.513",
-    56 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:38:08.153"
+    56 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-11T12:38:08.153",
+    57 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-12T14:50:50.896", # no output normalization hyperparams
+    58 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-12T15:04:26.121", # no output norm - normalization stats
 )[basename_key]
 
 csv_file = joinpath(outdir, "$basename.csv")

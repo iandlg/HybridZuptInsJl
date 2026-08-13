@@ -8,7 +8,7 @@ function hybrid_zupt_aided_insv2(
     gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),
     ref_frame::ReferenceFrame=HEADING,
     feature_type::FeatureType=THREED_STEP,
-    β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing
+    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -47,7 +47,7 @@ function hybrid_zupt_aided_insv2(
         pos_init=x_init[1:3],
         quat_init=quat[:, 1],
         Σpq_init=P[[1:3; 7:9], [1:3; 7:9], 1],
-        β_Σβ_0=β_Σβ_0
+        init_model=init_model
     )
 
     # n_train_cutoff = floor(Int, train_ratio * N)
@@ -236,6 +236,6 @@ function hybrid_zupt_aided_insv2(
         relinearize!(corrector)
     end
 
-    return zupt, step_seg, get_trajectory(corrector), io_data, get_β_Σβ(corrector)
+    return zupt, step_seg, get_trajectory(corrector), io_data, get_model(corrector)
 end
 

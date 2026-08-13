@@ -1,7 +1,7 @@
 """
     plot_groundtruth_vs_inertial_positions(trajs, gt_traj)
 
-Plot 2D positions (X‑Y) of ground truth and one or more estimated trajectories.
+Plot 2D positions (X-Y) of ground truth and one or more estimated trajectories.
 
 # Arguments
 - `trajs`: A `Trajectory` object (single estimate) or a `Dict{String,Trajectory}` (multiple).
@@ -122,7 +122,7 @@ end
 """
     plot_position_rmse(trajs::Union{Dict{String, Trajectory}, Trajectory}, gt_traj::Trajectory)
 
-Plot the cumulative root‑mean‑square error (RMSE) of the horizontal position (x‑y) over time
+Plot the cumulative root-mean-square error (RMSE) of the horizontal position (x-y) over time
 for one or more estimated trajectories against a ground truth trajectory.
 
 # Arguments
@@ -230,7 +230,7 @@ Plot Euler angles (roll, pitch, yaw) from estimated trajectories against a groun
 - `gt_traj`: Ground truth trajectory with the same `t` and `euler_nb` fields.
 
 # Returns
-- A `Figure` object with three side‑by‑side axis objects.
+- A `Figure` object with three side-by-side axis objects.
 """
 function plot_groundtruth_vs_inertial_orientations(
     trajs::Union{AbstractDict{String,Trajectory},Trajectory},
@@ -295,7 +295,7 @@ Plot position components (X, Y, Z) from estimated trajectories against ground tr
 - `gt_traj`: Ground truth trajectory with the same `t` and `pos` fields.
 
 # Returns
-- A `Figure` object with three side‑by‑side axis objects (X, Y, Z).
+- A `Figure` object with three side-by-side axis objects (X, Y, Z).
 """
 function plot_groundtruth_vs_inertial_xyz(
     trajs::Union{AbstractDict{String,Trajectory},Trajectory},

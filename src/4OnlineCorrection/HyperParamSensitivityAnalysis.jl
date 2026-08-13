@@ -58,51 +58,6 @@ function grid_from_dict(data::AbstractDict)::ParamGrid
     return ParamGrid(group_names, max_idx, specs)
 end
 
-# function make_rmse_evaluator(
-#     data_dir::String,
-#     trial_id::Int,
-#     train_ratio::Float64,
-#     feature_type::FeatureType,
-#     ref_frame::ReferenceFrame,
-#     m::Union{Nothing,Int}=nothing
-# )::Function
-
-#     # 1. Align INS and GT (same for all hyperparameter variations)
-#     ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated =
-#         compute_aligned_ins_trajectory(data_dir, trial_id)
-
-#     # 2. Initial state from aligned trajectory
-#     x_init = vcat(
-#         ins_traj_aligned.pos[:, 1],
-#         ins_traj_aligned.vel[:, 1],
-#         matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
-#     )
-
-#     # 3. Return the evaluator closure
-#     function rmse_evaluator(hsgp_params::HsgpParameters)::Float64
-#         # Optionally force m to be consistent (if needed)
-#         hsgp_params = HsgpParameters(
-#             hsgp_params.hp, hsgp_params.d, isnothing(m) ? hsgp_params.m : m, hsgp_params.LL;
-#             input_stats=hsgp_params.input_stats,
-#             output_stats=hsgp_params.output_stats
-#         )
-
-#         # Run online correction
-#         _, hsgp_ins_traj, segs, _, _, _, _ =
-#             hybrid_zupt_aided_ins(
-#                 inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_params;
-#                 x_init=x_init,
-#                 train_ratio=train_ratio,
-#                 feature_type=feature_type,
-#                 ref_frame=ref_frame
-#             )
-
-#         return rmse(hsgp_ins_traj[segs], gt_traj_aligned[segs])[end] # final RMSE
-#     end
-
-#     return rmse_evaluator
-# end
-
 
 function make_rmse_evaluator(
     data_dir::String,

@@ -44,7 +44,8 @@ include("4OnlineCorrection/HybridZuptIns.jl")
 include("4OnlineCorrection/Estimators.jl")
 include("4OnlineCorrection/HybridZuptInsV2.jl")
 include("4OnlineCorrection/DataProcessing.jl")
-include("4OnlineCorrection/VariabilityAnalysis.jl")
+include("4OnlineCorrection/HyperParamSensitivityAnalysis.jl")
+include("4OnlineCorrection/TrainingDataQualityAnalysis.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")
@@ -53,7 +54,8 @@ include("Plotting/OfflineCorrection.jl")
 include("Plotting/PlotHypVariability.jl")
 include("Plotting/OnlineCorrection.jl")
 include("Plotting/CorrelationAnalysis.jl")
-include("Plotting/OnlineHpVariability.jl")
+include("Plotting/OnlineHpSensitivity.jl")
+include("Plotting/TrainingDataQualityAnalysis.jl")
 
 end
 
