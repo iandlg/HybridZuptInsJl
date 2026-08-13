@@ -9,7 +9,7 @@ data_dir = Dict{String,String}(
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
 
-train_ids = [6, 3] #  , 4, 5
+train_ids = [6, 3, 5] #  , 4, 5
 test_ids = [1] # , 14, 2
 
 train_labels = Dict(

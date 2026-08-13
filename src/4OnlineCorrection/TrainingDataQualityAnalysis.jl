@@ -37,7 +37,7 @@ function training_data_quality_analysis(
 
     results = DataFrame(
         estimator=String[],
-        train_id=Int[], train_name=String[],
+        train_id=Optional{Int}[], train_name=Optional{String}[],
         test_id=Int[], test_name=String[],
         rmse=Float64[], rmse_rate=Float64[]
     )
@@ -63,8 +63,8 @@ function training_data_quality_analysis(
             _rmse = rmse(step_traj, gt_step_traj)[end]
             _rmse_rate = _rmse / total_distance(gt_step_traj)
 
-            push!(results, ("ZUPT INS", 0, train_name, test_id, test_name, _rmse, _rmse_rate))
-
+            test_name = isnothing(test_labels) ? "trial_$tid" : get(test_labels, tid, "trial_$tid")
+            push!(results, (string(BaseEstimator), nothing, nothing, tid, test_name, _rmse, _rmse_rate))
         catch e
             @warn "Skipping test trial $tid in $data_dir" exception = e
         end

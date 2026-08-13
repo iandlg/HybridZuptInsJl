@@ -527,13 +527,16 @@ function relinearize!(c::JointStaticEstimator)
     c.stride_bias[:, c.i] += c.δx[7:end, c.i]
     c.δx[:, c.i] .= 0.0
 
-    # c.Σ[1:6, 7:end] .= 0.0
-    # c.Σ[7:end, 1:6] .= 0.0 # zero cross covs
+    c.Σ[1:6, 7:end] .= 0.0
+    c.Σ[7:end, 1:6] .= 0.0 # zero cross covs
 
 end
 
 function get_model(c::JointStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
-    return nothing
+    bias_full, Σ_bias_full = zeros(Float64, 4), zeros(Float64, 4, 4)
+    bias_full[c.correction_mask] .= c.stride_bias[:, c.i]
+    Σ_bias_full[c.correction_mask, c.correction_mask] .= c.Σ[7:end, 7:end]
+    return bias_full, Σ_bias_full
 end
 
 mutable struct DecoupledStaticEstimator <: AbstractEstimator
@@ -594,15 +597,32 @@ function DecoupledStaticEstimator(N::Int;
     )
 end
 
-function initialize_corrector!(c::DecoupledStaticEstimator; t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64}, kwargs...)
+function initialize_corrector!(c::DecoupledStaticEstimator;
+    t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
+    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...
+)
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
     c.δx[:, 1] .= 0.0
     c.Σ .= Σpq_init
 
-    c.stride_bias .= 0.0
-    c.Σ_bias = Matrix{Float64}(I, c.p, c.p) .* 1e2
+
+    if isnothing(init_model)
+        c.stride_bias .= 0.0
+    else
+        stride_bias_full, _ = init_model
+        @assert length(stride_bias_full) == 4 "init_model[1] must have length 4, got $(length(stride_bias_full))"
+        c.stride_bias .= stride_bias_full[c.correction_mask]
+    end
+
+    if isnothing(init_model)
+        c.Σ_bias .= Matrix{Float64}(I, c.p, c.p) .* 1e2
+    else
+        _, Σ_bias_full = init_model
+        @assert size(Σ_bias_full) == (4, 4) "init_model[2] must have size (4,4), got $(size(Σ_bias_full))"
+        c.Σ_bias .= Σ_bias_full[c.correction_mask, c.correction_mask]
+    end
 
     c.G .= Matrix{Float64}(I, 6, 6)
     c.H .= 0.0
@@ -699,7 +719,10 @@ function relinearize!(c::DecoupledStaticEstimator)
 end
 
 function get_model(c::DecoupledStaticEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
-    return nothing
+    bias_full, Σ_bias_full = zeros(Float64, 4), zeros(Float64, 4, 4)
+    bias_full[c.correction_mask] .= c.stride_bias
+    Σ_bias_full[c.correction_mask, c.correction_mask] .= c.Σ_bias
+    return bias_full, Σ_bias_full
 end
 
 mutable struct DecoupledHsgpEstimator <: AbstractEstimator
@@ -770,7 +793,7 @@ end
 
 function initialize_corrector!(c::DecoupledHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
-    β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
+    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.t[1] = t
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
@@ -799,13 +822,13 @@ function initialize_corrector!(c::DecoupledHsgpEstimator;
         c.σ_n[j] = getfield(c.params.hp, field)[1]
     end
 
-    # β_Σβ_0 is always full 4m-sized (matching JointHsgpEstimator's convention);
+    # init_model is always full 4m-sized (matching JointHsgpEstimator's convention);
     # extract only the masked sub-blocks into the reduced internal state.
-    if isnothing(β_Σβ_0)
+    if isnothing(init_model)
         c.β .= 0.0
     else
-        β_full, _ = β_Σβ_0
-        @assert length(β_full) == 4 * m "β_Σβ_0[1] must have length 4m = $(4*m), got $(length(β_full))"
+        β_full, _ = init_model
+        @assert length(β_full) == 4 * m "init_model[1] must have length 4m = $(4*m), got $(length(β_full))"
         for j in 1:p
             orig_idx = mask[j]
             c.β[((j-1)*m+1):(j*m)] = β_full[_full_range(orig_idx, m)]
@@ -813,11 +836,11 @@ function initialize_corrector!(c::DecoupledHsgpEstimator;
     end
 
     c.Σβ .= 0.0
-    if isnothing(β_Σβ_0)
+    if isnothing(init_model)
         c.Σβ[diagind(c.Σβ)] .= psd
     else
-        _, Σβ_full = β_Σβ_0
-        @assert size(Σβ_full) == (4 * m, 4 * m) "β_Σβ_0[2] must be (4m,4m) = $((4*m,4*m)), got $(size(Σβ_full))"
+        _, Σβ_full = init_model
+        @assert size(Σβ_full) == (4 * m, 4 * m) "init_model[2] must be (4m,4m) = $((4*m,4*m)), got $(size(Σβ_full))"
         for j1 in 1:p, j2 in 1:p
             r1 = _full_range(mask[j1], m)
             r2 = _full_range(mask[j2], m)
@@ -1052,7 +1075,7 @@ end
 
 function initialize_corrector!(c::JointHsgpEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64}, Σpq_init::AbstractMatrix{Float64},
-    β_Σβ_0::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
+    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
     c.i = 1
     c.t[1] = t
     m = c.params.m
@@ -1063,11 +1086,11 @@ function initialize_corrector!(c::JointHsgpEstimator;
     c.pos[:, 1] = pos_init
     c.quat[:, 1] = quat_init
 
-    if isnothing(β_Σβ_0)
+    if isnothing(init_model)
         c.β .= 0.0
     else
-        β_full, _ = β_Σβ_0
-        @assert length(β_full) == 4 * m "β_Σβ_0[1] must have length 4m = $(4*m), got $(length(β_full))"
+        β_full, _ = init_model
+        @assert length(β_full) == 4 * m "init_model[1] must have length 4m = $(4*m), got $(length(β_full))"
         for j in 1:p
             orig_idx = mask[j]
             c.β[((j-1)*m+1):(j*m)] = β_full[_full_range(orig_idx, m)]
@@ -1092,11 +1115,11 @@ function initialize_corrector!(c::JointHsgpEstimator;
     # Initialize state covariance
     c.Σ .= 0.0
     c.Σ[1:6, 1:6] = Σpq_init
-    if isnothing(β_Σβ_0)
+    if isnothing(init_model)
         c.Σ[7:end, 7:end] = Diagonal(psd)
     else
-        _, Σβ_full = β_Σβ_0
-        @assert size(Σβ_full) == (4 * m, 4 * m) "β_Σβ_0[2] must be (4m,4m) = $((4*m,4*m)), got $(size(Σβ_full))"
+        _, Σβ_full = init_model
+        @assert size(Σβ_full) == (4 * m, 4 * m) "init_model[2] must be (4m,4m) = $((4*m,4*m)), got $(size(Σβ_full))"
         for j1 in 1:p, j2 in 1:p
             r1 = _full_range(mask[j1], m)
             r2 = _full_range(mask[j2], m)
@@ -1273,8 +1296,8 @@ function relinearize!(c::JointHsgpEstimator)
     c.β += c.δx[7:end]
     c.δx .= 0.0
 
-    # c.Σ[1:6, 7:end] .= 0.0
-    # c.Σ[7:end, 1:6] .= 0.0
+    c.Σ[1:6, 7:end] .= 0.0
+    c.Σ[7:end, 1:6] .= 0.0
 end
 
 function get_model(c::JointHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
