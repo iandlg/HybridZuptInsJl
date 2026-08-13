@@ -22,7 +22,7 @@ hsgp_base, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, h
 base_FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 base_FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])  # # 
 
-data_key = "ANG2" # meta["data_key"]
+data_key = "DCSC" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -35,7 +35,7 @@ m = 200
 ## --- Load Data ---
 train_ids = Dict{String,Vector{Int}}(
     "ANG2" => [1, 2, 3, 4, 8, 9, 13, 15, 16],
-    "DCSC" => [1, 2, 3, 4, 5, 6, 8, 12, 14]
+    "DCSC" => [1, 2, 3, 4, 5, 6, 8, 10, 12, 14]
 )[data_key]
 test_ids = [14] # [3, 13, 15] 
 Dict{String,Vector{Int}}(
@@ -189,7 +189,7 @@ hsgp_base = HybridZuptInsJl.HsgpParameters(
 
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
-trial_id = 15
+trial_id = 5
 train_ratio = 0.45
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
@@ -302,6 +302,7 @@ HybridZuptInsJl.to_json(joinpath(combo_dir, filename), hsgp_opt;
         "normalize_output" => normalization_params["normalize_y"],
         "train_ids" => train_ids,
         "outlier_removal" => outlier_removal_params,
-        "normalization" => normalization_params
+        "normalization" => normalization_params,
+        "optimization_parameters" => optim_params
     )
 )

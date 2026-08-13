@@ -77,7 +77,6 @@ function calc_eigenvalues(L::AbstractVector{<:Real}, m::Int, d::Int)::AbstractMa
 
     # Number of indices per dimension (at least 1)
     N_per_dim = ceil.(Int, m^(1 / d) * L_float ./ L_min)
-    @show N_per_dim
 
     # Generate all index combinations
     indices_per_dim = [1:N_per_dim[i] for i in 1:d]
