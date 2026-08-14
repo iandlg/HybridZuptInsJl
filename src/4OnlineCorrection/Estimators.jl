@@ -268,7 +268,7 @@ mutable struct BaseEstimator <: AbstractEstimator
     F::AbstractMatrix{Float64}
 end
 
-function BaseEstimator(N::Int)::BaseEstimator
+function BaseEstimator(N::Int; kwargs...)::BaseEstimator
     @assert N > 1 "Invalid number of "
     return BaseEstimator(
         zeros(Float64, N), zeros(Float64, 3, N), zeros(Float64, 4, N), zeros(Float64, 6, N),
@@ -381,8 +381,7 @@ mutable struct JointStaticEstimator <: AbstractEstimator
 
 end
 
-function JointStaticEstimator(N::Int;
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+function JointStaticEstimator(N::Int; corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...
 )::JointStaticEstimator
     @assert N > 1 "Invalid number of allocations, got $N"
 
@@ -564,8 +563,7 @@ mutable struct DecoupledStaticEstimator <: AbstractEstimator
 
 end
 
-function DecoupledStaticEstimator(N::Int;
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+function DecoupledStaticEstimator(N::Int; corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...
 )::DecoupledStaticEstimator
     @assert N > 1 "Invalid number of allocations, got $N"
 
@@ -753,8 +751,10 @@ mutable struct DecoupledHsgpEstimator <: AbstractEstimator
     p::Int                          # number of corrected channels
 end
 
-function DecoupledHsgpEstimator(N::Int, params::HsgpParameters;
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw])::DecoupledHsgpEstimator
+function DecoupledHsgpEstimator(N::Int;
+    params::HsgpParameters, corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...
+)::DecoupledHsgpEstimator
+
     @assert N > 1 "Invalid number of allocations, got $N"
 
     correction_mask = Int[]
@@ -1038,8 +1038,8 @@ mutable struct JointHsgpEstimator <: AbstractEstimator
     p::Int                          # number of corrected channels (length(correction_mask))
 end
 
-function JointHsgpEstimator(N::Int, params::HsgpParameters;
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+function JointHsgpEstimator(N::Int;
+    params::HsgpParameters, corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
 )::JointHsgpEstimator
     @assert N > 1 "Invalid number of prealocations"
 

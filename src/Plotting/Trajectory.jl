@@ -110,7 +110,7 @@ function plot_groundtruth_vs_inertial_positions(
             end
 
             arrows2d!(ax, pts, dirs;
-                color=c, label=key)
+                color=c)
         end
     end
 
