@@ -22,8 +22,8 @@ feature_types = [
     # HybridZuptInsJl.THREED_STEP,
     # HybridZuptInsJl.TWOD_STEP_DT,
     # HybridZuptInsJl.THREED_STEP_DT,
-    # HybridZuptInsJl.TWOD_STEP_YAW,
-    HybridZuptInsJl.THREED_STEP_DT_YAW
+    HybridZuptInsJl.TWOD_STEP_YAW,
+    # HybridZuptInsJl.THREED_STEP_DT_YAW
 ]
 
 results = []
@@ -72,8 +72,16 @@ sort!(df, :first_cc, rev=true)
 println("Combinations ranked by first canonical correlation:")
 display(df)
 
-with_theme(theme_ggplot2()) do
+## Plot
+using Dates
+time = string(Dates.now())
+
+out_dir = "out/Results/3_yaw_channel/Correlation_Analysis"
+path = joinpath(out_dir, "$(time)_correlation_analysis.svg")
+mkpath(out_dir)
+GLMakie.with_theme(GLMakie.theme_ggplot2()) do
     for r in results
         display(GLMakie.Screen(), r[6])
     end
+    save(path, results[end][6])
 end

@@ -6,7 +6,7 @@ function plot_hp_sensitivity(
     fig = Figure(size=(400 * n_cols, 400 * n_rows))
 
     # Get baseline RMSE
-    baseline_row = df[df.parameter.=="baseline", :]
+    baseline_row = df[df.parameter .== "baseline", :]
     baseline_rmse = isempty(baseline_row) ? 1.0 : first(baseline_row.rmse)
 
     col_colors = Makie.wong_colors()
@@ -18,7 +18,7 @@ function plot_hp_sensitivity(
                 continue
             end
             # Find data for this parameter
-            sub = df[df.parameter.==spec.name, :]
+            sub = df[df.parameter .== spec.name, :]
             if isempty(sub)
                 @warn "Missing data for $(spec.name)"
                 continue
@@ -98,11 +98,11 @@ function plot_channel_boxplots(
             # Global mean per channel (across all trials) — used to gauge how
             # "central" each trial point is and scale its jitter accordingly.
             ch_global_mean = Dict(
-                ch => mean(panel_df.value[panel_df.channel.==ch])
+                ch => mean(panel_df.value[panel_df.channel .== ch])
                 for ch in channels
             )
             all_trial_means = [
-                mean(panel_df.value[panel_df.channel.==ch.&&panel_df.trial_id.==t])
+                mean(panel_df.value[panel_df.channel .== ch.&&panel_df.trial_id .== t])
                 for ch in channels for t in trial_ids
             ]
             mean_min = minimum(all_trial_means)
@@ -121,7 +121,7 @@ function plot_channel_boxplots(
                 sigmas = Float64[]
 
                 for ch in channels
-                    vals = tdf.value[tdf.channel.==ch]
+                    vals = tdf.value[tdf.channel .== ch]
                     isempty(vals) && continue
 
                     mu = mean(vals)
@@ -166,6 +166,81 @@ function plot_channel_boxplots(
     draw_panel!(ax_out, output_df, :coral)
 
     linkyaxes!(ax_in, ax_out)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+"""
+    plot_max_relative_change(
+        df::DataFrame;
+        exclude_baseline::Bool=true,
+        save_path::Union{String,Nothing}=nothing,
+    )
+
+Bar chart of the maximum (most positive) `relative_change` achieved per parameter,
+as produced by `vary_hsgp_parameters`. Bars are sorted ascending left-to-right
+(smallest max relative change on the left, largest on the right) and colored by
+`type`.
+
+# Arguments
+- `df`: Output of `vary_hsgp_parameters` (needs `parameter`, `type`, `relative_change`).
+- `exclude_baseline`: If `true` (default), drops the `parameter == "baseline"` row
+  before computing per-parameter maxima.
+- `save_path`: Optional path to save the figure.
+
+# Returns
+- A `Figure` object.
+"""
+function plot_max_relative_change(
+    df::DataFrame;
+    exclude_baseline::Bool=true,
+    save_path::Union{String,Nothing}=nothing,
+    show_text_val::Bool=false,
+    color_offset::Int=3
+)
+    plot_df = exclude_baseline ? df[df.parameter .!= "baseline", :] : df
+    isempty(plot_df) && error("No rows to plot after filtering baseline")
+
+    # Max relative_change per parameter, keeping the associated type
+    gdf = combine(
+        groupby(plot_df, :parameter),
+        :relative_change => maximum => :max_relative_change,
+        :type => first => :type,
+    )
+
+    # Sort ascending: smallest on the left, largest on the right
+    sort!(gdf, :max_relative_change; rev=true)
+
+    n = nrow(gdf)
+    xs = 1:n
+
+    types = unique(gdf.type)
+    colors = Makie.wong_colors()
+    type_color = Dict(t => colors[mod1(i+color_offset, length(colors))] for (i, t) in enumerate(types))
+    bar_colors = [type_color[t] for t in gdf.type]
+
+    fig = Figure(size=(max(800, 40 * n), 500))
+    ax = Axis(fig[1, 1];
+        title="Maximum relative RMSE change per parameter",
+        ylabel="Max relative change",
+        xticks=(xs, gdf.parameter),
+        xticklabelrotation=π / 3,
+        xgridvisible=false)
+
+    barplot!(ax, xs, gdf.max_relative_change; color=bar_colors)
+    hlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
+
+    if show_text_val
+        for (x, val) in zip(xs, gdf.max_relative_change)
+            text!(ax, x, val;
+                text="$(round(val, digits=3))",
+                align=(:center, val >= 0 ? :bottom : :top),
+                fontsize=8)
+        end
+    end
+    legend_elems = [PolyElement(color=type_color[t]) for t in types]
+    Legend(fig[1, 2], legend_elems, string.(types); tellheight=false)
 
     isnothing(save_path) || save(save_path, fig)
     return fig

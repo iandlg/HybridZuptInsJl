@@ -1,14 +1,21 @@
 struct ParamSpec
     name::String
+    type::String
     get_current::Function   # (HsgpParameters) -> Float64
     set_new::Function       # (HsgpParameters, Float64) -> HsgpParameters
     value_generator::Function  # (current_value) -> Vector{Float64}
 end
 
+const _HYPERPARAM_TYPES = Dict{Int,String}(
+    1 => "noise",
+    2 => "length_scale",
+    3 => "signal_variance"
+)
+
 # Convenience constructor using default log_around
-function ParamSpec(name, get_current, set_new; log_range=(-2.0, 2.0), n_steps=9)
+function ParamSpec(name, type, get_current, set_new; log_range=(-2.0, 2.0), n_steps=9)
     generator(val) = log_around(val, log_range, n_steps)
-    ParamSpec(name, get_current, set_new, generator)
+    ParamSpec(name, type, get_current, set_new, generator)
 end
 
 # 
@@ -52,7 +59,7 @@ function grid_from_dict(data::AbstractDict)::ParamGrid
     for i in 1:size(specs, 1), j in 1:size(specs, 2)
         if !isnothing(spec_names[j][i])
             # We can create a dummy spec with just name; plotting only uses name to match DataFrame.
-            specs[i, j] = ParamSpec(spec_names[j][i], p -> 0.0, (p, v) -> p, (v) -> [v])
+            specs[i, j] = ParamSpec(spec_names[j][i], "none", p -> 0.0, (p, v) -> p, (v) -> [v])
         end
     end
     return ParamGrid(group_names, max_idx, specs)
@@ -97,7 +104,7 @@ function make_rmse_evaluator(
             input_stats=hsgp_params.input_stats,
             output_stats=hsgp_params.output_stats
         )
-        hsgp_estimator = hsgp_estimator_factory(300, hsgp_params; corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs])
+        hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params, corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs])
         _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
             inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_estimator;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)
@@ -127,7 +134,7 @@ function make_hp_param_grid(
             name = "$(Symbol(chan_name))[$idx]"
             getter(p) = getfield(p.hp, Symbol(chan_name))[idx]
             setter(p, new_val) = basecopy(p; new_hp=modify_sehp(p.hp, Symbol(chan_name), idx, new_val))
-            spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
+            spec = ParamSpec(name, _HYPERPARAM_TYPES[idx], getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
             place_spec!(grid, grp_idx, idx, spec)
         end
@@ -164,71 +171,87 @@ end
 function make_stats_param_grid(base_params::HsgpParameters;
     output_channel_idxs::Vector{Int}=[1, 2, 3, 4],
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
-    n_steps::Int=9)::Tuple{Vector{ParamSpec},ParamGrid}
-
+    n_steps::Int=9, include_input_params::Bool=true, include_output_params::Bool=true
+)::Tuple{Vector{ParamSpec},ParamGrid}
+    max_indices = Int[]
+    group_names = String[]
     d = base_params.d
     p = length(output_channel_idxs)
-    @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
-    @assert all(diff(output_channel_idxs) .> 0) "Output channels must be in ascending order, got $output_channel_idxs"
-    group_names = ["input_mean", "input_std", "input_center", "output_mean", "output_std"]
-    max_indices = [d, d, d, p, p]
+
+    if include_input_params
+        append!(max_indices, [d, d, d])
+        append!(group_names, ["input_mean", "input_std", "input_center"])
+    end
+
+
+    if include_output_params
+        @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
+        @assert all(diff(output_channel_idxs) .> 0) "Output channels must be in ascending order, got $output_channel_idxs"
+        append!(max_indices, [p, p])
+        append!(group_names, ["output_mean", "output_std"])
+    end
+
     grid = ParamGrid(group_names, max_indices)
     specs = ParamSpec[]
 
-    # Input means (group_idx=1)
-    for dim in 1:d
-        name = "input_mean[$dim]"
-        getter(p) = p.input_stats[1][dim]
-        setter(p, val) = set_input_stat(p, 1, dim, val)
-        spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
-        push!(specs, spec)
-        place_spec!(grid, 1, dim, spec)
+    if include_input_params
+        # Input means (group_idx=1)
+        for dim in 1:d
+            name = "input_mean[$dim]"
+            getter(p) = p.input_stats[1][dim]
+            setter(p, val) = set_input_stat(p, 1, dim, val)
+            spec = ParamSpec(name, "input_mean", getter, setter; log_range=log_range, n_steps=n_steps)
+            push!(specs, spec)
+            place_spec!(grid, 1, dim, spec)
+        end
+
+        # Input stds (group_idx=2)
+        for dim in 1:d
+            name = "input_std[$dim]"
+            getter(p) = p.input_stats[2][dim]
+            setter(p, val) = set_input_stat(p, 2, dim, val)
+            spec = ParamSpec(name, "input_std", getter, setter; log_range=log_range, n_steps=n_steps)
+            push!(specs, spec)
+            place_spec!(grid, 2, dim, spec)
+        end
+
+        # Input Center
+        for dim in 1:d
+            name = "input_center[$dim]"
+            getter(p) = p.mid_norm[dim]
+            setter(p, val) = set_mid_norm_stat(p, dim, val)
+            spec = ParamSpec(name, "mid_norm", getter, setter; log_range=log_range, n_steps=n_steps)
+            push!(specs, spec)
+            place_spec!(grid, 3, dim, spec)
+        end
     end
 
-    # Input stds (group_idx=2)
-    for dim in 1:d
-        name = "input_std[$dim]"
-        getter(p) = p.input_stats[2][dim]
-        setter(p, val) = set_input_stat(p, 2, dim, val)
-        spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
-        push!(specs, spec)
-        place_spec!(grid, 2, dim, spec)
-    end
+    if include_output_params
+        # Output means (group_idx=3)
+        for (i, dim) in enumerate(output_channel_idxs)
+            name = "output_mean[$dim]"
+            getter(p) = p.output_stats[1][dim]
+            setter(p, val) = set_output_stat(p, 1, dim, val)
+            spec = ParamSpec(name, "output_mean", getter, setter; log_range=log_range, n_steps=n_steps)
+            push!(specs, spec)
+            place_spec!(grid, 4, i, spec)
+        end
 
-    # Input Center
-    for dim in 1:d
-        name = "input_center[$dim]"
-        getter(p) = p.mid_norm[dim]
-        setter(p, val) = set_mid_norm_stat(p, dim, val)
-        spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
-        push!(specs, spec)
-        place_spec!(grid, 3, dim, spec)
-    end
-
-    # Output means (group_idx=3)
-    for (i, dim) in enumerate(output_channel_idxs)
-        name = "output_mean[$dim]"
-        getter(p) = p.output_stats[1][dim]
-        setter(p, val) = set_output_stat(p, 1, dim, val)
-        spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
-        push!(specs, spec)
-        place_spec!(grid, 4, i, spec)
-    end
-
-    # Output stds (group_idx=4)
-    for (i, dim) in enumerate(output_channel_idxs)
-        name = "output_std[$dim]"
-        getter(p) = p.output_stats[2][dim]
-        setter(p, val) = set_output_stat(p, 2, dim, val)
-        spec = ParamSpec(name, getter, setter; log_range=log_range, n_steps=n_steps)
-        push!(specs, spec)
-        place_spec!(grid, 5, i, spec)
+        # Output stds (group_idx=4)
+        for (i, dim) in enumerate(output_channel_idxs)
+            name = "output_std[$dim]"
+            getter(p) = p.output_stats[2][dim]
+            setter(p, val) = set_output_stat(p, 2, dim, val)
+            spec = ParamSpec(name, "output_std", getter, setter; log_range=log_range, n_steps=n_steps)
+            push!(specs, spec)
+            place_spec!(grid, 5, i, spec)
+        end
     end
 
     return specs, grid
 end
 
-function vary_hsgp_hyperparameters(
+function vary_hsgp_parameters(
     base_params::HsgpParameters,
     rmse_func::Function,
     param_specs::Vector{ParamSpec};
@@ -246,10 +269,12 @@ function vary_hsgp_hyperparameters(
             rmse_val = rmse_func(new_params)
             push!(results, (
                 parameter=spec.name,
+                type=spec.type,
                 base_value=current_val,
                 tested_value=new_val,
                 rmse=rmse_val,
-                rmse_ratio=rmse_val / baseline_rmse
+                rmse_ratio=rmse_val / baseline_rmse,
+                relative_change=(rmse_val - baseline_rmse) / baseline_rmse
             ))
         end
     end
@@ -257,10 +282,12 @@ function vary_hsgp_hyperparameters(
     if include_baseline
         push!(results, (
             parameter="baseline",
+            type="none",
             base_value=NaN,
             tested_value=NaN,
             rmse=baseline_rmse,
-            rmse_ratio=1.0
+            rmse_ratio=1.0,
+            relative_change=0.0
         ))
     end
     return DataFrame(results)
