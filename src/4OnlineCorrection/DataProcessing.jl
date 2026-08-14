@@ -413,3 +413,134 @@ function display_preprocessing(inp, outp; input_labels=nothing, output_labels=no
     end
     println("="^60)
 end
+
+"""
+    run_online_correction_sweep(
+        aligned::AbstractDict{<:AbstractString,<:AbstractDict{Int,<:NamedTuple}},
+        frame::ReferenceFrame,
+        feature_type::FeatureType,
+        hsgp_params::HsgpParameters,
+        train_ratios::AbstractVector{<:Real},
+        estimators::AbstractDict{<:AbstractString,<:Type},
+        output_channels::Vector{Symbol};
+        step_detector_factory::Function=StepDetector,
+        estimator_alloc::Int=300,
+    )::DataFrame
+
+For every `(dataset_name, trial_id)` pair in `aligned` (as produced by
+`collect_aligned_trajectories`), every `train_ratio` in `train_ratios`, and every
+estimator type in `estimators`, run `hybrid_zupt_aided_insv2` and record the raw
+outputs together with the resulting horizontal RMSE / RMSE-rate.
+
+# Arguments
+- `aligned`: `dataset_name => trial_id => NamedTuple` as returned by
+  `collect_aligned_trajectories` (needs `inertial_updated`, `sim_config_updated`,
+  `gt_traj_aligned`, `x_init`).
+- `frame`, `feature_type`: passed straight to `hybrid_zupt_aided_insv2`.
+- `hsgp_params`: `HsgpParameters` passed as `params=` to estimator constructors that
+  need it (ignored via `kwargs...` by estimators that don't, e.g. `BaseEstimator`).
+- `train_ratios`: vector of fractions in `[0,1]` controlling how much of the trial has
+  ground truth available (`gt_available[n] = n <= floor(train_ratio*N)`). Order is
+  preserved in `train_ratio_order`.
+- `estimators`: `OrderedDict{String,Type}` name => estimator type, e.g.
+  `OrderedDict("Joint HSGP" => JointHsgpEstimator, "Base" => BaseEstimator)`. Types are
+  constructed as `T(estimator_alloc; params=hsgp_params, corrected_channels=output_channels)`.
+  Order is preserved in `estimator_order`.
+- `output_channels`: e.g. `[:pos_1, :pos_2, :yaw]`, forwarded as `corrected_channels`.
+
+# Returns
+- `DataFrame` with columns:
+  `dataset_name, trial_id, train_ratio, train_ratio_order, estimator, estimator_order,
+   zupt, step_seg, corr_traj, io_data, model,
+   rmse, rmse_rate`
+  where `zupt`, `step_seg`, `corr_traj`, `io_data`, `model` hold the raw objects
+  returned by `hybrid_zupt_aided_insv2` (`Any`-typed columns — no serialization).
+  `estimator_order`/`train_ratio_order` are 1-based indices matching the iteration
+  order of `estimators`/`train_ratios`, useful for plotting in a consistent order.
+  Failed `(trial, train_ratio, estimator)` combinations are skipped with a `@warn`.
+"""
+function run_online_correction_sweep(
+    aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
+    frame::ReferenceFrame,
+    feature_type::FeatureType,
+    hsgp_params::HsgpParameters,
+    train_ratios::AbstractVector{<:Real},
+    estimators::AbstractDict{<:AbstractString,<:Type},
+    output_channels::Vector{Symbol};
+    step_detector_factory::Type=StepDetector,
+    estimator_alloc::Int=300,
+)::DataFrame
+
+    df = DataFrame(
+        dataset_name=String[],
+        dataset_order=Int[],
+        trial_id=Int[],
+        train_ratio=Float64[],
+        train_ratio_order=Int[],
+        estimator=String[],
+        estimator_order=Int[],
+        zupt=Any[],
+        step_seg=Any[],
+        corr_traj=Any[],
+        io_data=Any[],
+        model=Any[],
+        rmse=Float64[],
+        rmse_rate=Float64[],
+    )
+
+    n_ok = 0
+    n_fail = 0
+
+    for (dataset_order, (dataset_name, trials)) in enumerate(aligned)
+        for (trial_id, res) in trials
+            N = length(res.inertial_updated)
+
+            for (train_ratio_order, train_ratio) in enumerate(train_ratios)
+                n_train_cutoff = floor(Int, train_ratio * N)
+                gt_available = [n <= n_train_cutoff for n in 1:N]
+
+                for (estimator_order, (est_name, est_type)) in enumerate(estimators)
+                    try
+                        estimator = est_type(
+                            estimator_alloc;
+                            params=hsgp_params,
+                            corrected_channels=output_channels,
+                        )
+
+                        zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
+                            res.inertial_updated,
+                            res.sim_config_updated,
+                            res.gt_traj_aligned,
+                            estimator;
+                            step_detector=step_detector_factory(),
+                            x_init=res.x_init,
+                            gt_available=gt_available,
+                            ref_frame=frame,
+                            feature_type=feature_type,
+                        )
+
+                        gt_step_traj = res.gt_traj_aligned[step_seg]
+                        N = length(gt_step_traj)
+                        n_step_cutoff = floor(Int, train_ratio * N)
+                        _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj[n_step_cutoff:end])[end]
+                        _rmse_rate = _rmse / total_distance(gt_step_traj[n_step_cutoff:end])
+
+                        push!(df, (
+                            dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
+                            est_name, estimator_order,
+                            zupt, step_seg, corr_traj, io_data, model,
+                            _rmse, _rmse_rate,
+                        ))
+                        n_ok += 1
+                    catch e
+                        @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name)" exception = e
+                        n_fail += 1
+                    end
+                end
+            end
+        end
+    end
+
+    @info "run_online_correction_sweep: $n_ok succeeded, $n_fail failed"
+    return df
+end

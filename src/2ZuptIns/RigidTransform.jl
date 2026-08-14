@@ -248,3 +248,79 @@ function compute_aligned_ins_trajectory(
 
     return ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated
 end
+
+"""
+    collect_aligned_trajectories(
+        data_dict::AbstractDict{<:AbstractString,<:AbstractVector{Int}};
+        kwargs...
+    )::Dict{String,Dict{Int,NamedTuple}}
+
+For every `data_path => [trial_ids...]` pair, run `compute_aligned_ins_trajectory`
+for each trial and package everything needed for downstream steps (INS trajectory,
+GT trajectory, zupt, step segments, updated inertial data, updated sim config, and
+the initial state `x_init`) into a nested dictionary.
+
+# Arguments
+- `data_dict`: e.g. `Dict("data/angermann_v2" => [1, 2, 3])`.
+- `kwargs...`: forwarded to `compute_aligned_ins_trajectory` (e.g. `sim_config`,
+  `orientation_offset`, `fs_resample`).
+
+# Returns
+- `Dict{String,Dict{Int,NamedTuple}}`: `data_path => trial_id => (; ins_traj_aligned,
+  gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated, x_init)`.
+  Trials that fail to load/align are skipped with a `@warn`.
+"""
+function collect_aligned_trajectories(
+    data_dict::AbstractDict{String,Tuple{String,Vector{Int}}};
+    kwargs...
+)::OrderedDict{String,OrderedDict{Int,NamedTuple}}
+
+    results = OrderedDict{String,Dict{Int,NamedTuple}}()
+
+    for (dataset_name, (data_path, trial_ids)) in data_dict
+        trial_results = OrderedDict{Int,NamedTuple}()
+        failures = Int[]
+
+        for trial_id in trial_ids
+            try
+                ins_traj_aligned, gt_traj_aligned, zupt, segs,
+                inertial_updated, sim_config_updated =
+                    compute_aligned_ins_trajectory(data_path, trial_id; kwargs...)
+
+                x_init = vcat(
+                    ins_traj_aligned.pos[:, 1],
+                    ins_traj_aligned.vel[:, 1],
+                    matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
+                )
+
+                trial_results[trial_id] = (;
+                    ins_traj_aligned=ins_traj_aligned,
+                    gt_traj_aligned=gt_traj_aligned,
+                    zupt=zupt,
+                    segs=segs,
+                    inertial_updated=inertial_updated,
+                    sim_config_updated=sim_config_updated,
+                    x_init=x_init,
+                )
+            catch e
+                @warn "Skipping trial $trial_id in $data_path" exception = e
+                push!(failures, trial_id)
+            end
+        end
+
+        if isempty(trial_results)
+            @warn "No trials loaded successfully from $data_path"
+        else
+            n_loaded = length(trial_results)
+            n_total = length(trial_ids)
+            if !isempty(failures)
+                @warn "$(length(failures)) / $n_total trials failed and were skipped in $data_path. Failed IDs: $failures"
+            end
+            @info "Loaded $n_loaded / $n_total trials from $data_path"
+        end
+
+        results[dataset_name] = trial_results
+    end
+
+    return results
+end

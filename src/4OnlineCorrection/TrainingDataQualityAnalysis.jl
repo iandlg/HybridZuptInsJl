@@ -63,10 +63,12 @@ function training_data_quality_analysis(
             test_cache[test_id] = (inertial_updated, sim_config_updated, gt_traj_aligned, x_init, N)
 
             step_traj = ins_traj_aligned[segs]
-            gt_step_traj = gt_traj_aligned[segs]
 
-            _rmse = rmse(step_traj, gt_step_traj)[end]
-            _rmse_rate = _rmse / total_distance(gt_step_traj)
+            gt_step_traj = gt_traj_aligned[step_seg]
+            N = length(gt_step_traj)
+            n_test_cutoff = floor(Int, test_tr_ratio * N)
+            _rmse = rmse(step_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]
+            _rmse_rate = _rmse / total_distance(gt_step_traj[n_test_cutoff:end])
 
             push!(results, (
                 base_estimator[1],  # estimator

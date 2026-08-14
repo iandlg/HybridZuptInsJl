@@ -48,7 +48,7 @@ df = HybridZuptInsJl.training_data_quality_analysis(
     corrected_channels=output_channels)
 ##
 import CairoMakie, Dates
-base_dir = "out/8TrainDataQuality"
+base_dir = "out/Results/4_TrainDataQuality"
 
 time = string(Dates.now())
 filename = "$(time)_train_data_quality.svg"
