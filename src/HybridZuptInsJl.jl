@@ -57,5 +57,6 @@ include("Plotting/CorrelationAnalysis.jl")
 include("Plotting/OnlineHpSensitivity.jl")
 include("Plotting/TrainingDataQualityAnalysis.jl")
 include("Plotting/HypGeneralizationOverDatasets.jl")
+include("Plotting/NoiseRobustness.jl")
 end
 

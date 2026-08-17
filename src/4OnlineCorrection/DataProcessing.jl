@@ -415,16 +415,20 @@ function display_preprocessing(inp, outp; input_labels=nothing, output_labels=no
 end
 
 """
-    run_online_correction_sweep(
-        aligned::AbstractDict{<:AbstractString,<:AbstractDict{Int,<:NamedTuple}},
+    function run_online_correction_sweep(
+        aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
         frame::ReferenceFrame,
         feature_type::FeatureType,
         hsgp_params::HsgpParameters,
         train_ratios::AbstractVector{<:Real},
         estimators::AbstractDict{<:AbstractString,<:Type},
         output_channels::Vector{Symbol};
-        step_detector_factory::Function=StepDetector,
+        step_detector_factory::Type=StepDetector,
         estimator_alloc::Int=300,
+        pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
+        pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
+        att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
+        att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
     )::DataFrame
 
 For every `(dataset_name, trial_id)` pair in `aligned` (as produced by
@@ -469,6 +473,10 @@ function run_online_correction_sweep(
     output_channels::Vector{Symbol};
     step_detector_factory::Type=StepDetector,
     estimator_alloc::Int=300,
+    pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
+    pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
+    att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
+    att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
 )::DataFrame
 
     df = DataFrame(
@@ -479,6 +487,14 @@ function run_online_correction_sweep(
         train_ratio_order=Int[],
         estimator=String[],
         estimator_order=Int[],
+        pos_std=Any[],
+        pos_std_order=Int[],
+        pos_bias=Any[],
+        pos_bias_order=Int[],
+        att_std=Any[],
+        att_std_order=Int[],
+        att_bias=Any[],
+        att_bias_order=Int[],
         zupt=Any[],
         step_seg=Any[],
         corr_traj=Any[],
@@ -499,42 +515,62 @@ function run_online_correction_sweep(
                 n_train_cutoff = floor(Int, train_ratio * N)
                 gt_available = [n <= n_train_cutoff for n in 1:N]
 
-                for (estimator_order, (est_name, est_type)) in enumerate(estimators)
-                    try
-                        estimator = est_type(
-                            estimator_alloc;
-                            params=hsgp_params,
-                            corrected_channels=output_channels,
-                        )
+                for (pos_std_order, pos_std) in enumerate(pos_std_vec)
+                    for (pos_bias_order, pos_bias) in enumerate(pos_bias_vec)
+                        for (att_std_order, att_std) in enumerate(att_std_vec)
+                            for (att_bias_order, att_bias) in enumerate(att_bias_vec)
 
-                        zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
-                            res.inertial_updated,
-                            res.sim_config_updated,
-                            res.gt_traj_aligned,
-                            estimator;
-                            step_detector=step_detector_factory(),
-                            x_init=res.x_init,
-                            gt_available=gt_available,
-                            ref_frame=frame,
-                            feature_type=feature_type,
-                        )
+                                # Noisy GT is only used to drive the estimator (training/measurement
+                                # updates); RMSE evaluation always uses the clean res.gt_traj_aligned.
+                                gt_traj_noisy = add_gaussian_noise(
+                                    res.gt_traj_aligned;
+                                    pos_std=pos_std, pos_bias=pos_bias,
+                                    att_std=att_std, att_bias=att_bias,
+                                )
 
-                        gt_step_traj = res.gt_traj_aligned[step_seg]
-                        N = length(gt_step_traj)
-                        n_step_cutoff = floor(Int, train_ratio * N)
-                        _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj[n_step_cutoff:end])[end]
-                        _rmse_rate = _rmse / total_distance(gt_step_traj[n_step_cutoff:end])
+                                for (estimator_order, (est_name, est_type)) in enumerate(estimators)
+                                    try
+                                        estimator = est_type(
+                                            estimator_alloc;
+                                            params=hsgp_params,
+                                            corrected_channels=output_channels,
+                                        )
 
-                        push!(df, (
-                            dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
-                            est_name, estimator_order,
-                            zupt, step_seg, corr_traj, io_data, model,
-                            _rmse, _rmse_rate,
-                        ))
-                        n_ok += 1
-                    catch e
-                        @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name)" exception = e
-                        n_fail += 1
+                                        zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
+                                            res.inertial_updated,
+                                            res.sim_config_updated,
+                                            gt_traj_noisy,
+                                            estimator;
+                                            step_detector=step_detector_factory(),
+                                            x_init=res.x_init,
+                                            gt_available=gt_available,
+                                            ref_frame=frame,
+                                            feature_type=feature_type,
+                                        )
+
+                                        # RMSE evaluated against the clean ground truth
+                                        gt_step_traj_clean = res.gt_traj_aligned[step_seg]
+                                        N_step = length(gt_step_traj_clean)
+                                        n_step_cutoff = floor(Int, train_ratio * N_step)
+                                        _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
+                                        _rmse_rate = _rmse / total_distance(gt_step_traj_clean[n_step_cutoff:end])
+
+                                        push!(df, (
+                                            dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
+                                            est_name, estimator_order,
+                                            pos_std, pos_std_order, pos_bias, pos_bias_order,
+                                            att_std, att_std_order, att_bias, att_bias_order,
+                                            zupt, step_seg, corr_traj, io_data, model,
+                                            _rmse, _rmse_rate,
+                                        ))
+                                        n_ok += 1
+                                    catch e
+                                        @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, pos_std=$pos_std, pos_bias=$pos_bias, att_std=$att_std, att_bias=$att_bias)" exception = e
+                                        n_fail += 1
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end

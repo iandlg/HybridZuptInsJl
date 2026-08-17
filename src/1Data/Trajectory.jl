@@ -326,3 +326,53 @@ function angular_velocity_from_rotations(t::AbstractVector{T}, R::AbstractArray{
 end
 
 angular_velocity_from_rotations(trj::Trajectory) = angular_velocity_from_rotations(trj.t, trj.R_nb)
+
+"""
+    add_gaussian_noise(traj::Trajectory; pos_std=nothing, pos_bias=zeros(3),
+                        att_std=nothing, att_bias=zeros(3))
+
+Add Gaussian noise to a trajectory's position and/or orientation (Euler angles).
+Both are optional; skipped if their `std` is `nothing`. `std`/`bias` args accept
+a scalar (same value for all 3 dims) or a 3-vector.
+"""
+function add_gaussian_noise(
+    traj::Trajectory;
+    pos_std::Union{Nothing,Float64,AbstractVector{Float64}}=nothing,
+    pos_bias::Union{AbstractVector{Float64},NTuple{3,Float64}}=zeros(3),
+    att_std::Union{Nothing,Float64,AbstractVector{Float64}}=nothing,
+    att_bias::Union{AbstractVector{Float64},NTuple{3,Float64}}=zeros(3),
+    rng::Random.AbstractRNG=Random.Xoshiro(123)
+)::Trajectory
+    N = size(traj.pos, 2)
+
+    # --- Position noise (optional) ---
+    pos_noisy = traj.pos
+    if !isnothing(pos_std)
+        std_vec = pos_std isa Float64 ? fill(pos_std, 3) : collect(pos_std)
+        bias_vec = collect(pos_bias)
+
+        @assert length(std_vec) == 3 "pos_std must be a scalar or a 3-element vector, got length $(length(std_vec))"
+        @assert length(bias_vec) == 3 "pos_bias must be a 3-element vector, got length $(length(bias_vec))"
+
+        noise = randn(rng, 3, N) .* std_vec .+ bias_vec
+        pos_noisy = traj.pos .+ noise
+    end
+
+    # --- Orientation noise (optional) ---
+    R_nb_noisy = traj.R_nb
+    if !isnothing(att_std)
+        att_std_vec = att_std isa Float64 ? fill(att_std, 3) : collect(att_std)
+        att_bias_vec = collect(att_bias)
+
+        @assert length(att_std_vec) == 3 "att_std must be a scalar or a 3-element vector, got length $(length(att_std_vec))"
+        @assert length(att_bias_vec) == 3 "att_bias must be a 3-element vector, got length $(length(att_bias_vec))"
+
+        att_noise = randn(rng, 3, N) .* att_std_vec .+ att_bias_vec
+
+        euler = matrix_to_euler(traj.R_nb)          # (3, N)
+        euler_noisy = euler .+ att_noise
+        R_nb_noisy = euler_to_matrix(euler_noisy)    # (3, 3, N)
+    end
+
+    return Trajectory(traj.t, pos_noisy, R_nb_noisy, traj.vel)
+end
