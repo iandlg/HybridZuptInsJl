@@ -30,7 +30,7 @@ trial_id = 15 # meta["trial_id"]
 m = hsgp_p.m
 margin = meta["margin"]
 # z_thresh = meta["z_thresh"]
-train_ratio = 0.4
+train_ratio = 0.5
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
@@ -47,11 +47,7 @@ true_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
-hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 200, hsgp_p.LL;
-    input_stats=hsgp_p.input_stats,
-    output_stats=hsgp_p.output_stats
-)
+hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_m=200)
 
 N = length(inertial_updated)
 n_train_cutoff = floor(Int, train_ratio * N)

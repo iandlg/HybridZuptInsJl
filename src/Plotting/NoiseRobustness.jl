@@ -4,11 +4,10 @@
                               save_path::Union{String,Nothing}=nothing)
 
 For a single dataset (from the `run_online_correction_sweep` output), plot box plots of
-per-trial results grouped by noise level (`pos_std`, assumed uniform across x/y/z — i.e.
-"noise will be uniform in space"), with the different correction methods (`estimator`)
-shown side-by-side within each noise-level group.
+per-trial results grouped by noise specification (`noise_spec_tag`), with the different
+correction methods (`estimator`) shown side-by-side within each noise-spec group.
 
-Groups are ordered by `pos_std_order` and estimators within each group are ordered by
+Groups are ordered by `noise_spec_order` and estimators within each group are ordered by
 `estimator_order`, both following the display order already encoded in the dataframe by
 `run_online_correction_sweep`.
 
@@ -33,19 +32,13 @@ function plot_noise_sweep_boxplots(
     sub = df[df.dataset_name .== dataset_name, :]
     isempty(sub) && error("No rows found for dataset_name = $dataset_name")
 
-    # ---- Noise-level groups (ordered by pos_std_order) ----
-    noise_level_label(v) = isnothing(v) ? "0" :
-                           v isa Real ? string(round(v; digits=4)) :
-                           "[" * join(round.(v; digits=4), ", ") * "]"
-
-    noise_order_map = Dict{Any,Int}()
-    noise_label_map = Dict{Any,String}()
+    # ---- Noise-spec groups (ordered by noise_spec_order) ----
+    noise_order_map = Dict{String,Int}()
     for row in eachrow(sub)
-        noise_order_map[row.pos_std] = row.pos_std_order
-        noise_label_map[row.pos_std] = noise_level_label(row.pos_std)
+        noise_order_map[row.noise_spec_tag] = row.noise_spec_order
     end
-    noise_levels = sort(unique(sub.pos_std), by=v -> noise_order_map[v])
-    n_groups = length(noise_levels)
+    noise_specs = sort(unique(sub.noise_spec_tag), by=tag -> noise_order_map[tag])
+    n_groups = length(noise_specs)
 
     # ---- Estimators (ordered by estimator_order) ----
     est_order_map = Dict{String,Int}()
@@ -65,17 +58,18 @@ function plot_noise_sweep_boxplots(
     title_str = metric == :rmse ? "RMSE" : "RMSE rate"
     fig = Figure(size=(900, 600))
     ax = Axis(fig[1, 1],
-        xlabel="Noise level (pos_std)",
+        xlabel="Noise specification",
         ylabel=title_str,
-        title="$(title_str) per noise level — $dataset_name",
-        xticks=(1:n_groups, [noise_label_map[nl] for nl in noise_levels]),
+        title="$(title_str) per noise spec — $dataset_name",
+        xticks=(1:n_groups, noise_specs),
         xticklabelsize=14,
+        xticklabelrotation=π / 6,
     )
 
     labeled = Set{String}()
 
-    for (g, noise_level) in enumerate(noise_levels)
-        gdf = sub[isequal.(sub.pos_std, Ref(noise_level)), :]
+    for (g, noise_tag) in enumerate(noise_specs)
+        gdf = sub[sub.noise_spec_tag .== noise_tag, :]
 
         for (j, est) in enumerate(estimators)
             edf = gdf[gdf.estimator .== est, :]

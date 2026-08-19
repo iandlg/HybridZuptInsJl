@@ -8,7 +8,8 @@ function hybrid_zupt_aided_insv2(
     gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),
     ref_frame::ReferenceFrame=HEADING,
     feature_type::FeatureType=THREED_STEP,
-    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing
+    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing,
+    posyaw_measurement_update::Bool=true
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -57,7 +58,9 @@ function hybrid_zupt_aided_insv2(
     seg_start = 2
     seg_end = N
     step_seg = Int[1]
-    @info " ##### Processing $(typeof(corrector)) #####"
+    name = split(string(typeof(corrector)), ".")[end]
+
+    @info " ##### Processing $name #####"
     has_params = hasfield(typeof(corrector), :params)
 
     io_data = Dict{String,CorrectionIO}(
@@ -201,24 +204,27 @@ function hybrid_zupt_aided_insv2(
                 stride_err=stride_err, Σ_err=Σ_err,
                 feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl,
             )
-            relinearize!(corrector)
 
-            posyaw_measurement_update!(corrector;
-                curr_pos=gt_traj.pos[:, curr_step],
-                curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
-            )
+            if posyaw_measurement_update
+                relinearize!(corrector)
+
+                posyaw_measurement_update!(corrector;
+                    curr_pos=gt_traj.pos[:, curr_step],
+                    curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
+                    Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+                )
+            end
             if !isnothing(residual)
                 append_io!(io_data["residual"], inertial.t[prev_step], residual)
             end
 
-        elseif gt_available[curr_step]
+        elseif gt_available[curr_step] && posyaw_measurement_update
             # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
             # @info "Curr GT available"
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) .* 0.5e1
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) #.* 0.5e1
             )
         else
             # @info "No GT available"

@@ -28,9 +28,13 @@ train_ratio = 0.45
 
 output_channel_idxs = [1, 2, 4]
 
+noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)")
+
 rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
     data_dir, trial_id, train_ratio, FEATURE_TYPE, FRAME;
-    m=m, output_channel_idxs=output_channel_idxs, hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator)
+    m=m, output_channel_idxs=output_channel_idxs, hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator,
+    noise_spec=noise_spec
+)
 
 # Experiment variables
 groups = [Symbol(HybridZuptInsJl._OUTPUT_NAMES[idx]) for idx in output_channel_idxs]
@@ -40,9 +44,9 @@ n_steps = 5
 baseline_included = true
 
 specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs; log_range=log_range, n_steps=n_steps)
-specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p;
-    log_range=log_range, n_steps=n_steps, output_channel_idxs=output_channel_idxs,
-    include_output_params=false)
+# specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p;
+#     log_range=log_range, n_steps=n_steps, output_channel_idxs=output_channel_idxs,
+#     include_output_params=false)
 
 ##
 # Now vary hyperparameters
@@ -94,12 +98,13 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 using CairoMakie
 outdir = "out/Results/2_HypSensitivity/SensitivityAnalysis/data"
-basename_key = 61
+basename_key = 63
 basename = Dict(
     59 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T14:50:07.279",
     60 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:10:36.451",
     61 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:19:22.230",
-    62 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:26:20.692"
+    62 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:26:20.692",
+    63 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-19T12:17:58.504"
 )[basename_key]
 
 csv_file = joinpath(outdir, "$basename.csv")

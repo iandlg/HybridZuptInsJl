@@ -64,7 +64,7 @@ function training_data_quality_analysis(
 
             step_traj = ins_traj_aligned[segs]
 
-            gt_step_traj = gt_traj_aligned[step_seg]
+            gt_step_traj = gt_traj_aligned[segs]
             N = length(gt_step_traj)
             n_test_cutoff = floor(Int, test_tr_ratio * N)
             _rmse = rmse(step_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]

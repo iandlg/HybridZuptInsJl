@@ -9,11 +9,16 @@ data_dir = Dict{String,String}(
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
 
+# estimators = OrderedDict(
+#     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
+#     "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
+# )
 estimators = OrderedDict(
-    "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
-    "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
+    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
-
 train_labels = OrderedDict(
     6 => "CWRectangle_long",
     3 => "CCWRectangle_long_A",

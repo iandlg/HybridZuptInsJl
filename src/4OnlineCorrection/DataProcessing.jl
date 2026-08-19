@@ -414,6 +414,42 @@ function display_preprocessing(inp, outp; input_labels=nothing, output_labels=no
     println("="^60)
 end
 
+struct NoiseSpec
+    pos_std::Union{Nothing,Float64,AbstractVector{Float64}}
+    pos_bias::AbstractVector{Float64}
+    att_std::Union{Nothing,Float64,AbstractVector{Float64}}
+    att_bias::AbstractVector{Float64}
+    tag::AbstractString
+
+    function NoiseSpec(;
+        pos_std::Union{Nothing,Float64,AbstractVector{Float64}}=nothing,
+        pos_bias::Union{AbstractVector{Float64},NTuple{3,Float64}}=zeros(Float64, 3),
+        att_std::Union{Nothing,Float64,AbstractVector{Float64}}=nothing,
+        att_bias::Union{AbstractVector{Float64},NTuple{3,Float64}}=zeros(Float64, 3),
+        tag::AbstractString="NoiseSpec"
+    )
+        pos_std_vec = isnothing(pos_std) ? nothing : (pos_std isa Float64 ? fill(pos_std, 3) : collect(Float64, pos_std))
+        pos_bias_vec = collect(Float64, pos_bias)
+        att_std_vec = isnothing(att_std) ? nothing : (att_std isa Float64 ? fill(att_std, 3) : collect(Float64, att_std))
+        att_bias_vec = collect(Float64, att_bias)
+
+        if !isnothing(pos_std_vec) && length(pos_std_vec) != 3
+            throw(ArgumentError("pos_std must be a scalar or a 3-element vector, got length $(length(pos_std_vec))"))
+        end
+        if length(pos_bias_vec) != 3
+            throw(ArgumentError("pos_bias must be a 3-element vector, got length $(length(pos_bias_vec))"))
+        end
+        if !isnothing(att_std_vec) && length(att_std_vec) != 3
+            throw(ArgumentError("att_std must be a scalar or a 3-element vector, got length $(length(att_std_vec))"))
+        end
+        if length(att_bias_vec) != 3
+            throw(ArgumentError("att_bias must be a 3-element vector, got length $(length(att_bias_vec))"))
+        end
+
+        new(pos_std_vec, pos_bias_vec, att_std_vec, att_bias_vec, tag)
+    end
+end
+
 """
     function run_online_correction_sweep(
         aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
@@ -473,10 +509,11 @@ function run_online_correction_sweep(
     output_channels::Vector{Symbol};
     step_detector_factory::Type=StepDetector,
     estimator_alloc::Int=300,
-    pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
-    pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
-    att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
-    att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
+    noise_specs::AbstractVector{NoiseSpec}=[NoiseSpec()], # Default noise is none at all
+    # pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
+    # pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
+    # att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
+    # att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
 )::DataFrame
 
     df = DataFrame(
@@ -487,14 +524,12 @@ function run_online_correction_sweep(
         train_ratio_order=Int[],
         estimator=String[],
         estimator_order=Int[],
+        noise_spec_tag=String[],
+        noise_spec_order=Int[],
         pos_std=Any[],
-        pos_std_order=Int[],
         pos_bias=Any[],
-        pos_bias_order=Int[],
         att_std=Any[],
-        att_std_order=Int[],
         att_bias=Any[],
-        att_bias_order=Int[],
         zupt=Any[],
         step_seg=Any[],
         corr_traj=Any[],
@@ -515,61 +550,56 @@ function run_online_correction_sweep(
                 n_train_cutoff = floor(Int, train_ratio * N)
                 gt_available = [n <= n_train_cutoff for n in 1:N]
 
-                for (pos_std_order, pos_std) in enumerate(pos_std_vec)
-                    for (pos_bias_order, pos_bias) in enumerate(pos_bias_vec)
-                        for (att_std_order, att_std) in enumerate(att_std_vec)
-                            for (att_bias_order, att_bias) in enumerate(att_bias_vec)
+                for (noise_spec_order, noise_spec) in enumerate(noise_specs)
 
-                                # Noisy GT is only used to drive the estimator (training/measurement
-                                # updates); RMSE evaluation always uses the clean res.gt_traj_aligned.
-                                gt_traj_noisy = add_gaussian_noise(
-                                    res.gt_traj_aligned;
-                                    pos_std=pos_std, pos_bias=pos_bias,
-                                    att_std=att_std, att_bias=att_bias,
-                                )
+                    # Noisy GT is only used to drive the estimator (training/measurement
+                    # updates); RMSE evaluation always uses the clean res.gt_traj_aligned.
+                    gt_traj_noisy = add_gaussian_noise(
+                        res.gt_traj_aligned;
+                        pos_std=noise_spec.pos_std, pos_bias=noise_spec.pos_bias,
+                        att_std=noise_spec.att_std, att_bias=noise_spec.att_bias,
+                    )
 
-                                for (estimator_order, (est_name, est_type)) in enumerate(estimators)
-                                    try
-                                        estimator = est_type(
-                                            estimator_alloc;
-                                            params=hsgp_params,
-                                            corrected_channels=output_channels,
-                                        )
+                    for (estimator_order, (est_name, est_type)) in enumerate(estimators)
+                        try
+                            estimator = est_type(
+                                estimator_alloc;
+                                params=hsgp_params,
+                                corrected_channels=output_channels,
+                            )
 
-                                        zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
-                                            res.inertial_updated,
-                                            res.sim_config_updated,
-                                            gt_traj_noisy,
-                                            estimator;
-                                            step_detector=step_detector_factory(),
-                                            x_init=res.x_init,
-                                            gt_available=gt_available,
-                                            ref_frame=frame,
-                                            feature_type=feature_type,
-                                        )
+                            zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
+                                res.inertial_updated,
+                                res.sim_config_updated,
+                                gt_traj_noisy,
+                                estimator;
+                                step_detector=step_detector_factory(),
+                                x_init=res.x_init,
+                                gt_available=gt_available,
+                                ref_frame=frame,
+                                feature_type=feature_type,
+                            )
 
-                                        # RMSE evaluated against the clean ground truth
-                                        gt_step_traj_clean = res.gt_traj_aligned[step_seg]
-                                        N_step = length(gt_step_traj_clean)
-                                        n_step_cutoff = floor(Int, train_ratio * N_step)
-                                        _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
-                                        _rmse_rate = _rmse / total_distance(gt_step_traj_clean[n_step_cutoff:end])
+                            # RMSE evaluated against the clean ground truth
+                            gt_step_traj_clean = res.gt_traj_aligned[step_seg]
+                            N_step = length(gt_step_traj_clean)
+                            n_step_cutoff = floor(Int, train_ratio * N_step)
+                            _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
+                            _rmse_rate = _rmse / total_distance(gt_step_traj_clean[n_step_cutoff:end])
 
-                                        push!(df, (
-                                            dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
-                                            est_name, estimator_order,
-                                            pos_std, pos_std_order, pos_bias, pos_bias_order,
-                                            att_std, att_std_order, att_bias, att_bias_order,
-                                            zupt, step_seg, corr_traj, io_data, model,
-                                            _rmse, _rmse_rate,
-                                        ))
-                                        n_ok += 1
-                                    catch e
-                                        @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, pos_std=$pos_std, pos_bias=$pos_bias, att_std=$att_std, att_bias=$att_bias)" exception = e
-                                        n_fail += 1
-                                    end
-                                end
-                            end
+                            push!(df, (
+                                dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
+                                est_name, estimator_order,
+                                noise_spec.tag, noise_spec_order,
+                                noise_spec.pos_std, noise_spec.pos_bias,
+                                noise_spec.att_std, noise_spec.att_bias,
+                                zupt, step_seg, corr_traj, io_data, model,
+                                _rmse, _rmse_rate,
+                            ))
+                            n_ok += 1
+                        catch e
+                            @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, pos_std=$pos_std, pos_bias=$pos_bias, att_std=$att_std, att_bias=$att_bias)" exception = e
+                            n_fail += 1
                         end
                     end
                 end

@@ -3,7 +3,7 @@ using .HybridZuptInsJl;
 using GLMakie, OrderedCollections, Statistics, Random
 
 # --- Choose Parameters file
-hsgp_p_key = 43
+hsgp_p_key = 42
 
 hsgp_p_path = Dict{Int,String}(
     11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
@@ -22,7 +22,7 @@ hsgp_base, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, h
 base_FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 base_FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])  # # 
 
-data_key = "DCSC" # meta["data_key"]
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -114,14 +114,26 @@ hyps = Dict{String,Any}()
 rng = Random.Xoshiro(123)
 
 optim_params = OrderedDict(
-    "use_output_std_as_sigma_n_bound" => true,
+    "use_output_std_as_sigma_n_bound" => false,
     "use_input_std_as_sigma_n_bound" => false,
     "default_upper" => 1e3,
-    "default_lower" => 1e-3
+    "default_lower" => 1e-3,
+    "default_noise_lower" => 1e-1,
+    "yaw" => OrderedDict(
+        "default_var_lower" => 1e-1,
+        "default_ls_lower" => 1.0
+    )
 )
 for (idx, symb) in enumerate(output_symbols)
     # Define bounds on σ_n, ℓ, σ_f, σ_lin
     lower = fill(optim_params["default_lower"], 4)
+    lower[1] = optim_params["default_noise_lower"]
+
+    if symb == output_symbols[4]
+        lower[3] = optim_params["yaw"]["default_var_lower"]
+        lower[2] = optim_params["yaw"]["default_ls_lower"]
+    end
+
     if optim_params["use_output_std_as_sigma_n_bound"]
         noise_lower_orig = maximum(train_out.data_std[idx, :])
         max_output_std = noise_lower_orig / outp.σ[idx]
@@ -189,13 +201,16 @@ hsgp_base = HybridZuptInsJl.HsgpParameters(
 
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
-trial_id = 5
-train_ratio = 0.45
+trial_id = 15
+train_ratio = 0.5
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
 )
+# Add noise to training data
+noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)")
+noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=noise_spec.pos_std, att_std=noise_spec.att_std)
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
@@ -216,23 +231,23 @@ io_data = OrderedDict()
 
 defaultEstimator = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, defaultEstimator;
+    inertial_updated, sim_config_updated, noisy_gt_traj, defaultEstimator;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 decoupledStatic = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
 _, _, stat_corr_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, decoupledStatic;
+    inertial_updated, sim_config_updated, noisy_gt_traj, decoupledStatic;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
-jointHsgp_base = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_base; corrected_channels=output_channels)
-_, _, jointHsgp_base_traj, io_data["Joint HSGP Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, jointHsgp_base;
+Hsgp_base = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_base, corrected_channels=output_channels)
+_, _, jointHsgp_base_traj, io_data["Decoupled HSGP Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, noisy_gt_traj, Hsgp_base;
     x_init=x_init, gt_available=gt_available, ref_frame=base_FRAME, feature_type=base_FEATURE_TYPE)
 
-jointHsgp_opt = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_opt; corrected_channels=output_channels)
-_, _, jointHsgp_opt_traj, io_data["Joint HSGP Opt"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, gt_traj_aligned, jointHsgp_opt;
+Hsgp_opt = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_opt, corrected_channels=output_channels)
+_, _, jointHsgp_opt_traj, io_data["Decoupled HSGP Opt"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    inertial_updated, sim_config_updated, noisy_gt_traj, Hsgp_opt;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 
@@ -274,7 +289,7 @@ with_theme(theme_ggplot2()) do
 end
 
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
-fig_out_norm = HybridZuptInsJl.plot_regression_results(output_data_norm, io_data["Joint HSGP Opt"]["target_norm"])
+fig_out_norm = HybridZuptInsJl.plot_regression_results(output_data_norm, io_data["Decoupled HSGP Opt"]["target_norm"])
 
 fig_in = HybridZuptInsJl.plot_regression_results(input_data, io_data["Default"]["input"])
 # display(GLMakie.Screen(), fig_in)

@@ -32,10 +32,10 @@ FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta[
 ## 4. Define correction methods to compare
 estimators = OrderedDict(
     "Base (no correction)" => HybridZuptInsJl.BaseEstimator,
-    # "Joint static bias" => HybridZuptInsJl.JointStaticEstimator,
     "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
     "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
-    # "Joint HSGP" => JointHsgpEstimator,
+    "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
 output_channels = [:yaw]

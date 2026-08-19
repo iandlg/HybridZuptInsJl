@@ -13,7 +13,7 @@ hsgp_p_path = Dict{Int,String}(
 
 # Load parameters with corresponding metatdata
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-data_key = "DCSC" # meta["data_key"]
+data_key = "ANG2" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
@@ -24,17 +24,16 @@ FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 var_pos = 1e-2
 var_yaw = 1e-3
-pos_std = 0.0 # 0.5
-att_std = 0.0 # 5*pi/180
+noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=5*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
 sigma_groundtruth = (
-    sqrt(var_pos)+pos_std,
-    sqrt(var_pos)+pos_std,
-    sqrt(var_pos)+pos_std,
-    sqrt(var_yaw)+att_std
+    sqrt(var_pos)+noise_spec.pos_std,
+    sqrt(var_pos)+noise_spec.pos_std,
+    sqrt(var_pos)+noise_spec.pos_std,
+    sqrt(var_yaw)+noise_spec.att_std
 )
 posyaw_measurement_update=false
 
-trial_id = 5 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 train_ratio = 0.5
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)

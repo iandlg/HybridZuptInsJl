@@ -74,7 +74,8 @@ function make_rmse_evaluator(
     ref_frame::ReferenceFrame, ;
     m::Union{Nothing,Int}=nothing,
     output_channel_idxs=[1, 2, 3, 4],
-    hsgp_estimator_factory::Type=JointHsgpEstimator
+    hsgp_estimator_factory::Type=JointHsgpEstimator,
+    noise_spec::NoiseSpec=NoiseSpec()
 )::Function
     p = length(output_channel_idxs)
     @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
@@ -96,7 +97,13 @@ function make_rmse_evaluator(
     n_train_cutoff = floor(Int, train_ratio * N)
     gt_available = [n <= n_train_cutoff for n in 1:N]
 
-    # 4. Return the evaluator closure
+    # 4. Add Gaussian noise to ground truth 
+    gt_noisy = add_gaussian_noise(gt_traj_aligned;
+        pos_std=noise_spec.pos_std, pos_bias=noise_spec.pos_bias,
+        att_std=noise_spec.att_std, att_bias=noise_spec.att_bias
+    )
+
+    # 5. Return the evaluator closure
     function rmse_evaluator(hsgp_params::HsgpParameters)::Float64
         # Optionally force m to be consistent (if needed)
         hsgp_params = HsgpParameters(
@@ -106,7 +113,7 @@ function make_rmse_evaluator(
         )
         hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params, corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs])
         _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
-            inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_estimator;
+            inertial_updated, sim_config_updated, gt_noisy, hsgp_estimator;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)
 
         # Run online correction

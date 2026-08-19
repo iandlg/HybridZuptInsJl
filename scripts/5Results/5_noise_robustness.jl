@@ -19,10 +19,11 @@ aligned = HybridZuptInsJl.collect_aligned_trajectories(data_dict)
 
 ## 3. Load HSGP hyperparameters / Input feature type
 m=200
-hsgp_p_key = 42
+hsgp_p_key = 44
 hsgp_p_path = Dict{Int,String}(
     42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
     43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
+    44 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T12:56:03.443.json", # same; ANG2 higer lower noise bound
 )[hsgp_p_key]
 hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
 hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_m=m)
@@ -42,6 +43,14 @@ output_channels = [:pos_1, :pos_2, :yaw]
 
 train_ratios = [0.5]
 pos_std_vec = [nothing, 0.01, 0.1]
+noise_specs = [
+    HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=0.0, tag="Position Noise Only (0.05m)"),
+    HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=0.0, tag="Position Noise Only (0.1m)"),
+    HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=5*pi/180, tag="Heading Noise Only (5°)"),
+    HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=10*pi/180, tag="Heading Noise Only (10°)"),
+    HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"),
+    HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±10°)"),
+]
 ## 5. Run the sweep
 results_df = HybridZuptInsJl.run_online_correction_sweep(
     aligned,
@@ -51,8 +60,8 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
     train_ratios,
     estimators,
     output_channels;
-    pos_std_vec=pos_std_vec
+    noise_specs=noise_specs
 )
 
 ##
-HybridZuptInsJl.plot_noise_sweep_boxplots(results_df, "Angermann"; metric=:rmse_rate)
+HybridZuptInsJl.plot_noise_sweep_boxplots(results_df, "Angermann"; metric=:rmse_rate, show_outliers=false)
