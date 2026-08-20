@@ -57,3 +57,16 @@ function resample_to_grid(t::AbstractVector, x::AbstractVector, t_grid::Abstract
     itp = Interpolations.LinearInterpolation(t, x, extrapolation_bc=Interpolations.Line())
     return itp.(t_grid)
 end
+
+"""Mahalanobis square distance, robust to near-singular / non-symmetric S."""
+function mahalanobis(nu::AbstractVector, S::AbstractMatrix)
+    Ss = Symmetric((Matrix(S) + Matrix(S)') / 2)
+    try
+        return dot(nu, Ss \ nu)
+    catch
+        return dot(nu, pinv(Matrix(Ss)) * nu)
+    end
+end
+
+"""Wrap an angle to (-pi, pi]."""
+wrap_pi(a) = atan(sin(a), cos(a))

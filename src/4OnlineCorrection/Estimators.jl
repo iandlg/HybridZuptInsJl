@@ -132,7 +132,7 @@ function normalize_feature!(
 
     # Wrap angles after mean subtraction
     for i in angle_idx
-        feature[i] = atan(sin(feature[i]), cos(feature[i]))
+        feature[i] = wrap_pi(feature[i])
     end
 
     # Scale features in-place
@@ -226,7 +226,7 @@ function stride_error(ref_frame::ReferenceFrame;
     # Compute ground truth stride in local frame
     Δθ3_gt = matrix_to_euler(R_wb_gt[2])[3] -
              matrix_to_euler(R_wb_gt[1])[3]
-    Δθ3_gt = atan(sin(Δθ3_gt), cos(Δθ3_gt))
+    Δθ3_gt = wrap_pi(Δθ3_gt)
 
     gt_stride, Σ_gt_stride, _ = stride_local(ref_frame;
         R_wb=R_wb_gt[1],
@@ -237,8 +237,7 @@ function stride_error(ref_frame::ReferenceFrame;
     # Compute estimated stride from INS in local frame
     Δθ3 = matrix_to_euler(R_wb[2])[3] -
           matrix_to_euler(R_wb[1])[3]
-    Δθ3 = atan(sin(Δθ3), cos(Δθ3))
-
+    Δθ3 = wrap_pi(Δθ3)
     ins_stride, Σ_ins_stride, R_aug_wl = stride_local(ref_frame;
         R_wb=R_wb[1],
         ΔpΔθ3=[Δp; Δθ3],
@@ -247,7 +246,7 @@ function stride_error(ref_frame::ReferenceFrame;
 
     # Compute stride error
     stride_err = gt_stride - ins_stride
-    stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))  # Wrap angle to [-π, π]
+    stride_err[4] = wrap_pi(stride_err[4])
 
     # Combine covariances from ground truth and INS estimates
     Σ_err = Σ_gt_stride + Σ_ins_stride
@@ -337,7 +336,7 @@ function posyaw_measurement_update!(c::BaseEstimator; curr_pos::AbstractVector{F
 
     c.δx[:, c.i], c.Σ = measurement_update(
         c.δx[:, c.i], c.Σ,
-        vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
+        vcat(curr_pos .- c.pos[:, c.i], wrap_pi(curr_θ3 - θ3_estim)),
         c.H[:, :, c.i],
         Σy
     )
@@ -455,12 +454,6 @@ end
 function stride_measurement_update!(c::JointStaticEstimator;
     stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
     kwargs...)
-    # c.H[1:3, 1:3] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
-    # c.H[4, 4:6] = [0.0, 0.0, 1.0]
-    # c.H[:, 7:end] = Matrix{Float64}(I, 4, 4)
-
-    # stride_err -= c.stride_bias[:, c.i]
-    # # stride_err[4] = atan(sin(stride_err[4]), cos(stride_err[4]))
 
     Hfull = zeros(Float64, 4, 6)
     Hfull[1:3, 1:3] = R_aug_wl[1:3, 1:3]'
@@ -490,7 +483,7 @@ function posyaw_measurement_update!(c::JointStaticEstimator; curr_pos::AbstractV
 
     measurement_update!(
         view(c.δx, 1:(6+c.p), c.i), c.Σ,
-        vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
+        vcat(curr_pos .- c.pos[:, c.i], wrap_pi(curr_θ3 - θ3_estim)),
         c.H,
         Σy,
         c.ws
@@ -679,7 +672,7 @@ function posyaw_measurement_update!(c::DecoupledStaticEstimator; curr_pos::Abstr
 
     measurement_update!(
         c.δx, c.Σ,
-        vcat(curr_pos .- c.pos[:, c.i], atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))),
+        vcat(curr_pos .- c.pos[:, c.i], wrap_pi(curr_θ3 - θ3_estim)),
         c.H,
         Σy,
         c.ws_state
@@ -924,7 +917,7 @@ function posyaw_measurement_update!(c::DecoupledHsgpEstimator; curr_pos::Abstrac
 
     measurement_update!(
         view(c.δx, 1:6, c.i), c.Σ,
-        [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
+        [curr_pos .- c.pos[:, c.i]; wrap_pi(curr_θ3 - θ3_estim)],
         c.H[:, :, c.i],
         Σy,
         c.ws_state
@@ -1223,7 +1216,7 @@ function posyaw_measurement_update!(c::JointHsgpEstimator; curr_pos::AbstractVec
 
     measurement_update!(
         c.δx, c.Σ,
-        [curr_pos .- c.pos[:, c.i]; atan(sin(curr_θ3 - θ3_estim), cos(curr_θ3 - θ3_estim))],
+        [curr_pos .- c.pos[:, c.i]; wrap_pi(curr_θ3 - θ3_estim)],
         view(c.H, 1:4, :), Σy,
         c.ws
     )
