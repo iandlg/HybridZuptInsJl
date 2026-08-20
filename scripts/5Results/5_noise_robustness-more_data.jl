@@ -1,200 +1,112 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using GLMakie, OrderedCollections
+using OrderedCollections, DataFrames
 
-# Choose Parameters file
-hsgp_p_key = 42
-
-hsgp_p_path = Dict{Int,String}(
-    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
-)[hsgp_p_key]
-
-# Load parameters with corresponding metatdata
-hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-data_key = "ANG2" # meta["data_key"]
+data_key = "DCSC" # meta["data_key"]
 data_dir = Dict{String,String}(
     "ANG" => "data/angermann_high_precision",
     "ANG2" => "data/angermann_v2",
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
 
+# estimators = OrderedDict(
+#     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
+#     "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
+# )
+estimators = OrderedDict(
+    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
+    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
+)
+train_labels = Dict(
+    "ANG2" => OrderedDict(
+        4 => "Walk_8",
+        13 => "Walk_withoutCarpetShape",
+        14 => "Walk_Patrick_long",
+        1 => "Walk_rectangles",
+        2 => "Walk_rectangles_otherdir",
+        3 => "Walk_straight",
+    ),
+    "DCSC" => OrderedDict(
+        3 => "CCWRectangle_long_A",
+        4 => "FigureEight_long",
+        5 => "S_shape_long",
+        6 => "CWRectangle_long",
+        12 => "Mixed",
+        8 => "CW_Rect",
+        # 10 => "FigureEightLong"
+    )
+)[data_key]
+test_labels = Dict(
+    "ANG2" => OrderedDict(
+        15 => "Walk_Patrick_mixed",
+    ),
+    "DCSC" => OrderedDict(
+        1 => "CWRectangle_short",
+        14 => "CCWRectangle_long_B",
+        2 => "FigureEight_short",
+    )
+)[data_key]
+# Choose Parameters file
+hsgp_p_key = 44
+
+hsgp_p_path = Dict{Int,String}(
+    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
+    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
+    44 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T12:56:03.443.json", # same; ANG2 higer lower noise bound
+    45 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T16:42:30.821.json", # slightly changed hyps compared to 44
+)[hsgp_p_key]
+
+output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
+
+# Load parameters with corresponding metatdata
+params, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
+@show params
+new_hp = HybridZuptInsJl.SeHyperparams(
+    [5e-1, 2.0, 0.09],
+    [5e-1, 2.0, 0.09],
+    [5e-1, 2.0, 0.09],
+    [0.146, 24, 2.8]
+)
+params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
+
+noise = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=5*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
+
+# Get feature type and reference frame
 FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
 FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
-var_pos = 1e-2
-var_yaw = 1e-3
-noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=5*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
-sigma_groundtruth = (
-    sqrt(var_pos)+noise_spec.pos_std,
-    sqrt(var_pos)+noise_spec.pos_std,
-    sqrt(var_pos)+noise_spec.pos_std,
-    sqrt(var_yaw)+noise_spec.att_std
-)
-posyaw_measurement_update=false
 
-trial_id = 15 # meta["trial_id"]
-train_ratio = 0.5
-output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
-ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; sim_config=sim_config
+df_results = HybridZuptInsJl.multi_track_training_analysis(
+    data_dir, estimators, train_labels, test_labels, params;
+    frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
+    noise_spec=noise,
+    train_tr_ratio=1.0,
+    test_tr_ratio=0.1
 )
 
-# Extract the aligned initial state from the trajectory
-x_init = vcat(
-    ins_traj_aligned.pos[:, 1],
-    ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(
-        ins_traj_aligned.R_nb[:, :, 1]
+fig = HybridZuptInsJl.plot_multi_track_training_quality(df_results)
+
+##
+using Dates
+base_dir = "out/4OnlineCorrection/6_HypOpt"
+combo_dir = joinpath(base_dir, data_key, string(FRAME) * "-" * string(FEATURE_TYPE))
+mkpath(combo_dir)
+
+
+time = string(Dates.now())
+filename = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
+HybridZuptInsJl.to_json(joinpath(combo_dir, filename), params;
+    metadata=Dict(
+        "data_key" => data_key,
+        # "trial_id" => trial_id,
+        "ref_frame" => FRAME,
+        "feature_type" => FEATURE_TYPE,
+        # "normalize_input" => normalization_params["normalize_x"],
+        # "normalize_output" => normalization_params["normalize_y"],
+        # "train_ids" => train_ids,
+        # "outlier_removal" => outlier_removal_params,
+        # "normalization" => normalization_params,
+        # "optimization_parameters" => optim_params
     )
 )
-N = length(inertial_updated)
-n_train_cutoff = floor(Int, train_ratio * N)
-gt_available = [n <= n_train_cutoff for n in 1:N]
-
-# Add noise to GT
-noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
-
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-
-# Run online correction
-hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_m=m)
-
-io_data = OrderedDict()
-
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
-
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
-
-static_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
-zupt, step_seg, stat_corr_traj, io_data["Joint Static"], joint_stat_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, static_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
-
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
-
-
-slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], hsgp_joint_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, slamHsgp_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
-
-input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-for (method_name, io_dict) in io_data
-    input_data["$method_name : Input"] = io_dict["input"]
-    output_data["$method_name : Prediction"] = io_dict["prediction"]
-end
-
-trajs = OrderedDict(
-    "Base" => def_corr_traj,
-    "Decoupled Static" => decoupled_stat_traj,
-    "Joint Static" => stat_corr_traj,
-    "Decoupled HSGP" => hsgp1_corr_traj,
-    "Joint HSGP" => slamHsgp_corr_traj
-)
-
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; stop=105, show_heading=false, heading_stride=1)
-
-with_theme(theme_ggplot2()) do
-    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
-end
-with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
-end
-# fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
-# fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
-# fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])
-
-## Test on second track
-trial_id = 14
-train_ratio = 0.1
-posyaw_measurement_update = true
-ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; sim_config=sim_config
-)
-# sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
-noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
-
-# Extract the aligned initial state from the trajectory
-x_init = vcat(
-    ins_traj_aligned.pos[:, 1],
-    ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(
-        ins_traj_aligned.R_nb[:, :, 1]
-    )
-)
-N = length(inertial_updated)
-n_train_cutoff = floor(Int, train_ratio * N)
-gt_available = [n <= n_train_cutoff for n in 1:N]
-
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-
-io_data = OrderedDict()
-
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
-
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=decoup_stat_model, posyaw_measurement_update=posyaw_measurement_update)
-
-joint_static_est = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, joint_stat_traj, io_data["Joint Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, joint_static_est;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=joint_stat_model, posyaw_measurement_update=posyaw_measurement_update)
-
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)
-
-slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, slamHsgp_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_joint_model, posyaw_measurement_update=posyaw_measurement_update)
-
-input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-for (method_name, io_dict) in io_data
-    input_data["$method_name : Input"] = io_dict["input"]
-    output_data["$method_name : Prediction"] = io_dict["prediction"]
-end
-
-trajs = OrderedDict(
-    "Base" => def_corr_traj,
-    "Decoupled Static" => decoupled_stat_traj,
-    "Joint Static" => joint_stat_traj,
-    "Decoupled HSGP" => hsgp1_corr_traj,
-    "Joint HSGP" => slamHsgp_corr_traj
-)
-
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=100, show_heading=false, heading_stride=1)
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
-
-with_theme(theme_ggplot2()) do
-    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
-end
-with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
-end

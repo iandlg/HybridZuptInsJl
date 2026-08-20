@@ -46,6 +46,7 @@ include("4OnlineCorrection/HybridZuptInsV2.jl")
 include("4OnlineCorrection/DataProcessing.jl")
 include("4OnlineCorrection/HyperParamSensitivityAnalysis.jl")
 include("4OnlineCorrection/TrainingDataQualityAnalysis.jl")
+include("4OnlineCorrection/MultiTrackModelTraining.jl")
 
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")
