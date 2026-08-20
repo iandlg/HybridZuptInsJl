@@ -211,7 +211,7 @@ function hybrid_zupt_aided_ins(
                 α = tr(Diagonal(noise_vect .^ 2)) / tr(tt_target_cov_norm)
                 R = Diagonal(noise_vect .^ 2) + α * tt_target_cov_norm
                 beta, P_beta = measurement_update(
-                    beta, P_beta, target_norm, Φ, R # Diagonal(noise_vect .^ 2)
+                    beta, P_beta, target_norm, Φ, tt_target_cov_norm # Diagonal(noise_vect .^ 2)
                 )
                 push!(beta_hist, beta)
             end
@@ -220,35 +220,42 @@ function hybrid_zupt_aided_ins(
             append_io!(training_outputs, inertial.t[prev_step], target_norm, sqrt.(diag(tt_target_cov_norm)))
 
             # --------- Update the Position and orientation from GT ---------------
+
             if gt_available[prev_step] && gt_available[curr_step]
-                # Construct Measurement matrix H_gt 
+
                 H_gt = [
                     I zeros(Float64, (3, 6));
                     zeros(Float64, (1, 6)) ∂θ3_∂δθ_right(quat[:, curr_step])'
                 ]
+
                 yaw_gt_curr = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
                 yaw_ins_curr = matrix_to_euler(quat_to_matrix(quat[:, curr_step]))[3]
-                Δθ = wrap_pi(yaw_gt_curr - yaw_ins_curr)
-                # @info "Measured yaw error" round(Δθ; digits=3)
 
-                # δx is zero since has been compensated after zupts
+                # (nominal - true), matching the ZUPT convention
+                Δθ = atan(sin(yaw_ins_curr - yaw_gt_curr),
+                    cos(yaw_ins_curr - yaw_gt_curr))
+                z_gt = vcat(x[1:3, curr_step] .- gt_traj.pos[:, curr_step], Δθ)
+
+                # prior dx is zero: already compensated after the ZUPT smoother
                 dx[:, curr_step], P[:, :, curr_step] = measurement_update(
                     zeros(Float64, 9),
                     P[:, :, curr_step],
-                    vcat(gt_traj.pos[:, curr_step] - x[[1, 2, 3], curr_step], Δθ),
+                    z_gt,
                     H_gt,
-                    Diagonal(sigma_gt .^ 2) .* 10e1
+                    Diagonal(sigma_gt .^ 2) #.* 10e1
                 )
                 push!(var_hist, diag(P[:, :, curr_step]))
-                # @info "Resulting axis angle" dx[7:9, curr_step]
 
-                # -------- Compensate error -------------
+                # dx is (nominal - true) -> SUBTRACT it, as the ZUPT path does
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(
                     x[:, curr_step],
-                    dx[:, curr_step],
+                    -dx[:, curr_step],
                     quat[:, curr_step]
                 )
             end
+
+
+
 
             if !gt_available[curr_step] && correct
 
@@ -257,32 +264,43 @@ function hybrid_zupt_aided_ins(
                     zeros(Float64, (1, 6)) ∂θ3_∂δθ_right(quat[:, curr_step])'
                 ]
 
+                # ---- GP prediction, in TRAINING convention (true - nominal) --
+                # The training pipeline is untouched: `target`, `target_norm`,
+                # `training_outputs` and `pred_outputs` all stay in the sense
+                # that stride_error() produced. Only the filter-facing copy is
+                # converted, below.
                 pred_estim_norm = Φ * beta
                 pred_cov_norm = Φ * P_beta * Φ' + input_cov_norm
 
                 append_io!(pred_outputs, inertial.t[prev_step],
                     pred_estim_norm, sqrt.(diag(pred_cov_norm)))
 
-                pred_estim = pred_estim_norm .* params.output_stats[2] .+ params.output_stats[1]
-                y_estim = R_aug_wl * pred_estim
-                pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm * Diagonal(params.output_stats[2])
+                pred_estim = pred_estim_norm .* params.output_stats[2] .+
+                             params.output_stats[1]
+                pred_cov = Diagonal(params.output_stats[2]) * pred_cov_norm *
+                           Diagonal(params.output_stats[2])
+
+                # ---- convert to filter convention: nominal - true ------------
+                y_estim = -(R_aug_wl * pred_estim)
                 y_cov = R_aug_wl * pred_cov * R_aug_wl'
                 y_cov = Symmetric((y_cov + y_cov') / 2) * R_inflation
 
-                # ---- ground-truth references, evaluation only ----------------
-                y_true_stride = R_aug_wl * target
-                yaw_gt = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
-                yaw_ins = matrix_to_euler(quat_to_matrix(quat[:, curr_step]))[3]
+                # ---- ground-truth references, same convention, eval only -----
+                y_true_stride = -(R_aug_wl * target)
+
+                yaw_gt_c = matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3]
+                yaw_ins_c = matrix_to_euler(quat_to_matrix(quat[:, curr_step]))[3]
                 e_state_true = vcat(
-                    gt_traj.pos[:, curr_step] .- x[1:3, curr_step],
-                    wrap_pi(yaw_gt - yaw_ins)
+                    x[1:3, curr_step] .- gt_traj.pos[:, curr_step],
+                    atan(sin(yaw_ins_c - yaw_gt_c), cos(yaw_ins_c - yaw_gt_c))
                 )
 
                 # ---- oracle control -----------------------------------------
                 y_meas = if measurement_source === :oracle
                     y_true_stride
                 elseif measurement_source === :oracle_noisy
-                    y_true_stride .+ cholesky(Symmetric(Matrix(y_cov))).L * randn(length(y_true_stride))
+                    y_true_stride .+
+                    cholesky(Symmetric(Matrix(y_cov))).L * randn(length(y_true_stride))
                 else
                     y_estim
                 end
@@ -309,9 +327,15 @@ function hybrid_zupt_aided_ins(
 
                 push!(var_hist, diag(P[:, :, curr_step]))
 
+                # dx is (nominal - true) -> SUBTRACT it
                 x[:, curr_step], quat[:, curr_step] = comp_internal_states(
-                    x[:, curr_step], dx[:, curr_step], quat[:, curr_step])
+                    x[:, curr_step],
+                    -dx[:, curr_step],
+                    quat[:, curr_step]
+                )
             end
+
+
         end
 
         # R_nb_final = euler_to_matrix(x[7:9, :])

@@ -24,11 +24,10 @@ data_dir = Dict{String,String}(
     "ANG2" => "data/angermann_v2",
     "DCSC" => "data/dcsc_optitrack"
 )[data_key]
-trial_id = 3 # meta["trial_id"]
+trial_id = 5 # meta["trial_id"]
 ins_traj_aligned, gt_traj, zupt, segs, inertial, simdata = HybridZuptInsJl.compute_aligned_ins_trajectory(
     data_dir, trial_id
 )
-
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
@@ -38,8 +37,12 @@ x_init = vcat(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
+
 true_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+trajs = OrderedDict{String,HybridZuptInsJl.Trajectory}()
+varhist = Dict()
+nis = Dict()
 
 # Run online correction
 train_ratio = 0.5
@@ -47,27 +50,12 @@ N = length(inertial)
 n_train_cutoff = floor(Int, train_ratio * N)
 gta = [n <= n_train_cutoff for n in 1:N]
 
-trajs = OrderedDict{String,HybridZuptInsJl.Trajectory}()
-# zupt, trajs["model"], step_seg, _, _, _ = HybridZuptInsJl.hybrid_zupt_aided_ins(
-#     inertial, simdata, gt_traj, params;
-#     x_init=x_init, gt_available=gta, feature_type=FEATURE_TYPE, correct=false
-# )
-
-
-# zupt, trajs["model + HSGP covupd"], step_seg, true_outputs["model + HSGP covupd"], pred_outputs["model + HSGP covupd"], betahist, tr_input, var_hist_covupd, pred_nis_covupd = HybridZuptInsJl.hybrid_zupt_aided_ins(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
-#     x_init=x_init, gt_available=gt_available, feature_type=FEATURE_TYPE, cov_update=true
-# )
-
-# zupt, trajs["model + HSGP nocovupd"], step_seg, true_outputs["model + HSGP nocovupd"], pred_outputs["model + HSGP nocovupd"], betahist, tr_input, var_hist_nocovupd, pred_nis_nocovupd = HybridZuptInsJl.hybrid_zupt_aided_ins(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, hsgp_p;
-#     x_init=x_init, gt_available=gt_available, feature_type=FEATURE_TYPE, cov_update=false
-# )
-
 # --- single vs two filter -----------------------------------------------
-_, _, _, _, _, _, _, _, _, d_on, q_on, x_on, P_on = HybridZuptInsJl.hybrid_zupt_aided_ins(
+_, trajs["model"], _, _, _, _, _, _, _, _, _, _, _ = HybridZuptInsJl.hybrid_zupt_aided_ins(
+    inertial, simdata, gt_traj, params; gt_available=gta, x_init=x_init, correct=false)
+_, trajs["model + HSGP covupd"], _, true_outputs["model + HSGP covupd"], pred_outputs["model + HSGP covupd"], _, _, varhist["covupd"], nis["covupd"], d_on, q_on, x_on, P_on = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial, simdata, gt_traj, params; cov_update=true, gt_available=gta, feature_type=FEATURE_TYPE, x_init=x_init, ref_frame=FRAME)
-_, _, _, _, _, _, _, _, _, d_off, q_off, x_off, P_off = HybridZuptInsJl.hybrid_zupt_aided_ins(
+_, trajs["model + HSGP nocovupd"], segs, true_outputs["model + HSGP nocovupd"], pred_outputs["model + HSGP nocovupd"], _, _, varhist["nocovupd"], nis["nocovupd"], d_off, q_off, x_off, P_off = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial, simdata, gt_traj, params; cov_update=false, gt_available=gta, feature_type=FEATURE_TYPE, x_init=x_init, ref_frame=FRAME)
 
 # 1. NEES envelope
@@ -80,6 +68,7 @@ n_off = HybridZuptInsJl.nees_series(x_off, P_off, q_off, gt_traj)
 w = HybridZuptInsJl.whiteness_test(d_on; maxlag=15)
 @show HybridZuptInsJl.nis_summary(d_on; dof=4), w.pvalue
 @show HybridZuptInsJl.noise_state_correlation(d_on).rho
+@show HybridZuptInsJl.noise_state_correlation(d_off).rho
 
 # 3. inflation sweep
 HybridZuptInsJl.print_sweep(HybridZuptInsJl.inflation_sweep(inertial, simdata, gt_traj, params; gt_available=gta))
@@ -94,24 +83,21 @@ for (name, traj) in trajs
     step_trajs[name] = traj[segs]
 end
 
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(step_trajs, gt_traj_aligned[step_seg])
-fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned)
-fig_dist = HybridZuptInsJl.plot_position_distance_error(step_trajs, gt_traj_aligned[segs])
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(step_trajs, gt_traj[segs])
+fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj)
+fig_dist = HybridZuptInsJl.plot_position_distance_error(step_trajs, gt_traj[segs])
 is_step = [x ∈ segs for x in 1:N]
-fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned, is_step)
+fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj, is_step)
 
 fig_out = HybridZuptInsJl.plot_regression_results(pred_outputs, true_outputs["model + HSGP nocovupd"])
-fig_traj_calib = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned)
-fig_traj = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(step_trajs, gt_traj_aligned[step_seg]; show_heading=true, start=95, stop=105, heading_stride=1)
-fig_var_nocovupd = HybridZuptInsJl.plot_channels(hcat(var_hist_nocovupd...))
-fig_var_covupd = HybridZuptInsJl.plot_channels(hcat(var_hist_covupd...))
-fig_nis_nocovupd = HybridZuptInsJl.plot_channels(hcat(pred_nis_nocovupd...))
-fig_nis_covupd = HybridZuptInsJl.plot_channels(hcat(pred_nis_covupd...))
+fig_traj_calib = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj)
+fig_traj = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(step_trajs, gt_traj[segs]; show_heading=true, start=95, stop=105, heading_stride=1)
+fig_var_nocovupd = HybridZuptInsJl.plot_channels(hcat(varhist["nocovupd"]...))
+fig_var_covupd = HybridZuptInsJl.plot_channels(hcat(varhist["covupd"]...))
+fig_nis_nocovupd = HybridZuptInsJl.plot_channels(hcat(nis["nocovupd"]...))
+fig_nis_covupd = HybridZuptInsJl.plot_channels(hcat(nis["covupd"]...))
 
-display(GLMakie.Screen(), fig_var_nocovupd)
-display(GLMakie.Screen(), fig_var_covupd)
-display(GLMakie.Screen(), fig_nis_covupd)
-fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj_aligned[segs])
+fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(step_trajs, gt_traj[segs])
 
 # fig_in_gp = HybridZuptInsJl.plot_input_features(tr_input_gp)
 # fig_in_hsgp = HybridZuptInsJl.plot_input_features(tr_input)
