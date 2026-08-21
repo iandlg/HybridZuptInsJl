@@ -51,7 +51,7 @@ n_train_cutoff = floor(Int, train_ratio * N)
 gta = [n <= n_train_cutoff for n in 1:N]
 
 # --- single vs two filter -----------------------------------------------
-_, trajs["model"], _, _, _, _, _, _, _, _, _, _, _ = HybridZuptInsJl.hybrid_zupt_aided_ins(
+_, trajs["model"], _, _, _, _, _, _, _, d_base, q_base, x_base, P_base = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial, simdata, gt_traj, params; gt_available=gta, x_init=x_init, correct=false)
 _, trajs["model + HSGP covupd"], _, true_outputs["model + HSGP covupd"], pred_outputs["model + HSGP covupd"], _, _, varhist["covupd"], nis["covupd"], d_on, q_on, x_on, P_on = HybridZuptInsJl.hybrid_zupt_aided_ins(
     inertial, simdata, gt_traj, params; cov_update=true, gt_available=gta, feature_type=FEATURE_TYPE, x_init=x_init, ref_frame=FRAME)
@@ -59,16 +59,30 @@ _, trajs["model + HSGP nocovupd"], segs, true_outputs["model + HSGP nocovupd"], 
     inertial, simdata, gt_traj, params; cov_update=false, gt_available=gta, feature_type=FEATURE_TYPE, x_init=x_init, ref_frame=FRAME)
 
 # 1. NEES envelope
+n_base = HybridZuptInsJl.nees_series(x_base, P_base, q_base, gt_traj)
 n_on = HybridZuptInsJl.nees_series(x_on, P_on, q_on, gt_traj)
 n_off = HybridZuptInsJl.nees_series(x_off, P_off, q_off, gt_traj)
 @show mean(n_on.pos), HybridZuptInsJl.consistency_ratio(n_on.pos, n_on.lower, n_on.upper)
 @show mean(n_off.pos), HybridZuptInsJl.consistency_ratio(n_off.pos, n_off.lower, n_off.upper)
 
+fig_nees_pos = HybridZuptInsJl.plot_nees_comparison(
+    OrderedDict("baseline" => n_base, "cov_update=true" => n_on, "cov_update=false" => n_off);
+    block=:pos, title="NEES consistency (position)")
+
 # 2. whiteness + NIS level
-w = HybridZuptInsJl.whiteness_test(d_on; maxlag=15)
-@show HybridZuptInsJl.nis_summary(d_on; dof=4), w.pvalue
+w_on = HybridZuptInsJl.whiteness_test(d_on; maxlag=15)
+w_off = HybridZuptInsJl.whiteness_test(d_off; maxlag=15)
+@show HybridZuptInsJl.nis_summary(d_on; dof=4), w_on.pvalue
 @show HybridZuptInsJl.noise_state_correlation(d_on).rho
 @show HybridZuptInsJl.noise_state_correlation(d_off).rho
+
+fig_whiteness = HybridZuptInsJl.plot_innovation_whiteness(
+    OrderedDict("cov_update=true" => w_on, "cov_update=false" => w_off))
+
+fig_noise_state_corr = HybridZuptInsJl.plot_noise_state_correlation(
+    OrderedDict(
+        "cov_update=true" => HybridZuptInsJl.noise_state_correlation(d_on),
+        "cov_update=false" => HybridZuptInsJl.noise_state_correlation(d_off)))
 
 # 3. inflation sweep
 HybridZuptInsJl.print_sweep(HybridZuptInsJl.inflation_sweep(inertial, simdata, gt_traj, params; gt_available=gta))

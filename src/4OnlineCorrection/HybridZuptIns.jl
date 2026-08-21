@@ -292,7 +292,7 @@ function hybrid_zupt_aided_ins(
                 yaw_ins_c = matrix_to_euler(quat_to_matrix(quat[:, curr_step]))[3]
                 e_state_true = vcat(
                     x[1:3, curr_step] .- gt_traj.pos[:, curr_step],
-                    atan(sin(yaw_ins_c - yaw_gt_c), cos(yaw_ins_c - yaw_gt_c))
+                    wrap_pi(yaw_ins_c - yaw_gt_c)
                 )
 
                 # ---- oracle control -----------------------------------------
