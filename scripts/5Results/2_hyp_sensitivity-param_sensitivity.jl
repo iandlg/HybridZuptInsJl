@@ -116,15 +116,13 @@ println("Saved JSON: $json_path")
 # add a key down here.
 replot_basename = nothing
 
-if isnothing(replot_basename)
-    plot_df, plot_meta = df, metadata
-    plot_name = base_name
-else
-    plot_df, plot_meta = HybridZuptInsJl.load_hp_variation_results(
-        joinpath(outdir, "$replot_basename.csv"),
-        joinpath(outdir, "$replot_basename.json"))
-    plot_name = replot_basename
-end
+# Both branches load from disk, so the freshly computed sweep goes through the
+# exact same JSON round-trip as a replot -- grid_from_dict then sees identically
+# typed input either way.
+plot_name = isnothing(replot_basename) ? base_name : replot_basename
+plot_df, plot_meta = HybridZuptInsJl.load_hp_variation_results(
+    joinpath(outdir, "$plot_name.csv"),
+    joinpath(outdir, "$plot_name.json"))
 
 grid = HybridZuptInsJl.grid_from_dict(plot_meta["grid"])
 plot_log_range = (float(plot_meta["log10_range"][1]), float(plot_meta["log10_range"][2]))
