@@ -1,74 +1,85 @@
+# THESIS SECTION 1 (headline): performance vs how much ground truth is available
+# online (train_ratio), for every corrector, across all trials of a dataset.
+#
+# Despite the "6_" filename this is the *first* results section -- it is the
+# figure an examiner reads before any other. Consider renaming to 1_ so the
+# directory order matches the chapter order.
+#
+# Structurally this is the strongest sweep in 5Results: a genuinely swept
+# continuous x-axis with per-trial replication at every level. It was also the
+# least maintained -- see the notes below.
+
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using GLMakie, OrderedCollections, Dates
+include("_common.jl")
+using OrderedCollections, DataFrames
 import CSV
 
 # Choose Parameters file
-hsgp_p_key = 30
+hsgp_p_key = 42
+m = 200   # WAS 300 here and 200 in every other script, so the headline figure
+          # was not directly comparable with the rest of the chapter.
 
-hsgp_p_path = Dict{Int,String}(
-    11 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_THREED_STEP_2026-05-15T16:25:17.521.json",
-    20 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T13:07:52.881.json",
-    21 => "out/3OfflineCorrection/3_HsgpResults/ANG15_BODY_TWOD_STEP_DT_2026-05-15T14:02:45.772.json",
-    22 => "out/3OfflineCorrection/3_HsgpResults/ANG215_BODY_THREED_STEP_2026-06-06T17:33:50.999.json",
-    30 => "out/3OfflineCorrection/3_HsgpResults/ANG15_HEADING_TWOD_STEP_DT_2026-05-15T14:50:57.036.json"
-)[hsgp_p_key]
+hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
-# Load parameters with corresponding metatdata
-hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-data_key = "ANG2" # meta["data_key"]
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2"
-)[data_key]
+data_key = "ANG2"
+data_dir_path = data_dir(data_key)
 
-hsgp_p = HybridZuptInsJl.HsgpParameters(
-    hsgp_p.hp, hsgp_p.d, 300, hsgp_p.LL;
-    input_stats=hsgp_p.input_stats,
-    output_stats=hsgp_p.output_stats
-)
-
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
-
-trial_ids = HybridZuptInsJl.list_trial_ids(data_dir)
+ids = HybridZuptInsJl.list_trial_ids(data_dir_path)
 train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+
+# WAS: "Static" => HybridZuptInsJl.StaticCorrectorV2(300)
+# StaticCorrectorV2 does not exist anywhere in src/ -- this cell could not run
+# as written, which is why the committed figure dates from 26 June while the
+# rest of the chapter is from August. Names also updated from the old
+# Default/Static/Split/Slam vocabulary to the one every other script uses, so
+# the same estimator is called the same thing in every figure.
 correctors = OrderedDict{String,HybridZuptInsJl.AbstractEstimator}(
-    "Default" => HybridZuptInsJl.BaseEstimator(300),
-    "Static" => HybridZuptInsJl.StaticCorrectorV2(300),
-    "Split" => HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, 300), hsgp_p),
-    "Slam" => HybridZuptInsJl.JointHsgpEstimator(round(Int, 300), hsgp_p)
+    "Base (no correction)" => HybridZuptInsJl.BaseEstimator(300),
+    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator(300),
+    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator(300; params=hsgp_p),
+    "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator(300; params=hsgp_p),
 )
 
-dataset = HybridZuptInsJl.collect_dataset(data_dir, trial_ids, train_ratios, correctors; frame=FRAME, feature_type=FEATURE_TYPE)
+dataset = HybridZuptInsJl.collect_dataset(data_dir_path, ids, train_ratios, correctors;
+    frame=FRAME, feature_type=FEATURE_TYPE)
 
 df = HybridZuptInsJl.performance_dataframe(dataset)
 
-dirname = "out/4OnlineCorrection/4PerformanceResults"
-time = string(Dates.now())
-CSV.write(joinpath(dirname, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).csv"), df)
-##
-include("../../src/HybridZuptInsJl.jl");
+const SECTION = "1_Performance"
+csv_path = stamped(SECTION, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
+CSV.write(csv_path, df)
+@info "Saved results table: $csv_path"
 
-using .HybridZuptInsJl;
-using GLMakie, OrderedCollections, Dates
-using Dates, CSV, DataFrames
-dirname = "out/4OnlineCorrection/4PerformanceResults"
-df = CSV.read("out/4OnlineCorrection/4PerformanceResults/results_ANG2_HEADING_TWOD_STEP_DT_2026-06-26T16:02:48.787.csv", DataFrame)
-time = string(Dates.now())
+## Plot
+# WAS: this cell re-read a hard-coded CSV path from June while stamping the
+# output filenames with the data_key/FRAME/FEATURE of whatever the compute cell
+# above had set -- so the figure legend could describe a different run than the
+# data plotted. It now plots the DataFrame just computed. To re-plot an older
+# run, set `df = CSV.read(<path>, DataFrame)` here deliberately.
+corrector_names = collect(keys(correctors))
 
-with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), corrector_names=["Default", "Static", "Split", "Slam"])
+for metric in (:rmse, :rmse_rate), show_outliers in (true, false)
+    suffix = show_outliers ? "" : "_nooutliers"
+    results_figure() do
+        HybridZuptInsJl.plot_corrector_boxplots(
+            df, metric;
+            show_outliers=show_outliers,
+            corrector_names=corrector_names,
+            save_path=stamped(SECTION, "$(uppercase(string(metric)))$(suffix)"),
+        )
+    end
 end
 
-with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), corrector_names=["Default", "Static", "Split", "Slam"])
-end
-
-with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse; save_path=joinpath(dirname, "RMSE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false, corrector_names=["Default", "Static", "Split", "Slam"])
-end
-
-with_theme(theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_corrector_boxplots(df, :rmse_rate; save_path=joinpath(dirname, "RMSE_RATE_noouliers_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).svg"), show_outliers=false, corrector_names=["Default", "Static", "Split", "Slam"])
+## Paired view at the operating point used by the rest of the chapter.
+# Same trials at every train_ratio, so per-trial differences are the honest
+# summary at n ≈ 16.
+results_figure() do
+    HybridZuptInsJl.plot_paired_differences(
+        df;
+        metric=:rmse_rate,
+        baseline="Base (no correction)",
+        train_ratio=0.5,
+        save_path=stamped(SECTION, "paired_vs_baseline_tr0.5"),
+    )
 end

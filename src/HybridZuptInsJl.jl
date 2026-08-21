@@ -49,6 +49,7 @@ include("4OnlineCorrection/HyperParamSensitivityAnalysis.jl")
 include("4OnlineCorrection/TrainingDataQualityAnalysis.jl")
 include("4OnlineCorrection/MultiTrackModelTraining.jl")
 
+include("Plotting/MetricLabels.jl")
 include("Plotting/Trajectory.jl")
 include("Plotting/InertialData.jl")
 include("Plotting/Steps.jl")
@@ -61,5 +62,6 @@ include("Plotting/OnlineHpSensitivity.jl")
 include("Plotting/TrainingDataQualityAnalysis.jl")
 include("Plotting/HypGeneralizationOverDatasets.jl")
 include("Plotting/NoiseRobustness.jl")
+include("Plotting/PairedComparison.jl")
 end
 

@@ -75,7 +75,9 @@ function make_rmse_evaluator(
     m::Union{Nothing,Int}=nothing,
     output_channel_idxs=[1, 2, 3, 4],
     hsgp_estimator_factory::Type=JointHsgpEstimator,
-    noise_spec::NoiseSpec=NoiseSpec()
+    noise_spec::NoiseSpec=NoiseSpec(),
+    pred_includes_noise::Bool=false,
+    eval_test_half_only::Bool=true
 )::Function
     p = length(output_channel_idxs)
     @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
@@ -111,14 +113,25 @@ function make_rmse_evaluator(
             input_stats=hsgp_params.input_stats,
             output_stats=hsgp_params.output_stats
         )
-        hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params, corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs])
+        hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params,
+            corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs],
+            pred_includes_noise=pred_includes_noise)
         _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
             inertial_updated, sim_config_updated, gt_noisy, hsgp_estimator;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)
 
-        # Run online correction
-
-        return rmse(slamHsgp_corr_traj, gt_traj_aligned[step_seg])[end] # final RMSE
+        # Score the *test* portion only, matching run_online_correction_sweep
+        # (DataProcessing.jl) and training_data_quality_analysis. Previously this
+        # scored the whole trajectory, folding the GT-supervised training half
+        # into the metric and making the sensitivity numbers incomparable with
+        # every other figure in 5Results. Pass eval_test_half_only=false to
+        # reproduce results generated before 2026-08-21.
+        gt_step = gt_traj_aligned[step_seg]
+        if eval_test_half_only
+            k0 = max(1, floor(Int, train_ratio * length(slamHsgp_corr_traj)))
+            return rmse(slamHsgp_corr_traj[k0:end], gt_step[k0:end])[end]
+        end
+        return rmse(slamHsgp_corr_traj, gt_step)[end] # final RMSE
     end
 
     return rmse_evaluator
@@ -268,12 +281,15 @@ function vary_hsgp_parameters(
     baseline_rmse = rmse_func(base_params)
     @info "Baseline RMSE: $baseline_rmse"
 
+    inert = String[]
     for spec in param_specs
         current_val = spec.get_current(base_params)
         test_vals = spec.value_generator(current_val)
+        spec_rmses = Float64[]
         for new_val in test_vals
             new_params = spec.set_new(base_params, new_val)
             rmse_val = rmse_func(new_params)
+            push!(spec_rmses, rmse_val)
             push!(results, (
                 parameter=spec.name,
                 type=spec.type,
@@ -284,6 +300,25 @@ function vary_hsgp_parameters(
                 relative_change=(rmse_val - baseline_rmse) / baseline_rmse
             ))
         end
+
+        # A parameter whose sweep does not move the metric *at all* is almost
+        # never a physical insensitivity result: it means the value never
+        # reached the code under evaluation. Reporting it as a flat line in the
+        # sensitivity figure is actively misleading, so say so loudly.
+        # (This is exactly what happened to the `noise` hyperparameters: σ_n is
+        # loaded into DecoupledHsgpEstimator and then never read unless
+        # `pred_includes_noise=true`. See notes/004.)
+        if length(spec_rmses) > 1 && length(unique(spec_rmses)) == 1
+            push!(inert, spec.name)
+        end
+    end
+
+    if !isempty(inert)
+        @warn """
+        Sensitivity sweep produced a bit-identical metric for $(length(inert)) parameter(s): \
+        $(join(inert, ", ")). These parameters do not reach the evaluated code path, so their \
+        rows are NOT evidence of insensitivity. Verify the parameter is actually consumed before \
+        reporting this result."""
     end
 
     if include_baseline

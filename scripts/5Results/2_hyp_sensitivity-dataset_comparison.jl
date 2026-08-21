@@ -1,35 +1,29 @@
+# Section 2 (generalisation): do hyperparameters trained on ANG2 transfer to a
+# different dataset (different IMU, different user)?
+#
+# Design: one frozen hyperparameter set, applied to both datasets, 9 + 10 trials,
+# train_ratio = 0.5, no injected noise. Varied: dataset x estimator.
+
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+include("_common.jl")
 using OrderedCollections, DataFrames
 
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2",
-    "DCSC" => "data/dcsc_optitrack"
-)
-
-# 1. Define datasets / trials to process
+# 1. Datasets / trials
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
-    "Angermann" => (data_dir["ANG2"], [1, 2, 3, 4, 8, 9, 13, 15, 16]),
-    "TuDCSC" => (data_dir["DCSC"], [1, 2, 3, 4, 5, 6, 8, 10, 12, 14]),
+    "Angermann" => (data_dir("ANG2"), trial_ids("ANG2")),
+    "TuDCSC" => (data_dir("DCSC"), trial_ids("DCSC")),
 )
 
 # 2. Align INS / GT trajectories for every trial
 aligned = HybridZuptInsJl.collect_aligned_trajectories(data_dict)
 
-## 3. Load HSGP hyperparameters / Input feature type
-m=200
+## 3. Hyperparameters (trained on ANG2 -- that is the point of this figure)
+m = 200
 hsgp_p_key = 42
-hsgp_p_path = Dict{Int,String}(
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
-)[hsgp_p_key]
-hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_m=m)
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
+hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
-## 4. Define correction methods to compare
+## 4. Correction methods to compare
 estimators = OrderedDict(
     "Base (no correction)" => HybridZuptInsJl.BaseEstimator,
     "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
@@ -39,7 +33,6 @@ estimators = OrderedDict(
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
-
 train_ratios = [0.5]
 
 ## 5. Run the sweep
@@ -53,18 +46,29 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
     output_channels,
 )
 
-## 6. Plot RMSE and RMSE-rate for train_ratio = 0.5
-import CairoMakie, Dates
-base_dir = "out/Results/2_HypSensitivity/DatasetComprison"
+## 6. Plot
+# n per box is small (9 and 10 trials), so the paired view below is the one to
+# read for a claim; the boxplot is the distributional summary.
+const SECTION = "2_HypSensitivity/DatasetComparison"
 
-time = string(Dates.now())
-filename = "$(time)_dataset_comparison.svg"
-path = joinpath(base_dir, filename)
-CairoMakie.with_theme(CairoMakie.theme_ggplot2()) do
-    fig_rmse = HybridZuptInsJl.boxplot_dataset_comparison(
+results_figure() do
+    HybridZuptInsJl.boxplot_dataset_comparison(
         results_df;
         metric=:rmse_rate,
         train_ratio=0.5,
-        save_path=path,
+        save_path=stamped(SECTION, "dataset_comparison"),
+    )
+end
+
+# Same trials go through every estimator, so the design is paired. Plot the
+# per-trial difference against the uncorrected baseline rather than reading two
+# independent-looking boxes side by side.
+results_figure() do
+    HybridZuptInsJl.plot_paired_differences(
+        results_df;
+        metric=:rmse_rate,
+        baseline="Base (no correction)",
+        group=:dataset_name,
+        save_path=stamped(SECTION, "dataset_comparison_paired"),
     )
 end

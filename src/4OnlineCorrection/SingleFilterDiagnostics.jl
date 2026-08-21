@@ -57,6 +57,11 @@ Base.@kwdef struct StepDiagnostics
     # --- ZUPT epochs (velocity consistency, needs no ground truth) --------
     zupt_k::Vector{Int} = Int[]
     zupt_nis::Vector{Float64} = Float64[]
+    zupt_K_att::Vector{Float64} = Float64[]   # ||K[7:9,:]||, ZUPT->attitude authority
+    zupt_P_att::Vector{Float64} = Float64[]   # tr(P[7:9,7:9]) at the ZUPT epoch
+    zupt_K_pos::Vector{Float64} = Float64[]   # ||K[1:3,:]||, ZUPT->position authority
+    zupt_P_pos::Vector{Float64} = Float64[]   # tr(P[1:3,1:3]) at the ZUPT epoch
+    zupt_dpos::Vector{Float64} = Float64[]    # ||position correction applied by this ZUPT||
 end
 
 Base.length(d::StepDiagnostics) = length(d.k)
@@ -227,6 +232,46 @@ function zupt_consistency(diagnostics::StepDiagnostics)
     hi = quantile(Chisq(3 * n), 0.975) / n
     return (mean_nis=m, expected=3.0, lower=lo, upper=hi,
         consistent=lo <= m <= hi, n=n)
+end
+
+"""
+    zupt_gain_series(diagnostics; from_k)
+
+Per-ZUPT-epoch view of how much position-correction authority the ZUPT actually
+has. Position is never directly observed in a ZUPT-aided INS: the only channel
+that walks back the error accumulated during the swing phase is the
+position<->velocity cross-covariance, through the position rows of the ZUPT gain
+
+    K[1:3, :] = P[1:3, 4:6] * S^-1,    S = P[4:6,4:6] + R_meas
+
+so `K_pos` is the quantity a GP covariance update starves when it shrinks the
+absolute `P[1:3,1:3]`. `dpos` is the position correction that gain actually
+delivered at each epoch, and `cum_dpos` its running total -- the integrated
+shortfall is what shows up as position RMSE.
+
+`from_k` restricts to epochs at or after a sample index (e.g. the start of the
+test half, where the correction is active). Attitude counterparts are returned
+alongside as a control: they should be much less affected.
+"""
+function zupt_gain_series(diagnostics::StepDiagnostics; from_k::Int=1)
+    isempty(diagnostics.zupt_k) &&
+        error("No ZUPT epochs recorded; the ZUPT branch fills these.")
+    length(diagnostics.zupt_K_pos) == length(diagnostics.zupt_k) ||
+        error("ZUPT gain fields not recorded for this run.")
+
+    sel = findall(>=(from_k), diagnostics.zupt_k)
+    isempty(sel) && error("No ZUPT epochs at or after k=$from_k.")
+
+    dpos = diagnostics.zupt_dpos[sel]
+    return (k=diagnostics.zupt_k[sel],
+        P_pos=diagnostics.zupt_P_pos[sel],
+        K_pos=diagnostics.zupt_K_pos[sel],
+        dpos=dpos, cum_dpos=cumsum(dpos),
+        P_att=diagnostics.zupt_P_att[sel],
+        K_att=diagnostics.zupt_K_att[sel],
+        mean_K_pos=mean(diagnostics.zupt_K_pos[sel]),
+        mean_P_pos=mean(diagnostics.zupt_P_pos[sel]),
+        total_dpos=sum(dpos), n=length(sel))
 end
 
 """

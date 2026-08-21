@@ -165,9 +165,9 @@ end
 
 function result_performance(res::Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}})
     _, _, corr_traj, gt_traj, step_seg = res
-    rmse = rmse(corr_traj, gt_traj[step_seg])[end]
-    rmse_rate = rmse / total_distance(gt_traj[step_seg])
-    return rmse, rmse_rate
+    _rmse = rmse(corr_traj, gt_traj[step_seg])[end]
+    _rmse_rate = _rmse / total_distance(gt_traj[step_seg])
+    return _rmse, _rmse_rate
 end
 
 function result_performance(res::Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}, train_ratio::Float64)
@@ -537,6 +537,7 @@ function run_online_correction_sweep(
         model=Any[],
         rmse=Float64[],
         rmse_rate=Float64[],
+        rmse_yaw=Float64[],
     )
 
     n_ok = 0
@@ -586,6 +587,9 @@ function run_online_correction_sweep(
                             n_step_cutoff = floor(Int, train_ratio * N_step)
                             _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
                             _rmse_rate = _rmse / total_distance(gt_step_traj_clean[n_step_cutoff:end])
+                            # Yaw is scored separately: `rmse` is horizontal position only,
+                            # so a yaw-channel experiment is otherwise never measured on yaw.
+                            _rmse_yaw = rmse_yaw(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
 
                             push!(df, (
                                 dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
@@ -594,11 +598,11 @@ function run_online_correction_sweep(
                                 noise_spec.pos_std, noise_spec.pos_bias,
                                 noise_spec.att_std, noise_spec.att_bias,
                                 zupt, step_seg, corr_traj, io_data, model,
-                                _rmse, _rmse_rate,
+                                _rmse, _rmse_rate, _rmse_yaw,
                             ))
                             n_ok += 1
                         catch e
-                            @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, pos_std=$pos_std, pos_bias=$pos_bias, att_std=$att_std, att_bias=$att_bias)" exception = e
+                            @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, noise=$(noise_spec.tag))" exception = e
                             n_fail += 1
                         end
                     end

@@ -243,6 +243,33 @@ function rmse(tr::Trajectory, gt::Trajectory)
     return sqrt.(cumsum(err_sq) ./ (1:n))
 end
 
+"""
+    rmse_yaw(tr::Trajectory, gt::Trajectory) -> Vector{Float64}
+
+Cumulative RMS yaw error [rad], same running-mean convention as [`rmse`](@ref):
+element `k` is the RMSE over samples `1:k`, so callers take `[end]` for the
+window RMSE.
+
+Exists because `rmse` scores horizontal position only (`pos[1:2,:]`). Any
+experiment about the yaw channel — the yaw-only correction comparison in
+`scripts/5Results/3_yaw_channel-*`, for instance — is otherwise measured
+entirely in x/y and never on the quantity it claims to study.
+
+Errors are wrapped to (-π, π] before squaring, so a trajectory that differs
+from ground truth by a full turn scores 0 rather than 2π.
+"""
+function rmse_yaw(tr::Trajectory, gt::Trajectory)
+    is_compatible(tr, gt) || throw(ArgumentError("incompatible time series"))
+    n = size(tr.pos, 2)
+    err_sq = Vector{Float64}(undef, n)
+    for k in 1:n
+        ψ_tr = matrix_to_euler(tr.R_nb[:, :, k])[3]
+        ψ_gt = matrix_to_euler(gt.R_nb[:, :, k])[3]
+        err_sq[k] = wrap_pi(ψ_tr - ψ_gt)^2
+    end
+    return sqrt.(cumsum(err_sq) ./ (1:n))
+end
+
 function total_distance(tr::Trajectory; dims=2)::Float64
     @assert (dims == 2 || dims == 3) "Can only compute distance in 2D or 3D got: $(dims)D"
 

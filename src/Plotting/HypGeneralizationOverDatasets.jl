@@ -31,8 +31,8 @@ function boxplot_dataset_comparison(
     train_ratio::Union{Real,Nothing}=nothing,
     save_path::Union{String,Nothing}=nothing,
 )
-    metric in (:rmse, :rmse_rate) || throw(ArgumentError("metric must be :rmse or :rmse_rate"))
-    metric_name = metric == :rmse ? "RMSE" : "RMSE rate"
+    check_metric(metric)
+    metric_name = metric_label(metric)
 
     plot_df = isnothing(train_ratio) ? df : df[df.train_ratio .== train_ratio, :]
     isempty(plot_df) && error("No rows to plot" * (isnothing(train_ratio) ? "" : " for train_ratio=$train_ratio"))

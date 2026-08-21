@@ -32,9 +32,7 @@ function plot_corrector_boxplots(
     show_outliers::Bool=true,
     corrector_names::Optional{AbstractVector{<:AbstractString}}=nothing
 )
-    if !(metric in (:rmse, :rmse_rate))
-        throw(ArgumentError("metric must be :rmse or :rmse_rate"))
-    end
+    check_metric(metric)
 
     ratios = sort(unique(df.train_ratio))
     correctors = isnothing(corrector_names) ? sort(unique(df.corrector)) : corrector_names
@@ -50,7 +48,7 @@ function plot_corrector_boxplots(
     offsets = ((1:n_correctors) .- (n_correctors + 1) / 2) * box_width
 
     fig = Figure(size=(900, 600))
-    title_str = metric == :rmse ? "RMSE" : "RMSE rate"
+    title_str = metric_title(metric)
     ax = Axis(fig[1, 1],
         xlabel="Train ratio",
         ylabel=title_str,

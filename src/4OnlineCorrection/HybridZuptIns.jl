@@ -12,6 +12,15 @@ function hybrid_zupt_aided_ins(
     R_inflation::Float64=1.0,                    # y_cov scale factor for the sweep
     measurement_source::Symbol=:gp,              # :gp | :oracle | :oracle_noisy
     zero_xcov::Bool=true,                        # ablation for the P[1:2,9] zeroing
+    p_split::Symbol=:none,                       # :none | :gain_only | :downstream_only
+    # Attribution ablation. P feeds two paths: the GP Kalman gain, and everything
+    # downstream (ZUPT gain, RTS smoother, reported P). `p_split` runs a parallel
+    # covariance so the GP shrink can be routed to exactly one of them:
+    #   :gain_only        -> only the GP gain sees the shrunken P
+    #   :downstream_only  -> only ZUPT/smoother/reported P see the shrunken P
+    zupt_gain_source::Symbol=:P,                 # :P | :P_alt — take the ZUPT gain
+    # from the unshrunk parallel covariance, to separate the ZUPT-gain path from
+    # the RTS-smoother path within `:downstream_only`
     diag_rec::StepDiagnostics=StepDiagnostics()
 )
     is_compatible(inertial, gt_traj) ||
@@ -84,6 +93,11 @@ function hybrid_zupt_aided_ins(
 
     ΔP = Matrix{Float64}(undef, 9, 9)
 
+    # Parallel covariance for the p_split attribution ablation. Propagated and
+    # ZUPT-updated exactly like P; differs from it only in whether the GP
+    # measurement update is allowed to shrink it.
+    P_alt = copy(P[:, :, 1])
+
     var_hist = Vector{Float64}[]
     pred_nis = Vector{Float64}[]
 
@@ -110,6 +124,7 @@ function hybrid_zupt_aided_ins(
             dx[:, n] = F_store[:, :, n] * dx[:, n-1]
             P[:, :, n] = F_store[:, :, n] * P[:, :, n-1] * F_store[:, :, n]' + G * Q * G'
             ΔP = F_store[:, :, n] * ΔP * F_store[:, :, n]' + G * Q * G'
+            P_alt = F_store[:, :, n] * P_alt * F_store[:, :, n]' + G * Q * G'
             dx_timeupd[:, n] = dx[:, n]
             P_timeupd[:, :, n] = P[:, :, n]
             push!(var_hist, diag(P[:, :, n]))
@@ -117,20 +132,31 @@ function hybrid_zupt_aided_ins(
             if zupt[n]
                 S = H * P[:, :, n] * H' + R_meas
                 ΔS = H * ΔP * H' + R_meas
-                K = P[:, :, n] * H' / S
+                K = zupt_gain_source === :P_alt ?
+                    P_alt * H' / (H * P_alt * H' + R_meas) :
+                    P[:, :, n] * H' / S
                 ΔK = ΔP * H' / ΔS
 
                 ν_z = x[4:6, n] .- dx[4:6, n]          # innovation, dof = 3
                 push!(diag_rec.zupt_k, n)
                 push!(diag_rec.zupt_nis, mahalanobis(ν_z, S))
+                push!(diag_rec.zupt_K_att, norm(K[7:9, :]))
+                push!(diag_rec.zupt_P_att, tr(P[7:9, 7:9, n]))
+                push!(diag_rec.zupt_K_pos, norm(K[1:3, :]))
+                push!(diag_rec.zupt_P_pos, tr(P[1:3, 1:3, n]))
+                push!(diag_rec.zupt_dpos, norm((K*(dx[4:6, n] - x[4:6, n]))[1:3]))
 
                 dx[:, n] = dx[:, n] - K * (dx[4:6, n] - x[4:6, n])
                 P[:, :, n] = (I9 - K * H) * P[:, :, n]
                 ΔP = (I9 - ΔK * H) * ΔP
+
+                K_alt = P_alt * H' / (H * P_alt * H' + R_meas)
+                P_alt = (I9 - K_alt * H) * P_alt
             end
 
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
             ΔP = (ΔP + ΔP') / 2
+            P_alt = (P_alt + P_alt') / 2
             push!(var_hist, diag(P[:, :, n]))
 
             if update!(step_detector, zupt[n])
@@ -244,6 +270,8 @@ function hybrid_zupt_aided_ins(
                     H_gt,
                     Diagonal(sigma_gt .^ 2) #.* 10e1
                 )
+                _, P_alt = measurement_update(
+                    zeros(Float64, 9), P_alt, z_gt, H_gt, Diagonal(sigma_gt .^ 2))
                 push!(var_hist, diag(P[:, :, curr_step]))
 
                 # dx is (nominal - true) -> SUBTRACT it, as the ZUPT path does
@@ -305,17 +333,24 @@ function hybrid_zupt_aided_ins(
                     y_estim
                 end
 
-                P_pre = copy(P[:, :, curr_step])
+                # Which covariance sets the GP Kalman gain. Under :none this is
+                # just P, i.e. gain and downstream share one covariance.
+                P_gain = p_split === :none ? P[:, :, curr_step] : P_alt
+                P_pre = copy(P_gain)
                 S = H_correction * P_pre * H_correction' + Matrix(y_cov)
 
-                if cov_update
-                    dx[:, curr_step], P[:, :, curr_step] = measurement_update(
-                        zeros(Float64, 9), P[:, :, curr_step],
-                        y_meas, H_correction, Matrix(y_cov))
-                else
-                    dx[:, curr_step], _ = measurement_update(
-                        zeros(Float64, 9), P[:, :, curr_step],
-                        y_meas, H_correction, Matrix(y_cov))
+                dx[:, curr_step], P_upd = measurement_update(
+                    zeros(Float64, 9), P_gain,
+                    y_meas, H_correction, Matrix(y_cov))
+
+                if p_split === :none
+                    cov_update && (P[:, :, curr_step] = P_upd)
+                elseif p_split === :gain_only
+                    # only the gain path carries the shrink forward
+                    P_alt = P_upd
+                elseif p_split === :downstream_only
+                    # only ZUPT / smoother / reported P carry the shrink forward
+                    P[:, :, curr_step] = P_upd
                 end
 
                 record_step!(diag_rec;

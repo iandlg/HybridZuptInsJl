@@ -164,18 +164,21 @@ function plot_input_features(
         labels = ["Feature $i" for i in 1:n_channel]
     end
 
-    colors = [:red, :blue, :green, :orange, :purple]
+    palette = [:red, :blue, :green, :orange, :purple]
     fig = Figure(size=(800, 400))
     ax = Axis(fig[1, 1]; xlabel="Time (s)", ylabel="Value", title=title,
         xgridvisible=true, ygridvisible=true)
 
-    for i in 1:3
-        lines!(ax, t, features[i, :]; color=colors[i], linewidth=1.2, label=labels[i])
+    # Plot every channel present. Previously hard-coded to 1:3, which silently
+    # dropped channels 4+ for TWOD_STEP_YAW / THREED_STEP_DT_YAW features.
+    for i in 1:n_channel
+        color = palette[mod1(i, length(palette))]
+        lines!(ax, t, features[i, :]; color=color, linewidth=1.2, label=labels[i])
 
         if !isnothing(feature_std)
             label = "Feature $i ±σ"
             band!(ax, t, features[i, :] .- feature_std[i, :], features[i, :] .+ feature_std[i, :];
-                color=(colors[i], 0.15), label=label)
+                color=(color, 0.15), label=label)
 
         end
     end

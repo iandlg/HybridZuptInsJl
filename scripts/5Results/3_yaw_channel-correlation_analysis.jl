@@ -1,17 +1,20 @@
+# Section 3 (yaw channel): how much of the correction target do the input
+# features actually explain? Low input/output correlation on the yaw channel is
+# the justification for treating yaw differently from x/y.
+
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using OrderedCollections, DataFrames, Statistics, GLMakie
+include("_common.jl")
+using OrderedCollections, DataFrames, Statistics
 
-
-# Parameters (same as in 2_batch_correction.jl)
+# WAS: trial_ids = [1, 2, 3, 4, 5, 6, 8, 10, 12] under data_key = "ANG2".
+# That is the DCSC list. Because trial ids are just integers, running it against
+# ANG2 silently selected a different set of walks instead of erroring, so the
+# published heatmap does not describe the trials its caption claims. Now taken
+# from the shared table, which is keyed by dataset.
 data_key = "ANG2"
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2",
-    "DCSC" => "data/dcsc_optitrack"
-)[data_key]
-
-trial_ids = [1, 2, 3, 4, 5, 6, 8, 10, 12]
+data_dir_path = data_dir(data_key)
+ids = trial_ids(data_key)
 
 
 frames = [
@@ -31,7 +34,7 @@ for frame in frames
     for ft in feature_types
         # Load data
         dataset = HybridZuptInsJl.collect_dataset(
-            data_dir, trial_ids;
+            data_dir_path, ids;
             frame=frame,
             feature_type=ft,
         )
@@ -73,15 +76,12 @@ println("Combinations ranked by first canonical correlation:")
 display(df)
 
 ## Plot
-using Dates
-time = string(Dates.now())
-
-out_dir = "out/Results/3_yaw_channel/Correlation_Analysis"
-path = joinpath(out_dir, "$(time)_correlation_analysis.svg")
-mkpath(out_dir)
-GLMakie.with_theme(GLMakie.theme_ggplot2()) do
-    for r in results
-        display(GLMakie.Screen(), r[6])
-    end
-    save(path, results[end][6])
+# CairoMakie, not GLMakie: this writes an SVG for the thesis and must run
+# headless. The previous version opened a GLMakie Screen per result, which
+# fails without a display and produced raster-backed output when it did run.
+const SECTION = "3_yaw_channel/Correlation_Analysis"
+results_figure() do
+    path = stamped(SECTION, "correlation_analysis")
+    CairoMakie.save(path, results[end][6])
+    @info "Saved figure: $path"
 end

@@ -735,6 +735,13 @@ mutable struct DecoupledHsgpEstimator <: AbstractEstimator
     Φ::AbstractMatrix{Float64}
     per_dim_eigvals::AbstractMatrix{Float64}
     σ_n::AbstractVector{Float64}
+    # When true, `learned_measurement_update!` adds the GP observation-noise
+    # hyperparameter σ_n² to the predictive covariance, i.e. it reports Var[y]
+    # rather than Var[f]. Defaults to `false`, which reproduces the historical
+    # behaviour exactly. NOTE: with `false`, `σ_n` is loaded from the
+    # hyperparameter file and then never read — so the noise hyperparameter has
+    # no effect whatsoever on this estimator. See notes/004.
+    pred_includes_noise::Bool
 
     ws_state::KalmanWorkspace{Float64}
     ws_hsgp::KalmanWorkspace{Float64}
@@ -745,7 +752,8 @@ mutable struct DecoupledHsgpEstimator <: AbstractEstimator
 end
 
 function DecoupledHsgpEstimator(N::Int;
-    params::HsgpParameters, corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...
+    params::HsgpParameters, corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
+    pred_includes_noise::Bool=false, kwargs...
 )::DecoupledHsgpEstimator
 
     @assert N > 1 "Invalid number of allocations, got $N"
@@ -776,6 +784,7 @@ function DecoupledHsgpEstimator(N::Int;
         zeros(Float64, p, params.m * p),                # Φ
         zeros(Float64, params.m, params.d),             # per_dim_eigvals
         zeros(Float64, p),                              # σ_n
+        pred_includes_noise,                            # pred_includes_noise
         KalmanWorkspace{Float64}(6, 4),
         KalmanWorkspace{Float64}(params.m * p, p),
         correction_mask,
@@ -951,6 +960,13 @@ function learned_measurement_update!(c::DecoupledHsgpEstimator;
     pred_masked = c.Φ * c.β
     Σ_pred_masked = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z'   # Predictive + input uncertainty
 
+    # Optionally report Var[y] instead of Var[f] by adding the GP observation
+    # noise. σ_n is a hyperparameter of the *normalised* output, so it must be
+    # added here, before the denormalisation below. Off by default.
+    if c.pred_includes_noise
+        Σ_pred_masked += Diagonal(c.σ_n .^ 2)
+    end
+
     # Denormalise (masked channels only)
     pred_masked = pred_masked .* c.params.output_stats[2][mask] .+ c.params.output_stats[1][mask]
     Σ_pred_masked = Diagonal(c.params.output_stats[2][mask]) * Σ_pred_masked * Diagonal(c.params.output_stats[2][mask])
@@ -1031,8 +1047,14 @@ mutable struct JointHsgpEstimator <: AbstractEstimator
     p::Int                          # number of corrected channels (length(correction_mask))
 end
 
+# NOTE: `kwargs...` for parity with every other estimator constructor, all of
+# which absorb unknown keywords. Without it, generic factory call sites (e.g.
+# make_rmse_evaluator) raise a MethodError on this type alone.
+# `pred_includes_noise` is accepted and ignored here: JointHsgpEstimator never
+# reads the σ_n hyperparameter at all (see initialize_corrector! below).
 function JointHsgpEstimator(N::Int;
-    params::HsgpParameters, corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw]
+    params::HsgpParameters, corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
+    kwargs...
 )::JointHsgpEstimator
     @assert N > 1 "Invalid number of prealocations"
 
