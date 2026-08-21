@@ -1,27 +1,25 @@
+# Section 2 (sensitivity): how sensitive is performance to the GP
+# hyperparameters, one at a time?
+#
+# LIMITS OF THIS DESIGN, worth stating in the thesis rather than discovering in
+# the viva: n = 1 trajectory, one noise realisation, one-at-a-time perturbation
+# (so no interactions), and the pipeline is deterministic given the fixed seed,
+# which means the y-axis has no noise floor to compare the curves against. A
+# 5% wiggle here is not known to be larger than run-to-run variation, because
+# run-to-run variation is zero by construction. Treat it as a screening
+# experiment that says which parameters are worth studying properly.
+
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+include("_common.jl")
 
 # Choose Parameters file
 hsgp_p_key = 42
-hsgp_p_path = Dict{Int,String}(
-    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
-)[hsgp_p_key]
-
-# Load parameters with corresponding metatdata
 m = 200
-hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_m=m)
+hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
-data_key = "ANG2" # meta["data_key"]
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2"
-)[data_key]
-
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
+data_key = "ANG2"
+data_dir_path = data_dir(data_key)
 
 trial_id = 15
 train_ratio = 0.45
@@ -30,10 +28,20 @@ output_channel_idxs = [1, 2, 4]
 
 noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)")
 
+# NOTE: `pred_includes_noise` controls whether the GP `noise` hyperparameter
+# reaches the estimator at all. With the default `false`, DecoupledHsgpEstimator
+# loads sigma_n and never reads it, so every `noise` row of this sweep returns a
+# bit-identical RMSE and the figure shows three flat lines that look like an
+# insensitivity result but are a dead knob. vary_hsgp_parameters now warns when
+# that happens. Set it to `true` to sweep the noise hyperparameters meaningfully.
+pred_includes_noise = false
+
 rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
-    data_dir, trial_id, train_ratio, FEATURE_TYPE, FRAME;
-    m=m, output_channel_idxs=output_channel_idxs, hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator,
-    noise_spec=noise_spec
+    data_dir_path, trial_id, train_ratio, FEATURE_TYPE, FRAME;
+    m=m, output_channel_idxs=output_channel_idxs,
+    hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator,
+    noise_spec=noise_spec,
+    pred_includes_noise=pred_includes_noise,
 )
 
 # Experiment variables
@@ -60,8 +68,10 @@ df = HybridZuptInsJl.vary_hsgp_parameters(
 ## Save things 
 
 
-using JSON, Dates, CSV
-outdir = "out/Results/2_HypSensitivity/SensitivityAnalysis/data"
+using JSON, CSV
+const SECTION = "2_HypSensitivity/SensitivityAnalysis"
+outdir = joinpath("out/Results", SECTION, "data")
+mkpath(outdir)
 
 # Construct filenames
 time = string(Dates.now())
@@ -84,6 +94,11 @@ metadata = Dict(
     "baseline_included" => baseline_included,
     "grid" => HybridZuptInsJl.grid_to_dict(specs[2]),
     "timestamp" => time,
+    "trial_id" => trial_id,
+    "train_ratio" => train_ratio,
+    "noise_spec_tag" => noise_spec.tag,
+    "pred_includes_noise" => pred_includes_noise,
+    "hsgp_p_key" => hsgp_p_key,
     "base_parameters_metadata" => meta
 )
 
@@ -94,30 +109,42 @@ end
 println("Saved CSV: $csv_path")
 println("Saved JSON: $json_path")
 ## Plot Hp sensitivity
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
-using CairoMakie
-outdir = "out/Results/2_HypSensitivity/SensitivityAnalysis/data"
-basename_key = 63
-basename = Dict(
-    59 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T14:50:07.279",
-    60 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:10:36.451",
-    61 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:19:22.230",
-    62 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-14T15:26:20.692",
-    63 => "ANG215_HEADING_TWOD_STEP_YAW_2026-08-19T12:17:58.504"
-)[basename_key]
+# Set `replot_basename` to re-plot a previously saved sweep, or leave it
+# `nothing` to plot the sweep just computed above. The old version always
+# re-read a hard-coded basename from a dict of timestamps, so editing the
+# compute cell above had no effect on the figures unless you also remembered to
+# add a key down here.
+replot_basename = nothing
 
-csv_file = joinpath(outdir, "$basename.csv")
-json_file = joinpath(outdir, "$basename.json")
-
-df, metadata = HybridZuptInsJl.load_hp_variation_results(csv_file, json_file)
-
-grid = HybridZuptInsJl.grid_from_dict(metadata["grid"])
-log_range = (
-    float(metadata["log10_range"][1]), float(metadata["log10_range"][2]))
-with_theme(theme_ggplot2()) do
-    HybridZuptInsJl.plot_hp_sensitivity(df, grid, log_range; save_path="out/Results/2_HypSensitivity/SensitivityAnalysis/$(basename)_param_var.svg")
+if isnothing(replot_basename)
+    plot_df, plot_meta = df, metadata
+    plot_name = base_name
+else
+    plot_df, plot_meta = HybridZuptInsJl.load_hp_variation_results(
+        joinpath(outdir, "$replot_basename.csv"),
+        joinpath(outdir, "$replot_basename.json"))
+    plot_name = replot_basename
 end
-with_theme(theme_ggplot2()) do
-    HybridZuptInsJl.plot_max_relative_change(df; color_offset=2, save_path="out/Results/2_HypSensitivity/SensitivityAnalysis/$(basename)_max_rel_change.svg")
+
+grid = HybridZuptInsJl.grid_from_dict(plot_meta["grid"])
+plot_log_range = (float(plot_meta["log10_range"][1]), float(plot_meta["log10_range"][2]))
+
+results_figure() do
+    HybridZuptInsJl.plot_hp_sensitivity(plot_df, grid, plot_log_range;
+        save_path=results_path(SECTION, "$(plot_name)_param_var.svg"))
+end
+
+# Signed range: which parameters can be improved, and in which direction.
+# This is the one to read first. `plot_max_relative_change` below reduces each
+# parameter to maximum(relative_change), which for the yaw length scale is 0.0 --
+# it renders as a zero-height bar indistinguishable from a hyperparameter that
+# never reaches the code, while its true range is [-0.60, 0.0].
+results_figure() do
+    HybridZuptInsJl.plot_signed_relative_change(plot_df;
+        save_path=results_path(SECTION, "$(plot_name)_signed_rel_change.svg"))
+end
+
+results_figure() do
+    HybridZuptInsJl.plot_max_relative_change(plot_df; color_offset=2,
+        save_path=results_path(SECTION, "$(plot_name)_max_rel_change.svg"))
 end

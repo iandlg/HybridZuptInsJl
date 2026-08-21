@@ -9,35 +9,27 @@
 ### the ZUPT gain (`p_split=:downstream_only, zupt_gain_source=:P_alt`); if that
 ### curve lands on `cov_update=false`, the ZUPT gain is the whole mechanism and
 ### (b) is causal rather than merely correlated.
+### NOTE ON SCOPE: this script runs ONE trial. The 14-trial evidence quoted in
+### notes/002 (paired win count 10/14, mean delta 0.283 m) is not reproduced by
+### anything in this repository -- the script that produced it no longer exists.
+### Panel (c) is a strong causal argument on this trial; the generality claim
+### needs the multi-trial loop restored.
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
-using OrderedCollections, Statistics, LinearAlgebra, Printf, GLMakie
+include("_common.jl")
+using OrderedCollections, Statistics, LinearAlgebra, Printf
 
 ## 1. HSGP hyperparameters
 m = 200
 hsgp_p_key = 42
-hsgp_p_path = Dict{Int,String}(
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no output norm; DCSC
-    44 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T12:56:03.443.json", # same; ANG2 higher lower noise bound
-)[hsgp_p_key]
-
-params, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-params = HybridZuptInsJl.basecopy(params; new_m=m)
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
+params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 2. Track
 data_key = "DCSC"
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2",
-    "DCSC" => "data/dcsc_optitrack"
-)[data_key]
 trial_id = 5
 
 ins_traj_aligned, gt_traj, zupt, segs, inertial, simdata =
-    HybridZuptInsJl.compute_aligned_ins_trajectory(data_dir, trial_id)
+    HybridZuptInsJl.compute_aligned_ins_trajectory(data_dir(data_key), trial_id)
 
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
@@ -65,6 +57,7 @@ configs = OrderedDict{String,NamedTuple}(
 
 zupt_runs = OrderedDict{String,NamedTuple}()   # panels (a) and (b)
 pos_errors = OrderedDict{String,Any}()          # panel (c)
+nees_runs = OrderedDict{String,NamedTuple}()    # NEES consistency figure
 
 for (name, kw) in configs
     _, _, _, _, _, _, _, _, _, diag, quat, x, P = HybridZuptInsJl.hybrid_zupt_aided_ins(
@@ -80,6 +73,7 @@ for (name, kw) in configs
     if !occursin("counterfactual", name)
         zupt_runs[name] = HybridZuptInsJl.zupt_gain_series(diag; from_k=k0)
     end
+    nees_runs[name] = nees
     pos_errors["$name  (RMSE $(round(rmse.pos, digits=3)) m)"] =
         (collect(test_ks), [norm(x[1:3, k] .- gt_traj.pos[:, k]) for k in test_ks])
 
@@ -94,22 +88,25 @@ for (name, r) in zupt_runs
 end
 
 ## 4. Figure
-fig = HybridZuptInsJl.plot_zupt_starvation(
-    zupt_runs; poserr=pos_errors,
-    title="cov_update=true starves the ZUPT position correction  ($data_key trial $trial_id, test half)")
-display(fig)
+const SECTION = "6_SingleFilter"
+fig_title = "cov_update=true starves the ZUPT position correction  ($data_key trial $trial_id, test half)"
 
-## 5. Save
-import CairoMakie, Dates
-base_dir = "out/Results/6_SingleFilter"
-mkpath(base_dir)
-
-time = string(Dates.now())
-path = joinpath(base_dir, "$(time)_zupt_starvation_$(data_key)$(trial_id).svg")
-
-CairoMakie.with_theme(CairoMakie.theme_ggplot2()) do
+results_figure() do
     HybridZuptInsJl.plot_zupt_starvation(
-        zupt_runs; poserr=pos_errors, save_path=path,
-        title="cov_update=true starves the ZUPT position correction  ($data_key trial $trial_id, test half)")
+        zupt_runs; poserr=pos_errors,
+        save_path=stamped(SECTION, "zupt_starvation_$(data_key)$(trial_id)"),
+        title=fig_title)
 end
-println("saved -> ", path)
+
+## 5. NEES consistency figure.
+# The NEES numbers and consistency ratios were previously printed to stdout and
+# appeared in no figure, even though plot_nees_comparison exists and takes
+# exactly the NamedTuples already built above. NEES is the diagnostic that
+# discriminates cleanly here (1597 vs 3.2 in notes/002), so it belongs in the
+# chapter rather than in a terminal scrollback.
+results_figure() do
+    HybridZuptInsJl.plot_nees_comparison(
+        nees_runs; block=:pos,
+        title="Position NEES, $data_key trial $trial_id (test half)",
+        save_path=stamped(SECTION, "nees_pos_$(data_key)$(trial_id)"))
+end

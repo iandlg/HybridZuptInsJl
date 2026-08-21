@@ -62,5 +62,6 @@ include("Plotting/OnlineHpSensitivity.jl")
 include("Plotting/TrainingDataQualityAnalysis.jl")
 include("Plotting/HypGeneralizationOverDatasets.jl")
 include("Plotting/NoiseRobustness.jl")
+include("Plotting/PairedComparison.jl")
 end
 

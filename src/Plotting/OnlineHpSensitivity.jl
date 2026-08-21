@@ -245,3 +245,79 @@ function plot_max_relative_change(
     isnothing(save_path) || save(save_path, fig)
     return fig
 end
+"""
+    plot_signed_relative_change(df; exclude_baseline=true, save_path=nothing,
+                                sort_by=:span, show_text_val=false)
+
+Signed tornado plot of the sensitivity sweep: for each parameter, the full range
+of relative RMSE change observed, from the most-improving to the most-degrading
+perturbation, with a marker at each tested point.
+
+Complements [`plot_max_relative_change`](@ref), which reduces each parameter to
+`maximum(relative_change)` -- a *signed* max. That discards direction, and
+direction is frequently the whole result. Worked example from
+`out/Results/2_HypSensitivity/SensitivityAnalysis/data/ANG215_..._2026-08-19T12:17:58.504.csv`:
+the yaw length scale has `maximum(relative_change) = +0.014`, so it reads as a
+1.4% effect in the max-bar chart, while its *minimum* is `-0.603` -- every
+perturbation tested, in both directions, improved RMSE by ~60%. The baseline
+value sits on a local maximum. The max-bar chart cannot show that; this one puts
+it at the top.
+
+`sort_by` is `:span` (widest total range first), `:min` (best improvement first)
+or `:max`.
+"""
+function plot_signed_relative_change(df::DataFrame;
+    exclude_baseline::Bool=true,
+    save_path::Union{String,Nothing}=nothing,
+    sort_by::Symbol=:span,
+    show_text_val::Bool=false,
+    figsize::Tuple{Int,Int}=(900, 520))
+
+    work = exclude_baseline ? df[df.parameter.!="baseline", :] : copy(df)
+    isempty(work) && throw(ArgumentError("no rows to plot"))
+
+    g = combine(groupby(work, [:parameter, :type]),
+        :relative_change => minimum => :lo,
+        :relative_change => maximum => :hi)
+    g.span = g.hi .- g.lo
+
+    key = sort_by === :span ? :span : sort_by === :min ? :lo : :hi
+    rev = sort_by !== :min
+    sort!(g, key; rev=rev)
+
+    types = unique(g.type)
+    palette = Makie.wong_colors()
+    tcolor = Dict(t => palette[mod1(i, length(palette))] for (i, t) in enumerate(types))
+
+    n = nrow(g)
+    fig = Figure(size=figsize)
+    ax = Axis(fig[1, 1];
+        xlabel="Relative RMSE change vs baseline  (negative = better than baseline)",
+        yticks=(1:n, g.parameter),
+        title="Signed sensitivity range over the tested multipliers")
+    vlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
+
+    for (i, row) in enumerate(eachrow(g))
+        c = tcolor[row.type]
+        lines!(ax, [row.lo, row.hi], [float(i), float(i)]; color=c, linewidth=6)
+        # every individual tested point, so a flat parameter is visibly flat
+        pts = work[work.parameter.==row.parameter, :relative_change]
+        scatter!(ax, pts, fill(float(i), length(pts));
+            color=:white, strokecolor=c, strokewidth=1.5, markersize=8)
+        if show_text_val
+            text!(ax, row.lo, float(i); text=string(round(row.lo, sigdigits=2)),
+                align=(:right, :center), offset=(-6, 0), fontsize=10)
+        end
+    end
+
+    Legend(fig[1, 2],
+        [PolyElement(color=tcolor[t]) for t in types],
+        collect(types), "Parameter type"; framevisible=false)
+
+    if !isnothing(save_path)
+        mkpath(dirname(save_path))
+        save(save_path, fig)
+        @info "Saved figure: $save_path"
+    end
+    return fig
+end

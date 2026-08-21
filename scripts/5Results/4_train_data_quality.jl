@@ -1,13 +1,22 @@
+# Section 4 (training-data quality): does varied movement during training
+# produce a better frozen model?
+#
+# Protocol: train on ONE track with full GT, freeze the model, then run it on
+# each test track with only 10% GT. One run per (estimator, train, test) cell.
+#
+# CAVEAT worth stating in the thesis: the hyperparameters below are trained on
+# ANG2 but applied to DCSC data, so a cross-dataset transfer confound sits
+# inside what is meant to be a training-data experiment. Use key 43 (DCSC) to
+# remove it, or state it explicitly.
+
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+include("_common.jl")
 using OrderedCollections, DataFrames
+import CSV
 
-data_key = "DCSC" # meta["data_key"]
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2",
-    "DCSC" => "data/dcsc_optitrack"
-)[data_key]
+data_key = "DCSC"
+data_dir_path = data_dir(data_key)
 
 # estimators = OrderedDict(
 #     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
@@ -32,37 +41,25 @@ test_labels = OrderedDict(
 )
 # Choose Parameters file
 hsgp_p_key = 42
-
-hsgp_p_path = Dict{Int,String}(
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
-)[hsgp_p_key]
-
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
-# Load parameters with corresponding metatdata
-params, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-
-# Get feature type and reference frame
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
+params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 
 df = HybridZuptInsJl.training_data_quality_analysis(
-    data_dir, estimators, train_labels, test_labels, params;
+    data_dir_path, estimators, train_labels, test_labels, params;
     frame=FRAME, feature_type=FEATURE_TYPE,
     corrected_channels=output_channels)
 ##
-import CairoMakie, Dates
-base_dir = "out/Results/4_TrainDataQuality"
+const SECTION = "4_TrainDataQuality"
 
-time = string(Dates.now())
-filename = "$(time)_train_data_quality.svg"
-path = joinpath(base_dir, filename)
-
-CairoMakie.with_theme(CairoMakie.theme_ggplot2()) do
-    fig = HybridZuptInsJl.plot_train_data_quality(df; metric=:rmse_rate,
-        save_path=path)
+results_figure() do
+    HybridZuptInsJl.plot_train_data_quality(df; metric=:rmse_rate,
+        save_path=stamped(SECTION, "train_data_quality"))
 end
 
-##
-CSV.write("train_test_variability.csv", df)
+## Persist the numbers next to the figure.
+# WAS: CSV.write("train_test_variability.csv", df) -- no `import CSV` in this
+# script (so it only worked if a previous REPL cell had loaded it), and it wrote
+# into the repository root rather than out/.
+CSV.write(stamped(SECTION, "train_data_quality"; ext="csv"),
+    select(df, Not(intersect(names(df), ["corr_traj", "io_data", "model", "zupt", "step_seg"]))))

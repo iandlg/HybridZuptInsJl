@@ -1,13 +1,21 @@
+# Section 5b: does MORE (noisy) training data buy back robustness?
+#
+# Training tracks are accumulated incrementally and the frozen model is re-tested
+# after each addition.
+#
+# CAVEAT: the accumulation order below is one arbitrary permutation of the
+# training tracks, so the curve confounds "more data" with "which track came
+# next". Either randomise the order over repeats or state the order in the
+# caption. Noise is applied to the training tracks only; the test track's GT
+# window stays clean.
+
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+include("_common.jl")
 using OrderedCollections, DataFrames
 
-data_key = "DCSC" # meta["data_key"]
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2",
-    "DCSC" => "data/dcsc_optitrack"
-)[data_key]
+data_key = "DCSC"
+data_dir_path = data_dir(data_key)
 
 # estimators = OrderedDict(
 #     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
@@ -50,63 +58,66 @@ test_labels = Dict(
 )[data_key]
 # Choose Parameters file
 hsgp_p_key = 44
-
-hsgp_p_path = Dict{Int,String}(
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
-    44 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T12:56:03.443.json", # same; ANG2 higer lower noise bound
-    45 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T16:42:30.821.json", # slightly changed hyps compared to 44
-)[hsgp_p_key]
-
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
-# Load parameters with corresponding metatdata
-params, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
-@show params
-new_hp = HybridZuptInsJl.SeHyperparams(
-    [5e-1, 2.0, 0.09],
-    [5e-1, 2.0, 0.09],
-    [5e-1, 2.0, 0.09],
-    [0.146, 24, 2.8]
-)
-params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
+params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
+
+# Hand-tuned override of the loaded hyperparameters. Set `use_hand_tuned=false`
+# to evaluate key $(hsgp_p_key) as trained. Keeping this explicit matters: the
+# figure is otherwise labelled with a hyperparameter key whose values were not
+# the ones used.
+use_hand_tuned = true
+if use_hand_tuned
+    new_hp = HybridZuptInsJl.SeHyperparams(
+        [5e-1, 2.0, 0.09],
+        [5e-1, 2.0, 0.09],
+        [5e-1, 2.0, 0.09],
+        [0.146, 24, 2.8]
+    )
+    params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
+end
 
 noise = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=5*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
 
-# Get feature type and reference frame
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
-
 df_results = HybridZuptInsJl.multi_track_training_analysis(
-    data_dir, estimators, train_labels, test_labels, params;
+    data_dir_path, estimators, train_labels, test_labels, params;
     frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
     noise_spec=noise,
     train_tr_ratio=1.0,
     test_tr_ratio=0.1
 )
 
-fig = HybridZuptInsJl.plot_multi_track_training_quality(df_results)
+## Plot
+# WAS: called without save_path, so this script wrote no figure either.
+const SECTION = "5_NoiseRobustness/MoreData"
 
-##
-using Dates
-base_dir = "out/4OnlineCorrection/6_HypOpt"
-combo_dir = joinpath(base_dir, data_key, string(FRAME) * "-" * string(FEATURE_TYPE))
-mkpath(combo_dir)
-
-
-time = string(Dates.now())
-filename = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
-HybridZuptInsJl.to_json(joinpath(combo_dir, filename), params;
-    metadata=Dict(
-        "data_key" => data_key,
-        # "trial_id" => trial_id,
-        "ref_frame" => FRAME,
-        "feature_type" => FEATURE_TYPE,
-        # "normalize_input" => normalization_params["normalize_x"],
-        # "normalize_output" => normalization_params["normalize_y"],
-        # "train_ids" => train_ids,
-        # "outlier_removal" => outlier_removal_params,
-        # "normalization" => normalization_params,
-        # "optimization_parameters" => optim_params
+results_figure() do
+    HybridZuptInsJl.plot_multi_track_training_quality(
+        df_results;
+        metric=:rmse_rate,
+        save_path=stamped(SECTION, "multi_track_training"),
     )
-)
+end
+
+## Optionally persist the hand-tuned hyperparameters.
+# WAS: this ran unconditionally and wrote hand-typed values into
+# out/4OnlineCorrection/6_HypOpt/, the same store that holds *optimised*
+# hyperparameters, with most metadata fields commented out. A results script
+# silently mutating the hyperparameter store is how the provenance of keys 44/45
+# became unrecoverable. Off by default; the metadata now records what it is.
+save_hand_tuned_params = false
+if save_hand_tuned_params && use_hand_tuned
+    combo_dir = joinpath("out/4OnlineCorrection/6_HypOpt", data_key,
+        string(FRAME) * "-" * string(FEATURE_TYPE))
+    mkpath(combo_dir)
+    filename = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(Dates.now()).json"
+    HybridZuptInsJl.to_json(joinpath(combo_dir, filename), params;
+        metadata=Dict(
+            "data_key" => data_key,
+            "ref_frame" => FRAME,
+            "feature_type" => FEATURE_TYPE,
+            "provenance" => "hand-tuned in scripts/5Results/5_noise_robustness-more_data.jl",
+            "derived_from_key" => hsgp_p_key,
+        )
+    )
+end
