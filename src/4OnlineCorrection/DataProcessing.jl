@@ -165,9 +165,9 @@ end
 
 function result_performance(res::Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}})
     _, _, corr_traj, gt_traj, step_seg = res
-    rmse = rmse(corr_traj, gt_traj[step_seg])[end]
-    rmse_rate = rmse / total_distance(gt_traj[step_seg])
-    return rmse, rmse_rate
+    _rmse = rmse(corr_traj, gt_traj[step_seg])[end]
+    _rmse_rate = _rmse / total_distance(gt_traj[step_seg])
+    return _rmse, _rmse_rate
 end
 
 function result_performance(res::Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}, train_ratio::Float64)
@@ -598,7 +598,7 @@ function run_online_correction_sweep(
                             ))
                             n_ok += 1
                         catch e
-                            @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, pos_std=$pos_std, pos_bias=$pos_bias, att_std=$att_std, att_bias=$att_bias)" exception = e
+                            @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, noise=$(noise_spec.tag))" exception = e
                             n_fail += 1
                         end
                     end

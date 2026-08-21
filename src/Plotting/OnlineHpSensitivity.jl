@@ -48,7 +48,7 @@ function plot_hp_sensitivity(
         @info "Saved figure: $save_path"
     end
     display(fig)
-    return nothing
+    return fig
 end
 
 """
@@ -65,7 +65,7 @@ function plot_channel_boxplots(
     input_df = subset(df, :io_type => x -> x .== :input)
     output_df = subset(df, :io_type => x -> x .== :output)
 
-    fig = Figure(resolution=(1000, 500))
+    fig = Figure(size=(1000, 500))
     ax_in = Axis(fig[1, 1], title="Input channels",
         xlabel="Channel", ylabel="Value")
     ax_out = Axis(fig[1, 2], title="Output channels",

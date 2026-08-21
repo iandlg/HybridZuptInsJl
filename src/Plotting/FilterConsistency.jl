@@ -70,7 +70,7 @@ function plot_nees_comparison(
     for (key, r) in runs
         vals = getfield(r, block)
         isnothing(vals) && error("Run \"$key\" has no `$block` NEES (was include_vel set?).")
-        lines!(ax, r.k, vals; label="$key, consistency=$(round(Int,100*consistency_ratio(r.pos, r.lower, r.upper)))%")
+        lines!(ax, r.k, vals; label="$key, consistency=$(round(Int,100*consistency_ratio(vals, r.lower, r.upper)))%")
     end
     axislegend(ax; position=:rt)
 
