@@ -3,3 +3,5 @@ out/3OfflineCorrection/OptimizationResults/*
 out/*
 *.png
 *.svg
+*.md
+notes/*
