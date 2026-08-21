@@ -10,13 +10,10 @@ function plot_train_data_quality(
     metric::Symbol=:rmse_rate,
     save_path::Union{String,Nothing}=nothing
 )
-    metric in (:rmse, :rmse_rate) || throw(ArgumentError("metric must be :rmse or :rmse_rate"))
+    check_metric(metric)
 
     short_name(s::AbstractString) = split(s, '.')[end]
-    metric_name = Dict{Symbol,String}(
-        :rmse => "RMSE",
-        :rmse_rate => "RMSE rate"
-    )[metric]
+    metric_name = metric_label(metric)
     baseline_name = isempty(df[isnothing.(df.train_id), :]) ? "Baseline" : first(df[isnothing.(df.train_id), :estimator])
     # Preserve user-supplied dictionary order via the *_order columns
     test_order_map = Dict{Int,Int}()

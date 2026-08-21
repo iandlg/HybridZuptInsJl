@@ -27,7 +27,7 @@ function plot_noise_sweep_boxplots(
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
 )
-    metric in (:rmse, :rmse_rate) || throw(ArgumentError("metric must be :rmse or :rmse_rate"))
+    check_metric(metric)
 
     sub = df[df.dataset_name .== dataset_name, :]
     isempty(sub) && error("No rows found for dataset_name = $dataset_name")
@@ -55,7 +55,7 @@ function plot_noise_sweep_boxplots(
     bar_width = n_est > 0 ? group_width / n_est : group_width
     offsets = ((1:n_est) .- (n_est + 1) / 2) * bar_width
 
-    title_str = metric == :rmse ? "RMSE" : "RMSE rate"
+    title_str = metric_title(metric)
     fig = Figure(size=(900, 600))
     ax = Axis(fig[1, 1],
         xlabel="Noise specification",
@@ -106,8 +106,8 @@ function plot_multi_track_training_quality(
     save_path::Union{String,Nothing}=nothing
 )
     # ----- Input validation -----
-    metric in (:rmse, :rmse_rate) || throw(ArgumentError("metric must be :rmse or :rmse_rate"))
-    metric_name = Dict(:rmse => "RMSE", :rmse_rate => "RMSE rate")[metric]
+    check_metric(metric)
+    metric_name = metric_label(metric)
 
     # ----- Determine test order (preserve input order) -----
     test_order_map = Dict{Int,Int}()
