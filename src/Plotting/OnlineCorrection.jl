@@ -35,7 +35,7 @@ function plot_corrector_boxplots(
     check_metric(metric)
 
     ratios = sort(unique(df.train_ratio))
-    correctors = isnothing(corrector_names) ? sort(unique(df.corrector)) : corrector_names
+    correctors = isnothing(corrector_names) ? sort(unique(df.estimator)) : corrector_names
     @show correctors #  
     n_correctors = length(correctors)
 
@@ -61,7 +61,7 @@ function plot_corrector_boxplots(
 
     for (j, corr) in enumerate(correctors)
         for (i, ratio) in enumerate(ratios)
-            mask = (df.train_ratio .== ratio) .& (df.corrector .== corr)
+            mask = (df.train_ratio .== ratio) .& (df.estimator .== corr)
             sub = df[mask, :]
             vals = sub[:, metric]
             clean_mask = .!isnan.(vals)

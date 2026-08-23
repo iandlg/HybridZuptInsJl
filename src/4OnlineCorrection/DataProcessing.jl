@@ -184,7 +184,7 @@ function performance_dataframe(
 )::DataFrame
     df = DataFrame(
         trial_id=Int[],
-        corrector=String[],
+        estimator=String[],
         train_ratio=Float64[],
         rmse=Float64[],
         rmse_rate=Float64[],
