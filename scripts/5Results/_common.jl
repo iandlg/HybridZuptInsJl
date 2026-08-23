@@ -33,7 +33,7 @@ datasets cannot be mixed up: these lists are NOT interchangeable, and using the
 DCSC list against ANG2 silently selects different walks rather than erroring.
 """
 const TRIAL_IDS = Dict{String,Vector{Int}}(
-    "ANG2" => [1, 2, 3, 4, 8, 9, 13, 15, 16],
+    "ANG2" => [1, 2, 3, 4, 6, 10, 11, 13, 14, 15, 16],
     "DCSC" => [1, 2, 3, 4, 5, 6, 8, 10, 12, 14],
 )
 

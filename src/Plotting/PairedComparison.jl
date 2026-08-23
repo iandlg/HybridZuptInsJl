@@ -55,7 +55,8 @@ another column (`:dataset_name` is the usual one). If `df` spans several
 not be paired one-to-one.
 
 Negative values mean the estimator beat the baseline on that trial. Each
-estimator's column shows every trial as a point, the median as a thick bar, and
+estimator's column shows every trial as a point labelled with its `trial_id`
+(set `label_trials=false` to drop the labels), the median as a thick bar, and
 a percentile-bootstrap interval for that median; the subtitle carries the win
 count and n.
 """
@@ -66,13 +67,14 @@ function plot_paired_differences(df::DataFrame;
     train_ratio::Union{Real,Nothing}=nothing,
     save_path::Union{String,Nothing}=nothing,
     level::Real=0.95,
+    label_trials::Bool=true,
     figsize::Tuple{Int,Int}=(1000, 520))
 
     check_metric(metric)
     work = copy(df)
 
     if !isnothing(train_ratio)
-        work = work[work.train_ratio.==train_ratio, :]
+        work = work[work.train_ratio .== train_ratio, :]
     elseif hasproperty(work, :train_ratio) && length(unique(work.train_ratio)) > 1
         throw(ArgumentError(
             "df spans train_ratio values $(sort(unique(work.train_ratio))); " *
@@ -90,23 +92,24 @@ function plot_paired_differences(df::DataFrame;
     colors = Makie.wong_colors()
 
     for (gi, gname) in enumerate(groups)
-        sub = isnothing(group) ? work : work[work[!, group].==gname, :]
+        sub = isnothing(group) ? work : work[work[!, group] .== gname, :]
 
-        base_rows = sub[sub.estimator.==baseline, :]
+        base_rows = sub[sub.estimator .== baseline, :]
         base_by_trial = Dict(zip(base_rows.trial_id, base_rows[!, metric]))
 
         ax = Axis(fig[1, gi];
             title=string(gname),
-            ylabel=gi == 1 ? "Δ $(metric_label(metric))  (estimator − baseline)" : "",
+            ylabel=gi == 1 ? "relative change in $(metric_quantity(metric))  (estimator − baseline) / |baseline|  [%]" : "",
             xticks=(1:length(others), others),
-            xticklabelrotation=π / 6)
+            xticklabelrotation=π / 6,
+            ytickformat=vs -> [string(round(v; digits=1), "%") for v in vs])
         hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
 
         annotations = String[]
         for (ei, est) in enumerate(others)
-            rows = sub[sub.estimator.==est, :]
+            rows = sub[sub.estimator .== est, :]
             # pair strictly by trial: a trial missing from either arm is dropped
-            paired = [(r.trial_id, r[metric] - base_by_trial[r.trial_id])
+            paired = [(r.trial_id, 100*(r[metric] - base_by_trial[r.trial_id])/abs(r[metric]))
                       for r in eachrow(rows) if haskey(base_by_trial, r.trial_id)]
             isempty(paired) && continue
             deltas = [d for (_, d) in paired]
@@ -116,21 +119,29 @@ function plot_paired_differences(df::DataFrame;
             lo, hi = median_bootstrap_ci(deltas; level=level)
 
             x = fill(float(ei), n) .+ (rand(Random.Xoshiro(ei), n) .- 0.5) .* 0.18
-            scatter!(ax, x, deltas; color=(colors[mod1(ei, length(colors))], 0.75), markersize=9)
+            scatter!(ax, x, deltas; color=(colors[mod1(ei+1, length(colors))], 0.75), markersize=9)
+            if label_trials
+                # pixel offset so the label clears the marker regardless of zoom
+                text!(ax, x, deltas; text=[string(t) for (t, _) in paired],
+                    align=(:left, :center), offset=(7, 0), fontsize=8,
+                    color=(:black, 0.7))
+            end
             if isfinite(lo)
                 rangebars!(ax, [float(ei)], [lo], [hi];
                     color=:black, linewidth=2, whiskerwidth=12)
             end
             lines!(ax, [ei - 0.28, ei + 0.28], [med, med]; color=:black, linewidth=3)
 
-            push!(annotations, "$est: better on $wins/$n, median $(round(med, sigdigits=3))")
+            push!(annotations, "$est: better on $wins/$n, median $(round(med, sigdigits=3))%")
         end
         ax.subtitle = join(annotations, "\n")
         ax.subtitlesize = 10
+        # labels hang to the right of the last column; leave them room
+        # label_trials && xlims!(ax, 0.5, length(others) + 0.8)
     end
 
     Label(fig[0, :],
-        "Paired per-trial change vs \"$baseline\" (below 0 = better). " *
+        "Paired per-trial relative change vs \"$baseline\", in %. " *
         "Bars: median and $(round(Int, 100 * level))% bootstrap interval.";
         fontsize=12, tellwidth=false)
 

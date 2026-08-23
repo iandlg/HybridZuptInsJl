@@ -1,12 +1,5 @@
 """
 Shared metric vocabulary for the results figures.
-
-Before this existed, six plotting functions each carried their own copy of
-`metric in (:rmse, :rmse_rate) || throw(...)` and their own
-`metric == :rmse ? "RMSE" : "RMSE rate"` ternary. Adding a metric meant editing
-six files, and the axis labels carried no units, so an RMSE in metres and a
-dimensionless RMSE-rate were labelled in the same style and could be misread
-for one another across figures.
 """
 
 const _METRIC_LABELS = Dict{Symbol,String}(
@@ -39,6 +32,16 @@ end
 Axis label for `metric`, including units.
 """
 metric_label(metric::Symbol)::String = _METRIC_LABELS[check_metric(metric)]
+
+"""
+    metric_quantity(metric::Symbol) -> String
+
+Name of `metric` with its unit stripped, e.g. `"RMSE rate"`. For axes that plot
+a *derived* quantity whose unit is not the metric's own -- a relative change, a
+ratio -- where `metric_label` would advertise the wrong unit.
+"""
+metric_quantity(metric::Symbol)::String =
+    strip(replace(metric_label(metric), r"\s*\[[^\]]*\]\s*$" => ""))
 
 """
     metric_title(metric::Symbol) -> String

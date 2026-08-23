@@ -21,14 +21,15 @@ end
 
 
 """
-    list_trial_ids(data_dir::AbstractString) -> Vector{Int}
+    list_trial_ids(data_dir::AbstractString; kwargs...) -> Vector{Int}
 
 Scan a data directory and return all integer trial IDs found.
-Dispatches to a source‑specific method.
+Dispatches to a source‑specific method; `kwargs` are forwarded to it (e.g.
+`foot="R"` for `DCSC`, which no other source accepts).
 """
-function list_trial_ids(data_dir::AbstractString)::Vector{Int}
+function list_trial_ids(data_dir::AbstractString; kwargs...)::Vector{Int}
     src = resolve_source(data_dir)
-    return list_trial_ids(src, data_dir)
+    return list_trial_ids(src, data_dir; kwargs...)
 end
 
 """
@@ -60,6 +61,54 @@ function list_trial_ids(::ANG, data_dir::AbstractString)::Vector{Int}
         !isnothing(m) && push!(ids, parse(Int, m.captures[1]))
     end
     return sort(unique(ids))
+end
+
+"""
+    list_trial_ids(::DCSC, data_dir::AbstractString; foot=nothing)::Vector{Int}
+
+Trial ids of the "data/dcsc_optitrack" recordings, taken from the `track_id`
+column of `track-metadatas.csv` rather than from the directory names: only the
+two-IMU trials (7–14) carry the foot in their directory name, so the metadata
+file is the only complete record of which foot an id was recorded on.
+
+`foot="R"` / `foot="L"` restricts the result to that foot (case-insensitive);
+`foot=nothing` (default) returns every trial. Ids whose recording directory is
+missing from `data_dir` are dropped, so a metadata row without data on disk does
+not produce an id that later fails to load.
+"""
+function list_trial_ids(::DCSC, data_dir::AbstractString;
+    foot::Union{Nothing,AbstractString}=nothing)::Vector{Int}
+    meta_path = joinpath(data_dir, "track-metadatas.csv")
+    isfile(meta_path) || error("DCSC metadata file not found: $meta_path")
+
+    df = CSV.read(meta_path, DataFrame; select=["track_id", "foot"])
+    want = isnothing(foot) ? nothing : uppercase(strip(foot))
+
+    ids = Int[]
+    for row in eachrow(df)
+        if !isnothing(want)
+            uppercase(strip(String(row.foot))) == want || continue
+        end
+        id = Int(row.track_id)
+        _has_dcsc_trial_dir(data_dir, id) || continue
+        push!(ids, id)
+    end
+    return sort(unique(ids))
+end
+
+"""
+    _has_dcsc_trial_dir(data_dir, id) -> Bool
+
+Whether `data_dir` holds a recording directory for trial `id`, using the same
+`<id>` + non-digit prefix rule as `read_raw_imu`/`read_raw_trajectory` (so `1`
+matches `1_Walk_CWRectangle` but not `10_Right_FigureEight_long`).
+"""
+function _has_dcsc_trial_dir(data_dir::AbstractString, id::Int)::Bool
+    s = string(id)
+    return any(readdir(data_dir)) do entry
+        isdir(joinpath(data_dir, entry)) || return false
+        startswith(entry, s) && (length(entry) == length(s) || !isdigit(entry[length(s)+1]))
+    end
 end
 
 """

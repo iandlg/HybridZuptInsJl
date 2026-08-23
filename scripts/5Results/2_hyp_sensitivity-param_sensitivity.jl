@@ -26,7 +26,7 @@ train_ratio = 0.45
 
 output_channel_idxs = [1, 2, 4]
 
-noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)")
+noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
 
 # NOTE: `pred_includes_noise` controls whether the GP `noise` hyperparameter
 # reaches the estimator at all. With the default `false`, DecoupledHsgpEstimator

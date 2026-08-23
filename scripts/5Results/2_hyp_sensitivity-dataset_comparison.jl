@@ -66,7 +66,7 @@ end
 results_figure() do
     HybridZuptInsJl.plot_paired_differences(
         results_df;
-        metric=:rmse_rate,
+        metric=:rmse,
         baseline="Base (no correction)",
         group=:dataset_name,
         save_path=stamped(SECTION, "dataset_comparison_paired"),
