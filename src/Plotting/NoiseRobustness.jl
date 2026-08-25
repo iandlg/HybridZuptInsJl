@@ -1,11 +1,89 @@
 """
+Shared grouped-boxplot machinery for the noise-robustness figures: `group_col` on
+the x axis, `series_col` side-by-side within each group, both ordered by their
+`*_order` companion columns so the figure follows the order the sweep was declared
+in rather than alphabetical order. Every box spans the trials — and, if the sweep
+drew more than one noise realisation per cell (more than one seed), those too.
+"""
+function _grouped_boxplot!(
+    ax::Axis,
+    sub::DataFrame,
+    value_col::Symbol;
+    group_col::Symbol=:noise_spec_tag,
+    group_order_col::Symbol=:noise_spec_order,
+    series_col::Symbol=:estimator,
+    series_order_col::Symbol=:estimator_order,
+    show_outliers::Bool=true,
+    show_points::Bool=false,
+)
+    group_order_map = Dict{Any,Int}()
+    series_order_map = Dict{Any,Int}()
+    for row in eachrow(sub)
+        group_order_map[row[group_col]] = row[group_order_col]
+        series_order_map[row[series_col]] = row[series_order_col]
+    end
+    groups = sort(unique(sub[:, group_col]), by=g -> group_order_map[g])
+    series = sort(unique(sub[:, series_col]), by=e -> series_order_map[e])
+    n_groups, n_series = length(groups), length(series)
+
+    colors = Makie.wong_colors()
+    # Colour by `series_order_col`, not by position within THIS figure: the paired
+    # figure omits the baseline, and indexing by position would shift every
+    # remaining estimator onto the colour its neighbour had in the unpaired one.
+    # With the estimators declared Base, Static, HSGP the mapping is wong 1/2/3
+    # everywhere, and the paired figure simply has no wong-1 box.
+    series_color = Dict(ser => colors[mod1(series_order_map[ser], length(colors))] for ser in series)
+
+    group_width = 0.8
+    bar_width = n_series > 0 ? group_width / n_series : group_width
+    offsets = ((1:n_series) .- (n_series + 1) / 2) * bar_width
+
+    # Fixed RNG: the point jitter is cosmetic, and a figure that moves between
+    # rebuilds is a nuisance when it sits in a document.
+    jitter_rng = Random.Xoshiro(0)
+
+    labeled = Set{Any}()
+    for (g, grp) in enumerate(groups)
+        gdf = sub[sub[:, group_col] .== grp, :]
+
+        for (j, ser) in enumerate(series)
+            edf = gdf[gdf[:, series_col] .== ser, :]
+            isempty(edf) && continue
+
+            vals = Float64.(edf[:, value_col])
+            clean_vals = vals[.!isnan.(vals)]
+            length(clean_vals) < 1 && continue
+
+            x_pos = g + offsets[j]
+
+            boxplot!(ax, fill(x_pos, length(clean_vals)), clean_vals;
+                width=bar_width * 0.9,
+                color=series_color[ser],
+                label=ser in labeled ? nothing : ser,
+                show_outliers=show_outliers)
+            if show_points
+                jitter = (rand(jitter_rng, length(clean_vals)) .- 0.5) .* (bar_width * 0.35)
+                scatter!(ax, x_pos .+ jitter, clean_vals;
+                    color=(:black, 0.45), markersize=4)
+            end
+            push!(labeled, ser)
+        end
+    end
+
+    ax.xticks = (1:n_groups, string.(groups))
+    return labeled
+end
+
+"""
     plot_noise_sweep_boxplots(df::DataFrame, dataset_name::AbstractString;
                               metric::Symbol=:rmse,
                               save_path::Union{String,Nothing}=nothing)
 
 For a single dataset (from the `run_online_correction_sweep` output), plot box plots of
 per-trial results grouped by noise specification (`noise_spec_tag`), with the different
-correction methods (`estimator`) shown side-by-side within each noise-spec group.
+correction methods (`estimator`) shown side-by-side within each noise-spec group. Each
+box spans the trials for that (noise spec, estimator) combination, times the number of
+noise draws the sweep took per cell.
 
 Groups are ordered by `noise_spec_order` and estimators within each group are ordered by
 `estimator_order`, both following the display order already encoded in the dataframe by
@@ -14,11 +92,20 @@ Groups are ordered by `noise_spec_order` and estimators within each group are or
 # Arguments
 - `df`: DataFrame produced by `run_online_correction_sweep`.
 - `dataset_name`: Which `dataset_name` to filter to and plot.
-- `metric`: `:rmse` or `:rmse_rate`.
+- `metric`: `:rmse`, `:rmse_rate` or `:rmse_yaw`.
+- `show_points`: overlay the individual trials on each box. Off by default; worth
+  turning on when a box summarises ~10 points and the quartiles could be mistaken
+  for an error bar.
 - `save_path`: Optional path to save the figure.
 
 # Returns
 - A `Figure` object.
+
+!!! note "This figure is unpaired"
+    Each estimator's box is built independently, so overlapping boxes do **not** mean
+    the estimators are indistinguishable — they may differ consistently within every
+    trial while their boxes overlap, because walk-to-walk difficulty is the larger
+    source of spread. `plot_noise_paired_relative_change` is the paired counterpart.
 """
 function plot_noise_sweep_boxplots(
     df::DataFrame,
@@ -26,71 +113,90 @@ function plot_noise_sweep_boxplots(
     metric::Symbol=:rmse,
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
+    show_points::Bool=false,
 )
     check_metric(metric)
 
     sub = df[df.dataset_name .== dataset_name, :]
     isempty(sub) && error("No rows found for dataset_name = $dataset_name")
 
-    # ---- Noise-spec groups (ordered by noise_spec_order) ----
-    noise_order_map = Dict{String,Int}()
-    for row in eachrow(sub)
-        noise_order_map[row.noise_spec_tag] = row.noise_spec_order
-    end
-    noise_specs = sort(unique(sub.noise_spec_tag), by=tag -> noise_order_map[tag])
-    n_groups = length(noise_specs)
-
-    # ---- Estimators (ordered by estimator_order) ----
-    est_order_map = Dict{String,Int}()
-    for row in eachrow(sub)
-        est_order_map[row.estimator] = row.estimator_order
-    end
-    estimators = sort(unique(sub.estimator), by=e -> est_order_map[e])
-    n_est = length(estimators)
-
-    colors = Makie.wong_colors()
-    est_color = Dict(estimators[i] => colors[mod1(i, length(colors))] for i in 1:n_est)
-
-    group_width = 0.8
-    bar_width = n_est > 0 ? group_width / n_est : group_width
-    offsets = ((1:n_est) .- (n_est + 1) / 2) * bar_width
-
-    title_str = metric_title(metric)
     fig = Figure(size=(900, 600))
     ax = Axis(fig[1, 1],
         xlabel="Noise specification",
-        ylabel=title_str,
-        title="$(title_str) per noise spec — $dataset_name",
-        xticks=(1:n_groups, noise_specs),
+        ylabel=metric_label(metric),
+        title="$(metric_title(metric)) per noise spec — $dataset_name",
         xticklabelsize=14,
         xticklabelrotation=π / 6,
     )
 
-    labeled = Set{String}()
+    labeled = _grouped_boxplot!(ax, sub, metric;
+        show_outliers=show_outliers, show_points=show_points)
 
-    for (g, noise_tag) in enumerate(noise_specs)
-        gdf = sub[sub.noise_spec_tag .== noise_tag, :]
-
-        for (j, est) in enumerate(estimators)
-            edf = gdf[gdf.estimator .== est, :]
-            isempty(edf) && continue
-
-            vals = Float64.(edf[:, metric])
-            clean_mask = .!isnan.(vals)
-            clean_vals = vals[clean_mask]
-            length(clean_vals) < 1 && continue
-
-            x_pos = g + offsets[j]
-            x_positions = fill(x_pos, length(clean_vals))
-
-            boxplot!(ax, x_positions, clean_vals;
-                width=bar_width * 0.9,
-                color=est_color[est],
-                label=est in labeled ? nothing : est,
-                show_outliers=show_outliers)
-            push!(labeled, est)
-        end
+    if !isempty(labeled)
+        Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
     end
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+"""
+    plot_noise_paired_relative_change(paired::DataFrame, dataset_name::AbstractString;
+                                      save_path::Union{String,Nothing}=nothing)
+
+The paired counterpart of `plot_noise_sweep_boxplots`: same noise specs on the x axis,
+but each box holds the per-trial **relative change against the reference estimator**
+(from `paired_estimator_contrast`), in percent, with a reference line at zero. The
+reference estimator has no box — it is the zero line.
+
+Because each point is a difference taken within one trial, walk-to-walk difficulty
+cancels, so a box sitting clear of zero is a consistent effect — a claim the unpaired
+figure cannot support.
+
+# Arguments
+- `paired`: output of `paired_estimator_contrast`.
+- `dataset_name`: which `dataset_name` to filter to.
+- `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
+- `metric`: only used to name the quantity in the axis label.
+- `show_points`: overlay the individual trials on each box.
+"""
+function plot_noise_paired_relative_change(
+    paired::DataFrame,
+    dataset_name::AbstractString;
+    value_col::Symbol=:rel_change_pct,
+    metric::Symbol=:rmse_rate,
+    reference_label::AbstractString="baseline",
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=false,
+)
+    check_metric(metric)
+    value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
+        "value_col must be :delta or :rel_change_pct, got :$value_col"))
+
+    sub = paired[paired.dataset_name .== dataset_name, :]
+    isempty(sub) && error("No rows found for dataset_name = $dataset_name")
+
+    as_pct = value_col === :rel_change_pct
+    fig = Figure(size=(900, 600))
+    ax = Axis(fig[1, 1],
+        xlabel="Noise specification",
+        # Kept short on purpose: spelling the formula out here overflows the axis
+        # once `reference_label` is a real estimator name. The subtitle carries it.
+        ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
+               "change in $(metric_label(metric))",
+        title="Paired per-trial change vs \"$reference_label\" — $dataset_name",
+        subtitle=as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
+                 "estimator − $reference_label, per trial",
+        subtitlesize=10,
+        xticklabelsize=14,
+        xticklabelrotation=π / 6,
+    )
+    as_pct && (ax.ytickformat = vs -> [string(round(v; digits=1), "%") for v in vs])
+
+    hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
+    labeled = _grouped_boxplot!(ax, sub, value_col;
+        show_outliers=show_outliers, show_points=show_points)
 
     if !isempty(labeled)
         Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)

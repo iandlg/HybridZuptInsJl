@@ -77,7 +77,7 @@ end
 # to compare by eye, and they are all the same trials.
 for metric in (:rmse_yaw, :rmse)
     results_figure() do
-        HybridZuptInsJl.plot_paired_differences(
+        HybridZuptInsJl.plot_paired_relative_change(
             results_df;
             metric=metric,
             baseline="Base (no correction)",
