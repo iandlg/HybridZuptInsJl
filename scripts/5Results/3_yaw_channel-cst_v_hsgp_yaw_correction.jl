@@ -31,9 +31,9 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 estimators = OrderedDict(
     "Base (no correction)" => HybridZuptInsJl.BaseEstimator,
     "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
+    # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
     "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
-    "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
+    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
 output_channels = [:yaw]
@@ -75,7 +75,7 @@ end
 
 # Paired view: five estimators x two datasets from n≈10 each is a lot of boxes
 # to compare by eye, and they are all the same trials.
-for metric in (:rmse_yaw, :rmse_rate)
+for metric in (:rmse_yaw, :rmse)
     results_figure() do
         HybridZuptInsJl.plot_paired_differences(
             results_df;
