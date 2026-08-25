@@ -43,10 +43,11 @@ function median_bootstrap_ci(x::AbstractVector{<:Real};
 end
 
 """
-    plot_paired_differences(df; metric, baseline, group=nothing, train_ratio=nothing,
-                            save_path=nothing, level=0.95)
+    plot_paired_relative_change(df; metric, baseline, group=nothing, train_ratio=nothing,
+                                save_path=nothing, level=0.95)
 
-Per-trial difference in `metric` between each estimator and `baseline`.
+Per-trial *relative* change in `metric` between each estimator and `baseline`, in
+percent of the baseline — not a raw difference, hence the name.
 
 `df` is the long DataFrame produced by `run_online_correction_sweep`, requiring
 columns `trial_id`, `estimator` and `metric`. `group` optionally facets by
@@ -60,7 +61,7 @@ estimator's column shows every trial as a point labelled with its `trial_id`
 a percentile-bootstrap interval for that median; the subtitle carries the win
 count and n.
 """
-function plot_paired_differences(df::DataFrame;
+function plot_paired_relative_change(df::DataFrame;
     metric::Symbol=:rmse_rate,
     baseline::AbstractString,
     group::Union{Symbol,Nothing}=nothing,
@@ -83,6 +84,21 @@ function plot_paired_differences(df::DataFrame;
 
     baseline in work.estimator ||
         throw(ArgumentError("baseline \"$baseline\" not found; have $(unique(work.estimator))"))
+
+    # This figure pairs on `trial_id` alone, so a frame carrying replicates --
+    # several noise specs, or the repeated noise draws added to
+    # `run_online_correction_sweep` -- has more than one row per (trial,
+    # estimator) and the Dict below would silently keep whichever row came last.
+    # Refuse rather than plot a comparison of mismatched rows.
+    for splitter in (:noise_spec_tag, :seed)
+        hasproperty(work, splitter) || continue
+        length(unique(work[!, splitter])) > 1 || continue
+        throw(ArgumentError(
+            "df spans $(length(unique(work[!, splitter]))) `$splitter` values, so trials are " *
+            "not paired one-to-one. Filter to a single value first, or use " *
+            "`paired_estimator_contrast` + `plot_noise_paired_relative_change`, which " *
+            "pair on (trial, noise spec, noise draw)."))
+    end
 
     groups = isnothing(group) ? ["All"] : unique(work[!, group])
     others = filter(!=(baseline), unique(work.estimator))
@@ -109,7 +125,10 @@ function plot_paired_differences(df::DataFrame;
         for (ei, est) in enumerate(others)
             rows = sub[sub.estimator .== est, :]
             # pair strictly by trial: a trial missing from either arm is dropped
-            paired = [(r.trial_id, 100*(r[metric] - base_by_trial[r.trial_id])/abs(r[metric]))
+            # Denominator is the baseline, matching the axis label: dividing by the
+            # estimator's own value (as this did) makes the same absolute
+            # improvement read differently depending on which estimator produced it.
+            paired = [(r.trial_id, 100 * (r[metric] - base_by_trial[r.trial_id]) / abs(base_by_trial[r.trial_id]))
                       for r in eachrow(rows) if haskey(base_by_trial, r.trial_id)]
             isempty(paired) && continue
             deltas = [d for (_, d) in paired]

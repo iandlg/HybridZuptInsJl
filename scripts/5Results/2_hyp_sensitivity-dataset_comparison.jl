@@ -64,7 +64,7 @@ end
 # per-trial difference against the uncorrected baseline rather than reading two
 # independent-looking boxes side by side.
 results_figure() do
-    HybridZuptInsJl.plot_paired_differences(
+    HybridZuptInsJl.plot_paired_relative_change(
         results_df;
         metric=:rmse,
         baseline="Base (no correction)",

@@ -57,7 +57,7 @@ test_labels = Dict(
     )
 )[data_key]
 # Choose Parameters file
-hsgp_p_key = 44
+hsgp_p_key = 46
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
@@ -72,7 +72,7 @@ if use_hand_tuned
         [5e-1, 2.0, 0.09],
         [5e-1, 2.0, 0.09],
         [5e-1, 2.0, 0.09],
-        [0.146, 24, 2.8]
+        [0.146, 18.0, 2.8]
     )
     params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
 end
@@ -94,7 +94,7 @@ const SECTION = "5_NoiseRobustness/MoreData"
 results_figure() do
     HybridZuptInsJl.plot_multi_track_training_quality(
         df_results;
-        metric=:rmse_rate,
+        metric=:rmse,
         save_path=stamped(SECTION, "multi_track_training"),
     )
 end

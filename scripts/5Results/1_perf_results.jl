@@ -104,7 +104,7 @@ end
 # Same trials at every train_ratio, so per-trial differences are the honest
 # summary at n ≈ 16.
 results_figure() do
-    HybridZuptInsJl.plot_paired_differences(
+    HybridZuptInsJl.plot_paired_relative_change(
         results_df;
         metric=:rmse,
         baseline="Base (no correction)",

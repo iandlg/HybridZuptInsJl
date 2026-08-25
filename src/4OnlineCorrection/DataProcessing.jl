@@ -451,6 +451,20 @@ struct NoiseSpec
 end
 
 """
+    is_noiseless(spec::NoiseSpec) -> Bool
+
+`true` when `spec` adds no randomness at all (both stds are `nothing` or all-zero),
+so repeat draws would produce bit-identical runs. Used by
+`run_online_correction_sweep` to run such specs once instead of once per seed.
+
+Note a nonzero *bias* with zero std is still noiseless in this sense: the
+perturbation is deterministic, so extra draws buy nothing.
+"""
+is_noiseless(spec::NoiseSpec)::Bool =
+    (isnothing(spec.pos_std) || all(iszero, spec.pos_std)) &&
+    (isnothing(spec.att_std) || all(iszero, spec.att_std))
+
+"""
     function run_online_correction_sweep(
         aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
         frame::ReferenceFrame,
@@ -487,12 +501,34 @@ outputs together with the resulting horizontal RMSE / RMSE-rate.
   constructed as `T(estimator_alloc; params=hsgp_params, corrected_channels=output_channels)`.
   Order is preserved in `estimator_order`.
 - `output_channels`: e.g. `[:pos_1, :pos_2, :yaw]`, forwarded as `corrected_channels`.
+- `seeds`: one noise realisation per seed, per `(trial, train_ratio, noise_spec)`. Each
+  realisation comes from its own `Xoshiro(seed)`, so a seed always means the same draw
+  no matter what else the sweep contains or in what order it runs — add a trial, drop a
+  noise spec, re-run one cell alone, and the rest is unchanged. A single seed (the
+  default) gives one realisation per cell, so the spread across rows is walk-to-walk
+  variability; more seeds add replicates of the *noise* on top, recorded in the `seed`
+  column. Specs for which `is_noiseless` holds are run once regardless (the repeats
+  would be identical), under the first seed.
+
+  The seed loop sits outside the estimator loop, so every estimator in a cell sees the
+  **same** realisation — that is what makes `paired_estimator_contrast` paired.
+  Different trials at the same seed share one stream, and since `randn` is drawn as
+  `3 x N` with `N` the trial length, shorter trials get a prefix of what longer ones
+  get: draws are identical *within* a cell by design, and only partly independent
+  *across* trials.
+- `keep_artifacts`: keep the raw `zupt`/`step_seg`/`corr_traj`/`io_data`/`model` objects
+  in the returned frame. They cost roughly **2.5 MB per row**, which a one-draw sweep
+  can afford and a Monte-Carlo one cannot: 11 trials x 6 specs x 10 draws x 3 estimators
+  is ~2000 rows, i.e. several GB of trajectories nothing downstream reads. Pass `false`
+  when only the metric columns are wanted; the columns stay in place, filled with
+  `nothing`.
 
 # Returns
 - `DataFrame` with columns:
   `dataset_name, trial_id, train_ratio, train_ratio_order, estimator, estimator_order,
+   noise_spec_tag, noise_spec_order, seed,
    zupt, step_seg, corr_traj, io_data, model,
-   rmse, rmse_rate`
+   rmse, rmse_rate, rmse_yaw`
   where `zupt`, `step_seg`, `corr_traj`, `io_data`, `model` hold the raw objects
   returned by `hybrid_zupt_aided_insv2` (`Any`-typed columns — no serialization).
   `estimator_order`/`train_ratio_order` are 1-based indices matching the iteration
@@ -510,11 +546,16 @@ function run_online_correction_sweep(
     step_detector_factory::Type=StepDetector,
     estimator_alloc::Int=300,
     noise_specs::AbstractVector{NoiseSpec}=[NoiseSpec()], # Default noise is none at all
+    seeds::AbstractVector{Int}=[123],
+    keep_artifacts::Bool=true,
     # pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
     # pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
     # att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
     # att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
 )::DataFrame
+
+    isempty(seeds) && throw(ArgumentError("seeds must not be empty"))
+    allunique(seeds) || throw(ArgumentError("seeds must be unique, got $seeds"))
 
     df = DataFrame(
         dataset_name=String[],
@@ -526,6 +567,7 @@ function run_online_correction_sweep(
         estimator_order=Int[],
         noise_spec_tag=String[],
         noise_spec_order=Int[],
+        seed=Int[],
         pos_std=Any[],
         pos_bias=Any[],
         att_std=Any[],
@@ -553,57 +595,74 @@ function run_online_correction_sweep(
 
                 for (noise_spec_order, noise_spec) in enumerate(noise_specs)
 
-                    # Noisy GT is only used to drive the estimator (training/measurement
-                    # updates); RMSE evaluation always uses the clean res.gt_traj_aligned.
-                    gt_traj_noisy = add_gaussian_noise(
-                        res.gt_traj_aligned;
-                        pos_std=noise_spec.pos_std, pos_bias=noise_spec.pos_bias,
-                        att_std=noise_spec.att_std, att_bias=noise_spec.att_bias,
-                    )
+                    # A noiseless spec is deterministic, so extra seeds would only
+                    # duplicate the same run (and would inflate its box with copies
+                    # of one point). Run it once, under the first seed.
+                    spec_seeds = is_noiseless(noise_spec) ? seeds[1:1] : seeds
 
-                    for (estimator_order, (est_name, est_type)) in enumerate(estimators)
-                        try
-                            estimator = est_type(
-                                estimator_alloc;
-                                params=hsgp_params,
-                                corrected_channels=output_channels,
-                            )
+                    for seed in spec_seeds
 
-                            zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
-                                res.inertial_updated,
-                                res.sim_config_updated,
-                                gt_traj_noisy,
-                                estimator;
-                                step_detector=step_detector_factory(),
-                                x_init=res.x_init,
-                                gt_available=gt_available,
-                                ref_frame=frame,
-                                feature_type=feature_type,
-                            )
+                        # Noisy GT is only used to drive the estimator (training/measurement
+                        # updates); RMSE evaluation always uses the clean res.gt_traj_aligned.
+                        #
+                        # One Xoshiro per seed, drawn once per
+                        # (trial, train_ratio, noise_spec, seed) and outside the estimator
+                        # loop below: every estimator in this cell therefore sees the SAME
+                        # realisation, which is what makes `paired_estimator_contrast` a
+                        # paired comparison.
+                        gt_traj_noisy = add_gaussian_noise(
+                            res.gt_traj_aligned;
+                            pos_std=noise_spec.pos_std, pos_bias=noise_spec.pos_bias,
+                            att_std=noise_spec.att_std, att_bias=noise_spec.att_bias,
+                            rng=Random.Xoshiro(seed),
+                        )
 
-                            # RMSE evaluated against the clean ground truth
-                            gt_step_traj_clean = res.gt_traj_aligned[step_seg]
-                            N_step = length(gt_step_traj_clean)
-                            n_step_cutoff = floor(Int, train_ratio * N_step)
-                            _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
-                            _rmse_rate = _rmse / total_distance(gt_step_traj_clean[n_step_cutoff:end])
-                            # Yaw is scored separately: `rmse` is horizontal position only,
-                            # so a yaw-channel experiment is otherwise never measured on yaw.
-                            _rmse_yaw = rmse_yaw(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
+                        for (estimator_order, (est_name, est_type)) in enumerate(estimators)
+                            try
+                                estimator = est_type(
+                                    estimator_alloc;
+                                    params=hsgp_params,
+                                    corrected_channels=output_channels,
+                                )
 
-                            push!(df, (
-                                dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
-                                est_name, estimator_order,
-                                noise_spec.tag, noise_spec_order,
-                                noise_spec.pos_std, noise_spec.pos_bias,
-                                noise_spec.att_std, noise_spec.att_bias,
-                                zupt, step_seg, corr_traj, io_data, model,
-                                _rmse, _rmse_rate, _rmse_yaw,
-                            ))
-                            n_ok += 1
-                        catch e
-                            @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, noise=$(noise_spec.tag))" exception = e
-                            n_fail += 1
+                                zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
+                                    res.inertial_updated,
+                                    res.sim_config_updated,
+                                    gt_traj_noisy,
+                                    estimator;
+                                    step_detector=step_detector_factory(),
+                                    x_init=res.x_init,
+                                    gt_available=gt_available,
+                                    ref_frame=frame,
+                                    feature_type=feature_type,
+                                )
+
+                                # RMSE evaluated against the clean ground truth
+                                gt_step_traj_clean = res.gt_traj_aligned[step_seg]
+                                N_step = length(gt_step_traj_clean)
+                                n_step_cutoff = floor(Int, train_ratio * N_step)
+                                _rmse = rmse(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
+                                _rmse_rate = _rmse / total_distance(gt_step_traj_clean[n_step_cutoff:end])
+                                # Yaw is scored separately: `rmse` is horizontal position only,
+                                # so a yaw-channel experiment is otherwise never measured on yaw.
+                                _rmse_yaw = rmse_yaw(corr_traj[n_step_cutoff:end], gt_step_traj_clean[n_step_cutoff:end])[end]
+
+                                push!(df, (
+                                    dataset_name, dataset_order, trial_id, train_ratio, train_ratio_order,
+                                    est_name, estimator_order,
+                                    noise_spec.tag, noise_spec_order,
+                                    seed,
+                                    noise_spec.pos_std, noise_spec.pos_bias,
+                                    noise_spec.att_std, noise_spec.att_bias,
+                                    (keep_artifacts ? (zupt, step_seg, corr_traj, io_data, model) :
+                                     (nothing, nothing, nothing, nothing, nothing))...,
+                                    _rmse, _rmse_rate, _rmse_yaw,
+                                ))
+                                n_ok += 1
+                            catch e
+                                @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name, noise=$(noise_spec.tag), seed=$seed)" exception = e
+                                n_fail += 1
+                            end
                         end
                     end
                 end
@@ -613,4 +672,78 @@ function run_online_correction_sweep(
 
     @info "run_online_correction_sweep: $n_ok succeeded, $n_fail failed"
     return df
+end
+
+# ── Paired comparison of a noise sweep ────────────────────────────────────
+#
+# A noise sweep runs the SAME trials through every estimator, which makes the
+# design paired. Boxing each estimator's metric separately throws that away and
+# asks the reader to compare two clouds of ~10 points by eye, while walk-to-walk
+# difficulty -- some walks are simply longer or twistier -- dominates the spread.
+# Differencing within a trial first cancels that nuisance, leaving the effect.
+
+"The columns that identify one walk under one GT-availability setting."
+const _TRIAL_KEYS = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_ratio_order]
+
+function _require_cols(df::DataFrame, cols, who::AbstractString)
+    missing_cols = [c for c in cols if !hasproperty(df, c)]
+    isempty(missing_cols) && return nothing
+    throw(ArgumentError("$who: DataFrame is missing column(s) $(missing_cols). \
+                         Was it produced by run_online_correction_sweep?"))
+end
+
+"""
+    paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="Base (no correction)") -> DataFrame
+
+Per-trial change in `metric` relative to `reference_estimator`, for every noise spec.
+
+Each row pairs one estimator against the reference on the **same**
+`(dataset, trial, train_ratio, noise_spec, seed)` cell — the identical noise
+realisation, which `run_online_correction_sweep` guarantees by drawing the noise
+outside the estimator loop. The reference estimator itself is not in the output: it
+is the zero line.
+
+# Returns
+`DataFrame` with the trial keys plus `estimator`, `noise_spec_tag`, `seed`, and:
+- `value` — the estimator's metric,
+- `ref_value` — the reference estimator's metric on that same cell,
+- `delta = value - ref_value` — in the metric's own units,
+- `rel_change_pct = 100 (value - ref_value) / |ref_value|` — the quantity
+  `plot_paired_relative_change` and `plot_noise_paired_relative_change` display.
+
+Negative means the estimator beat the reference on that trial.
+"""
+function paired_estimator_contrast(
+    df::DataFrame;
+    metric::Symbol=:rmse_rate,
+    reference_estimator::AbstractString="Base (no correction)",
+)::DataFrame
+    _require_cols(df, vcat(_TRIAL_KEYS, [:estimator, :estimator_order, :noise_spec_tag,
+            :noise_spec_order, :seed, metric]), "paired_estimator_contrast")
+
+    key_cols = vcat(_TRIAL_KEYS, [:noise_spec_tag, :noise_spec_order, :seed])
+
+    ref_rows = df[df.estimator .== reference_estimator, :]
+    isempty(ref_rows) && throw(ArgumentError(
+        "paired_estimator_contrast: no rows with estimator = \"$reference_estimator\". \
+         Available: $(join(unique(df.estimator), ", "))"))
+    ref = select(ref_rows, key_cols, metric => :ref_value)
+
+    test = select(df[df.estimator .!= reference_estimator, :],
+        key_cols, [:estimator, :estimator_order], metric => :value)
+
+    out = innerjoin(test, ref, on=key_cols)
+    isempty(out) && throw(ArgumentError(
+        "paired_estimator_contrast: no cell has both \"$reference_estimator\" and \
+         another estimator — nothing to pair."))
+
+    ok = isfinite.(out.value) .& isfinite.(out.ref_value)
+    n_bad = count(!, ok)
+    n_bad > 0 && @warn "paired_estimator_contrast: dropping $n_bad pair(s) with non-finite metric values"
+    out = out[ok, :]
+
+    out.delta = out.value .- out.ref_value
+    out.rel_change_pct = 100 .* out.delta ./ abs.(out.ref_value)
+    sort!(out, [:dataset_order, :noise_spec_order, :estimator_order, :trial_id, :seed])
+    return out
 end
