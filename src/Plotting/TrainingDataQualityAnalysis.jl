@@ -73,7 +73,7 @@ function plot_train_data_quality(
 
         if !isnan(baseline_val)
             barplot!(ax, [1.0], [baseline_val]; color=baseline_color, width=0.6)
-            text!(ax, 1.0, baseline_val; text="$(round(baseline_val, digits=4))",
+            text!(ax, 1.0, baseline_val; text="$(round(baseline_val, digits=2))",
                 align=(:center, :bottom), fontsize=9)
         end
 
@@ -89,7 +89,7 @@ function plot_train_data_quality(
                 xpos = group_center + offsets[j]
 
                 barplot!(ax, [xpos], [val]; color=est_color[est], width=bar_width * 0.9)
-                text!(ax, xpos, val; text="$(round(val, digits=4))",
+                text!(ax, xpos, val; text="$(round(val, digits=2))",
                     align=(:center, :bottom), fontsize=8)
             end
 

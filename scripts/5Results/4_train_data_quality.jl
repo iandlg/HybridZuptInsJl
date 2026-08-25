@@ -24,9 +24,9 @@ data_dir_path = data_dir(data_key)
 # )
 estimators = OrderedDict(
     "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
+    # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
     "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
-    "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
+    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 train_labels = OrderedDict(
     6 => "CWRectangle_long",
@@ -44,7 +44,7 @@ hsgp_p_key = 42
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
-
+## Run sweep
 df = HybridZuptInsJl.training_data_quality_analysis(
     data_dir_path, estimators, train_labels, test_labels, params;
     frame=FRAME, feature_type=FEATURE_TYPE,
@@ -53,7 +53,7 @@ df = HybridZuptInsJl.training_data_quality_analysis(
 const SECTION = "4_TrainDataQuality"
 
 results_figure() do
-    HybridZuptInsJl.plot_train_data_quality(df; metric=:rmse_rate,
+    HybridZuptInsJl.plot_train_data_quality(df; metric=:rmse,
         save_path=stamped(SECTION, "train_data_quality"))
 end
 
@@ -62,4 +62,5 @@ end
 # script (so it only worked if a previous REPL cell had loaded it), and it wrote
 # into the repository root rather than out/.
 CSV.write(stamped(SECTION, "train_data_quality"; ext="csv"),
-    select(df, Not(intersect(names(df), ["corr_traj", "io_data", "model", "zupt", "step_seg"]))))
+    select(df, Not(intersect(names(df), ["corr_traj", "io_data", "model", "zupt", "step_seg"])));
+    transform=(col, val) -> something(val, missing))
