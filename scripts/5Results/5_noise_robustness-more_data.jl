@@ -37,13 +37,13 @@ train_labels = Dict(
         3 => "Walk_straight",
     ),
     "DCSC" => OrderedDict(
+        8 => "CW_Rect",
+        12 => "Mixed",
         3 => "CCWRectangle_long_A",
         4 => "FigureEight_long",
         5 => "S_shape_long",
         6 => "CWRectangle_long",
-        12 => "Mixed",
-        8 => "CW_Rect",
-        # 10 => "FigureEightLong"
+        10 => "FigureEightLong"
     )
 )[data_key]
 test_labels = Dict(
@@ -77,15 +77,14 @@ if use_hand_tuned
     params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
 end
 
-noise = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=5*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
+noise = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
 
 df_results = HybridZuptInsJl.multi_track_training_analysis(
     data_dir_path, estimators, train_labels, test_labels, params;
     frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
     noise_spec=noise,
     train_tr_ratio=1.0,
-    test_tr_ratio=0.1
-)
+    test_tr_ratio=0.1,)
 
 ## Plot
 # WAS: called without save_path, so this script wrote no figure either.
