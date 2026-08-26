@@ -48,9 +48,9 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 # Default/Static/Split/Slam vocabulary to the one every other script uses, so
 # the same estimator is called the same thing in every figure.
 estimators = OrderedDict(
-    "Base (no correction)" => HybridZuptInsJl.BaseEstimator,
-    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
@@ -107,7 +107,7 @@ results_figure() do
     HybridZuptInsJl.plot_paired_relative_change(
         results_df;
         metric=:rmse,
-        baseline="Base (no correction)",
+        baseline="ZUPT only",
         train_ratio=0.5,
         label_trials=true,
         save_path=stamped(SECTION, "paired_vs_baseline_tr0.5"),

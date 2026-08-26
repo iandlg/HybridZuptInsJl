@@ -106,6 +106,7 @@ function plot_paired_relative_change(df::DataFrame;
 
     fig = Figure(size=figsize)
     colors = Makie.wong_colors()
+    axs = Axis[]
 
     for (gi, gname) in enumerate(groups)
         sub = isnothing(group) ? work : work[work[!, group] .== gname, :]
@@ -157,7 +158,14 @@ function plot_paired_relative_change(df::DataFrame;
         ax.subtitlesize = 10
         # labels hang to the right of the last column; leave them room
         # label_trials && xlims!(ax, 0.5, length(others) + 0.8)
+        push!(axs, ax)
     end
+
+    # Panels stay separate (own title, own x ticks, own subtitle) but share one
+    # y scale: autoscaled independently, a -5% column in one dataset can be drawn
+    # at the same height as a -30% column in the other, which is precisely the
+    # false equivalence this figure exists to avoid.
+    length(axs) > 1 && linkyaxes!(axs...)
 
     Label(fig[0, :],
         "Paired per-trial relative change vs \"$baseline\", in %. " *

@@ -693,7 +693,7 @@ function _require_cols(df::DataFrame, cols, who::AbstractString)
 end
 
 """
-    paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="Base (no correction)") -> DataFrame
+    paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="ZUPT only") -> DataFrame
 
 Per-trial change in `metric` relative to `reference_estimator`, for every noise spec.
 
@@ -716,7 +716,7 @@ Negative means the estimator beat the reference on that trial.
 function paired_estimator_contrast(
     df::DataFrame;
     metric::Symbol=:rmse_rate,
-    reference_estimator::AbstractString="Base (no correction)",
+    reference_estimator::AbstractString="ZUPT only",
 )::DataFrame
     _require_cols(df, vcat(_TRIAL_KEYS, [:estimator, :estimator_order, :noise_spec_tag,
             :noise_spec_order, :seed, metric]), "paired_estimator_contrast")

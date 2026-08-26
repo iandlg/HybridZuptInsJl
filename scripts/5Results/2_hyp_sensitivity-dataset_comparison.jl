@@ -25,10 +25,10 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Correction methods to compare
 estimators = OrderedDict(
-    "Base (no correction)" => HybridZuptInsJl.BaseEstimator,
-    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
     # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
-    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
@@ -67,7 +67,7 @@ results_figure() do
     HybridZuptInsJl.plot_paired_relative_change(
         results_df;
         metric=:rmse,
-        baseline="Base (no correction)",
+        baseline="ZUPT only",
         group=:dataset_name,
         save_path=stamped(SECTION, "dataset_comparison_paired"),
     )
