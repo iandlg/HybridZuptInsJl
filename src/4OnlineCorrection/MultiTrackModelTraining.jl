@@ -112,7 +112,7 @@ function multi_track_training_analysis(
                     pos_bias=noise_spec.pos_bias,
                     att_std=noise_spec.att_std,
                     att_bias=noise_spec.att_bias,
-                    rng=rng
+                    rng=Xoshiro(1000*train_id)
                 )
             end
 

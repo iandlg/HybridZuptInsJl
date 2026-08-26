@@ -37,10 +37,10 @@ train_labels = Dict(
         3 => "Walk_straight",
     ),
     "DCSC" => OrderedDict(
+        4 => "FigureEight_long",
         8 => "CW_Rect",
         12 => "Mixed",
         3 => "CCWRectangle_long_A",
-        4 => "FigureEight_long",
         5 => "S_shape_long",
         6 => "CWRectangle_long",
         10 => "FigureEightLong"
@@ -84,7 +84,8 @@ df_results = HybridZuptInsJl.multi_track_training_analysis(
     frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
     noise_spec=noise,
     train_tr_ratio=1.0,
-    test_tr_ratio=0.1,)
+    test_tr_ratio=0.1,
+)
 
 ## Plot
 # WAS: called without save_path, so this script wrote no figure either.

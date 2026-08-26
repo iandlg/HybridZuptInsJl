@@ -1,27 +1,17 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
+include("../5Results/_common.jl")
 using GLMakie, OrderedCollections
 
-# Choose Parameters file
+# Choose Parameters file (see HSGP_PARAM_PATHS in scripts/5Results/_common.jl)
 hsgp_p_key = 42
-
-hsgp_p_path = Dict{Int,String}(
-    41 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG23_HEADING_TWOD_STEP_YAW_2026-07-13T12:28:30.952.json",
-    42 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-12T10:25:45.876.json", # no output norm; trained on ANG2
-    43 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-12T10:41:50.718.json", # no ouptut norm; DCSC
-)[hsgp_p_key]
+m = 200
 
 # Load parameters with corresponding metatdata
-hsgp_p, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, hsgp_p_path)
+hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 data_key = "DCSC" # meta["data_key"]
-data_dir = Dict{String,String}(
-    "ANG" => "data/angermann_high_precision",
-    "ANG2" => "data/angermann_v2",
-    "DCSC" => "data/dcsc_optitrack"
-)[data_key]
+data_dir_path = data_dir(data_key)
 
-FRAME = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-FEATURE_TYPE = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
 var_pos = 1e-2
 var_yaw = 1e-3
 pos_std = 0.0 # 0.5
@@ -39,7 +29,7 @@ train_ratio = 0.5
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; sim_config=sim_config
+    data_dir_path, trial_id; sim_config=sim_config
 )
 
 # Extract the aligned initial state from the trajectory
@@ -61,8 +51,6 @@ true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 # Run online correction
-hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_m=m)
-
 io_data = OrderedDict()
 
 default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
@@ -126,7 +114,7 @@ trial_id = 14
 train_ratio = 0.1
 posyaw_measurement_update = true
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir, trial_id; sim_config=sim_config
+    data_dir_path, trial_id; sim_config=sim_config
 )
 # sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
 noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
