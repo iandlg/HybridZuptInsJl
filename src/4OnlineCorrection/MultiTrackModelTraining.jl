@@ -11,6 +11,7 @@ function multi_track_training_analysis(
     train_tr_ratio::Float64=1.0,
     noise_spec::Union{Nothing,NoiseSpec}=nothing,
     base_estimator::Tuple{<:AbstractString,<:Any}=("ZUPT INS", BaseEstimator),
+    rng::Random.AbstractRNG=Xoshiro(123)
 )::DataFrame
 
     # Results container
@@ -111,6 +112,7 @@ function multi_track_training_analysis(
                     pos_bias=noise_spec.pos_bias,
                     att_std=noise_spec.att_std,
                     att_bias=noise_spec.att_bias,
+                    rng=rng
                 )
             end
 
