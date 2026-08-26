@@ -4,11 +4,11 @@
 # Two figures per metric, both with the noise specs on the x axis and each box
 # spanning the trials:
 #
-#   1. Unpaired -- Base, Decoupled Static and Decoupled HSGP side by side, in the
-#      metric's own units. Shows the absolute error level at each noise level.
+#   1. Unpaired -- ZUPT only, Static and HSGP side by side, in the metric's own
+#      units. Shows the absolute error level at each noise level.
 #   2. Paired -- Static and HSGP only, as the per-trial relative change against
-#      Base on the SAME trial and the SAME noise realisation. Base is the zero
-#      line. Walk-to-walk difficulty cancels here, so a box clear of zero is a
+#      ZUPT only on the SAME trial and the SAME noise realisation. ZUPT only is
+#      the zero line. Walk-to-walk difficulty cancels here, so a box clear of zero is a
 #      consistent effect; in figure 1 the same effect can hide inside the spread.
 #
 # N_NOISE_DRAWS below controls how many noise realisations each (trial, noise
@@ -43,10 +43,10 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Define correction methods to compare
 estimators = OrderedDict(
-    "Base (no correction)" => HybridZuptInsJl.BaseEstimator,
+    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
     # "Joint static bias" => HybridZuptInsJl.JointStaticEstimator,
-    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
     # "Joint HSGP" => JointHsgpEstimator,
 )
 
@@ -95,7 +95,7 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
 # pasted in as PNGs from a REPL session.
 const SECTION = "5_NoiseRobustness"
 const DATASET = "Angermann"
-const BASE_ESTIMATOR = "Base (no correction)"
+const BASE_ESTIMATOR = "ZUPT only"
 
 for metric in (:rmse, :rmse_yaw)
     # (1) Absolute level: every estimator, per noise spec, boxed over trials.

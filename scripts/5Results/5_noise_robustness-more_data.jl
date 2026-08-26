@@ -22,9 +22,9 @@ data_dir_path = data_dir(data_key)
 #     "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
 # )
 estimators = OrderedDict(
-    "Decoupled Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
     # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
-    "Decoupled HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 train_labels = Dict(

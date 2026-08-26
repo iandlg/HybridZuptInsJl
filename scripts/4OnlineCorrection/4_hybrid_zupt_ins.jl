@@ -9,6 +9,24 @@ m = 200
 
 # Load parameters with corresponding metatdata
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
+use_hand_tuned = true
+if use_hand_tuned
+    new_hp = HybridZuptInsJl.SeHyperparams(
+        [0.06063349111094665, 1.9009449161575966, 0.06392436373774413],
+        [0.06063340044438242, 1.755542511682359, 0.09133912436420788],
+        [0.06063313723928771, 1.4138158563148968, 0.018763841300751767],
+        [0.01721875922611514, 14.684512247403717, 127.94772453083775]
+    )
+    # original 42
+    # new_hp = HybridZuptInsJl.SeHyperparams(
+    #     [0.06063349111094665, 1.9009449161575966, 0.06392436373774413],
+    #     [0.06063340044438242, 1.755542511682359, 0.09133912436420788],
+    #     [0.06063313723928771, 1.4138158563148968, 0.018763841300751767],
+    #     [0.01721875922611514, 14.684512247403717, 127.94772453083775]
+    # )
+    hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_hp=new_hp)
+end
+
 data_key = "DCSC" # meta["data_key"]
 data_dir_path = data_dir(data_key)
 
