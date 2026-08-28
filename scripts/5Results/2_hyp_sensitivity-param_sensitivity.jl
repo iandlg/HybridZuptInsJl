@@ -36,6 +36,11 @@ noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag
 # that happens. Set it to `true` to sweep the noise hyperparameters meaningfully.
 pred_includes_noise = false
 
+# σ_n is therefore excluded from the sweep below (`include_noise`), leaving the
+# length scale ℓ_s and the signal variance σ_f. Flip both together if you want
+# the noise term back.
+sweep_noise = pred_includes_noise
+
 rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, trial_id, train_ratio, FEATURE_TYPE, FRAME;
     m=m, output_channel_idxs=output_channel_idxs,
@@ -47,11 +52,12 @@ rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
 # Experiment variables
 groups = [Symbol(HybridZuptInsJl._OUTPUT_NAMES[idx]) for idx in output_channel_idxs]
 
-log_range = (-0.5, 0.5)
-n_steps = 5
+log_range = (-1.0, 1.0)
+n_steps = 20
 baseline_included = true
 
-specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs; log_range=log_range, n_steps=n_steps)
+specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs;
+    log_range=log_range, n_steps=n_steps, include_noise=sweep_noise)
 # specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p;
 #     log_range=log_range, n_steps=n_steps, output_channel_idxs=output_channel_idxs,
 #     include_output_params=false)
@@ -114,7 +120,7 @@ println("Saved JSON: $json_path")
 # re-read a hard-coded basename from a dict of timestamps, so editing the
 # compute cell above had no effect on the figures unless you also remembered to
 # add a key down here.
-replot_basename = nothing
+replot_basename = "ANG215_HEADING_TWOD_STEP_YAW_2026-08-27T13:12:11.074"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -142,7 +148,20 @@ results_figure() do
         save_path=results_path(SECTION, "$(plot_name)_signed_rel_change.svg"))
 end
 
+# Close-up of the single most consequential parameter. The signed-range plot
+# above compresses each parameter to the interval [min, max], which says how far
+# RMSE moved but not *how* it got there -- and for the yaw length scale the shape
+# is the result: the baseline sits on a local minimum, so perturbing it in either
+# direction reduces RMSE. 
+focus_param = HybridZuptInsJl.hp_param_name(:yaw, :length_scale)
+focus_slug = replace(focus_param, "[" => "_", "]" => "")  # "yaw[2]" -> "yaw_2", filename-safe
 results_figure() do
-    HybridZuptInsJl.plot_max_relative_change(plot_df; color_offset=2,
+    HybridZuptInsJl.plot_hp_param_sensitivity(plot_df, focus_param;
+        log_range=plot_log_range,
+        save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.svg"))
+end
+
+results_figure() do
+    HybridZuptInsJl.plot_max_relative_change(plot_df;
         save_path=results_path(SECTION, "$(plot_name)_max_rel_change.svg"))
 end

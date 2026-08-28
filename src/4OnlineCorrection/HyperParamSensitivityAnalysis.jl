@@ -137,26 +137,53 @@ function make_rmse_evaluator(
     return rmse_evaluator
 end
 
+"""
+    make_hp_param_grid(base_hp, output_channel_idxs; log_range, n_steps, include_noise=true)
+
+Build the one-at-a-time sweep specs for the GP hyperparameters of each requested
+output channel.
+
+`include_noise=false` drops the `noise` (σ_n) hyperparameter from the sweep.
+That is the useful setting whenever the evaluator runs with
+`pred_includes_noise=false`, because σ_n is then loaded into the estimator and
+never read: every one of its rows returns a bit-identical RMSE, and the result
+is a flat line that looks like an insensitivity finding but is a dead knob.
+Excluding it is honest about not having tested it; sweeping it and plotting the
+flat line is not.
+
+Parameter *names* keep the true index into the channel vector (`yaw[2]` is the
+length scale whether or not noise was swept), so names stay comparable across
+runs; only the grid layout closes up.
+"""
 function make_hp_param_grid(
     base_hp::SeHyperparams, output_channel_idxs::Vector{Int};
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
-    n_steps::Int=9
+    n_steps::Int=9,
+    include_noise::Bool=true
 )::Tuple{Vector{ParamSpec},ParamGrid}
 
     channel_names = [_OUTPUT_NAMES[idx] for idx in output_channel_idxs]
-    max_indices = [length(getfield(base_hp, Symbol(name))) for name in channel_names]
-    grid = ParamGrid(channel_names, max_indices)
+    keep(i) = include_noise || _HYPERPARAM_TYPES[i] != "noise"
+
+    kept_indices = [filter(keep, eachindex(getfield(base_hp, Symbol(name)))) for name in channel_names]
+    all(!isempty, kept_indices) || throw(ArgumentError(
+        "include_noise=false leaves no hyperparameters to sweep"))
+
+    grid = ParamGrid(channel_names, length.(kept_indices))
     specs = ParamSpec[]
 
     for (grp_idx, chan_name) in enumerate(channel_names)
-        vec = getfield(base_hp, Symbol(chan_name))
-        for (idx, base_val) in enumerate(vec)
+        # `col` is the position in the grid; `idx` stays the true index into the
+        # channel vector, which is what the parameter name and _HYPERPARAM_TYPES
+        # are keyed by. Conflating the two would silently relabel the length
+        # scale as the noise term whenever a parameter is skipped.
+        for (col, idx) in enumerate(kept_indices[grp_idx])
             name = "$(Symbol(chan_name))[$idx]"
             getter(p) = getfield(p.hp, Symbol(chan_name))[idx]
             setter(p, new_val) = basecopy(p; new_hp=modify_sehp(p.hp, Symbol(chan_name), idx, new_val))
             spec = ParamSpec(name, _HYPERPARAM_TYPES[idx], getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
-            place_spec!(grid, grp_idx, idx, spec)
+            place_spec!(grid, grp_idx, col, spec)
         end
     end
     return specs, grid
