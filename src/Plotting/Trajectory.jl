@@ -7,117 +7,472 @@ Plot 2D positions (X-Y) of ground truth and one or more estimated trajectories.
 - `trajs`: A `Trajectory` object (single estimate) or a `Dict{String,Trajectory}` (multiple).
 - `gt_traj`: Ground truth `Trajectory`.
 
+# Keywords
+- `segment`: which part of the track to draw -- `:full` (default), `:train` or `:test`.
+  `:train`/`:test` need `train_ratio` and cut the trajectory themselves, so callers do
+  not have to work out stride indices by hand. The title is labelled to match.
+- `train_ratio`: the same fraction passed to the filter. Required by `:train`/`:test`.
+- `start`/`stop`: explicit index window, overriding `segment` on whichever end is given.
+  Leave both `nothing` to let `segment` decide. Everything reported in the title and the
+  legend (duration, distance, RMSE) is measured over the drawn window only, never over
+  the full track.
+- `marker_stride`: draw a dot every Nth stride along each track. `0` (default) draws none:
+  on a looping walk the per-stride dots were the bulk of the clutter, and the start/stop
+  markers still show the direction of travel. Set e.g. `5` to get a pace cue back.
+- `segment_label`: overrides the name `segment` puts in the title.
+- `legend_position`: `:outer_right` (default) or `:outer_bottom` put the legend outside
+  the axis so it cannot cover the track. Any other symbol is passed to `axislegend` as an
+  in-axis anchor (`:rt`, `:lt`, ...), which is compact but may overlap the trajectory.
+- `save_path`: write the figure here as well as returning it. Call inside
+  `results_figure()` (`scripts/5Results/_common.jl`) so it is saved under the same
+  CairoMakie theme as every other results figure.
+
 # Returns
 - A `Figure` object (Makie figure).
 """
 function plot_groundtruth_vs_inertial_positions(
     trajs::Trajectory, gt_traj::Union{Nothing,Trajectory};
-    start=1,
-    stop=typemax(Int),
+    segment::Symbol=:full,
+    train_ratio::Union{Nothing,Real}=nothing,
+    start=nothing,
+    stop=nothing,
     show_heading=false,
     heading_stride=10,
     heading_length=0.15,
+    marker_stride=0,
+    segment_label::Union{Nothing,AbstractString}=nothing,
+    legend_position::Symbol=:outer_right,
+    save_path::Union{String,Nothing}=nothing,
 )
     plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj;
+        segment=segment,
+        train_ratio=train_ratio,
         start=start,
         stop=stop,
         show_heading=show_heading,
         heading_stride=heading_stride,
         heading_length=heading_length,
+        marker_stride=marker_stride,
+        segment_label=segment_label,
+        legend_position=legend_position,
+        save_path=save_path,
     )
+end
+
+"""
+    _segment_window(ref_traj, segment, train_ratio) -> (first, last)
+
+Index range of `ref_traj` covered by `segment` (`:full`, `:train` or `:test`).
+
+The train/test split is made on the IMU sample stream, which is uniformly sampled, so
+`train_ratio` is really a fraction of elapsed *time*. The trajectories plotted here are
+stride-indexed and strides are not uniform in time, so the cut is placed by time rather than
+by scaling the stride count -- otherwise the drawn window drifts away from the split the
+filter actually used, by more the more the walking pace varies.
+"""
+function _segment_window(ref_traj::Trajectory, segment::Symbol, train_ratio::Union{Nothing,Real})
+    return _segment_window(ref_traj.t, segment, train_ratio)
+end
+
+# Core method on a bare time vector, so anything time-indexed -- a Trajectory, a
+# CorrectionIO -- gets the same train/test cut from one implementation.
+function _segment_window(t::AbstractVector{<:Real}, segment::Symbol, train_ratio::Union{Nothing,Real})
+    n = length(t)
+    segment === :full && return (1, n)
+    segment in (:train, :test) ||
+        throw(ArgumentError("segment must be :full, :train or :test, got :$segment"))
+    isnothing(train_ratio) &&
+        throw(ArgumentError("segment=:$segment needs train_ratio (the fraction passed to the filter)"))
+    0 <= train_ratio <= 1 ||
+        throw(ArgumentError("train_ratio must be in [0, 1], got $train_ratio"))
+
+    t_cut = t[1] + train_ratio * (t[n] - t[1])
+    n_train = something(findlast(<=(t_cut), t), 0)
+    segment === :train && return (1, max(n_train, 1))
+    return (min(n_train + 1, n), n)
+end
+
+"""
+    _heading_arrows!(ax, traj, idx, len, color)
+
+Draw yaw arrows at `idx` along `traj`. Shared so the ground-truth and estimate paths
+cannot drift apart in how they read heading out of `R_nb`.
+"""
+function _heading_arrows!(ax, traj::Trajectory, idx, len::Real, color)
+    pts = Point2f[]
+    dirs = Vec2f[]
+    for i in idx
+        h = matrix_to_euler(traj.R_nb[:, :, i])[3]
+        push!(pts, Point2f(traj.pos[1, i], traj.pos[2, i]))
+        push!(dirs, len * Vec2f(cos(h), sin(h)))
+    end
+    arrows2d!(ax, pts, dirs; color=color)
+end
+
+"""
+    _window_rmse(traj, gt_traj, window) -> Union{Nothing,Float64}
+
+Horizontal RMSE of `traj` against `gt_traj` over `window`, or `nothing` when the two
+cannot be compared there (window runs past either trajectory, or the time bases do not
+line up). Returning `nothing` rather than throwing lets the caller simply drop the
+number from a legend label instead of failing the whole plot.
+"""
+function _window_rmse(traj::Trajectory, gt_traj::Trajectory, window::AbstractRange)
+    (last(window) <= length(traj.t) && last(window) <= length(gt_traj.t)) || return nothing
+    tr_w, gt_w = traj[window], gt_traj[window]
+    is_compatible(tr_w, gt_w) || return nothing
+    return rmse(tr_w, gt_w)[end]
+end
+
+"""
+    _draw_tracks!(ax, trajs, gt_traj, win_start, win_stop; kwargs...) -> (entries, labels, series)
+
+Draw the ground truth and every estimated track onto `ax` over `win_start:win_stop`,
+and return the legend entries/labels plus the `(traj, colour, last_index)` triples in
+the order they were drawn.
+
+Split out so the standalone top-down figure and the combined
+[`plot_trajectory_and_distance_error`](@ref) draw the same tracks in the same colours
+from one piece of code, and so the colour a series gets in one panel is by construction
+the colour it gets in the other.
+"""
+function _draw_tracks!(
+    ax,
+    trajs::AbstractDict{String,Trajectory},
+    gt_traj::Union{Nothing,Trajectory},
+    win_start::Int,
+    win_stop::Int;
+    show_heading::Bool=false,
+    heading_stride::Int=10,
+    heading_length::Float64=0.15,
+    marker_stride::Int=0
+)
+    # Casing colour: the axis background, not hard white, so the halo stays invisible
+    # under both the default theme and theme_ggplot2's grey panel.
+    casing_color = ax.backgroundcolor[]
+    casing_width = 1.8
+    line_width = 1.2
+
+    # Legend entries are built from LineElement/MarkerElement rather than from plot
+    # objects: the tracks are drawn as per-stride segments below, so there is no single
+    # plot per series to point the legend at.
+    entries = Vector{Any}[]
+    labels = String[]
+    # Markers and heading arrows go on last, after every line segment: drawn inline they
+    # would be clipped by the casing of whatever is drawn after them.
+    overlay_passes = Function[]
+
+    series = Tuple{Trajectory,Any,Int}[]
+
+    for ((key, traj), c) in zip(trajs, Iterators.cycle(Makie.wong_colors()))
+        n = min(length(traj.t), win_stop)
+        push!(series, (traj, c, n))
+
+        window_rmse = isnothing(gt_traj) ? nothing : _window_rmse(traj, gt_traj, win_start:n)
+        label = isnothing(window_rmse) ? key : @sprintf("%s - RMSE %.2f m", key, window_rmse)
+
+        entry = Any[LineElement(color=c, linewidth=line_width)]
+        marker_stride > 0 &&
+            push!(entry, MarkerElement(color=c, marker=:circle, markersize=5))
+        push!(entries, entry)
+        push!(labels, label)
+
+        push!(overlay_passes, function ()
+            if marker_stride > 0
+                idx = win_start:marker_stride:n
+                scatter!(ax, traj.pos[1, idx], traj.pos[2, idx];
+                    color=c, marker=:circle, markersize=5, alpha=0.6)
+            end
+            scatter!(ax, [traj.pos[1, win_start]], [traj.pos[2, win_start]];
+                color=c, marker=:circle, markersize=12)
+            scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
+                color=c, marker=:rect, markersize=12)
+            show_heading && _heading_arrows!(ax, traj, win_start:heading_stride:n, heading_length, c)
+        end)
+    end
+
+    # Draw one time step at a time across ALL series, rather than one whole polyline per
+    # series. Whole polylines make the z-order follow the order of `trajs`, so the last
+    # entry sits on top of the others everywhere on the plot regardless of when each part
+    # of the walk happened. Stepping through time instead means a later part of any track
+    # covers an earlier part of any other, which is what the casing is meant to convey.
+    for k in win_start:(win_stop-1)
+        segs = Point2f[]
+        cols = []
+        for (traj, c, n) in series
+            k + 1 <= n || continue
+            push!(segs, Point2f(traj.pos[1, k], traj.pos[2, k]),
+                Point2f(traj.pos[1, k+1], traj.pos[2, k+1]))
+            push!(cols, c)
+        end
+        isempty(segs) && continue
+        linesegments!(ax, segs; color=casing_color, linewidth=line_width + casing_width)
+        linesegments!(ax, segs; color=repeat(cols, inner=2), linewidth=line_width)
+    end
+
+    if !isnothing(gt_traj)
+        n = min(length(gt_traj.t), win_stop)
+        idx = win_start:n
+
+        # Ground truth stays a single uncased polyline on top of everything. It is the
+        # reference the estimates are read against, so unlike the estimates it should not
+        # be chopped up by anything -- and a dashed black line reads over them cleanly.
+        lines!(ax, gt_traj.pos[1, idx], gt_traj.pos[2, idx];
+            color=:black, linestyle=:dash, linewidth=line_width)
+
+        gt_entry = Any[LineElement(color=:black, linestyle=:dash, linewidth=line_width)]
+        marker_stride > 0 &&
+            push!(gt_entry, MarkerElement(color=:black, marker=:circle, markersize=5))
+        pushfirst!(entries, gt_entry)
+        pushfirst!(labels, "Ground truth")
+
+        push!(overlay_passes, function ()
+            if marker_stride > 0
+                m_idx = win_start:marker_stride:n
+                scatter!(ax, gt_traj.pos[1, m_idx], gt_traj.pos[2, m_idx];
+                    color=:black, marker=:circle, markersize=5, alpha=0.6)
+            end
+            scatter!(ax, [gt_traj.pos[1, win_start]], [gt_traj.pos[2, win_start]];
+                color=:black, marker=:circle, markersize=12)
+            scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
+                color=:black, marker=:rect, markersize=12)
+            show_heading && _heading_arrows!(ax, gt_traj, win_start:heading_stride:n, heading_length, :black)
+        end)
+    end
+
+    foreach(f -> f(), overlay_passes)
+
+    return entries, labels, series
 end
 
 function plot_groundtruth_vs_inertial_positions(
     trajs::AbstractDict{String,Trajectory},
     gt_traj::Union{Nothing,Trajectory};
-    start::Int=1,
-    stop::Int=typemax(Int),
+    segment::Symbol=:full,
+    train_ratio::Union{Nothing,Real}=nothing,
+    start::Union{Nothing,Int}=nothing,
+    stop::Union{Nothing,Int}=nothing,
     show_heading::Bool=false,
     heading_stride::Int=10,
     heading_length::Float64=0.15,
+    marker_stride::Int=0,
+    segment_label::Union{Nothing,AbstractString}=nothing,
+    legend_position::Symbol=:outer_right,
+    save_path::Union{String,Nothing}=nothing
 )
 
-    fig = Figure(size=(800, 600))
+    # The window is common to every series, so measure it once on whichever trajectory
+    # is available -- ground truth when there is one, otherwise the first estimate.
+    ref_traj = isnothing(gt_traj) ? first(values(trajs)) : gt_traj
+    n_ref = length(ref_traj.t)
+
+    # `segment` picks the window; an explicit start/stop overrides it on that end.
+    seg_start, seg_stop = _segment_window(ref_traj, segment, train_ratio)
+    win_start = clamp(isnothing(start) ? seg_start : start, 1, n_ref)
+    win_stop = clamp(isnothing(stop) ? seg_stop : stop, win_start, n_ref)
+    window = win_start:win_stop
+    n_strides = win_stop - win_start
+
+    duration = ref_traj.t[win_stop] - ref_traj.t[win_start]
+    distance = total_distance(ref_traj[window])
+
+    name = isnothing(segment_label) ?
+           (segment === :train ? "Train" : segment === :test ? "Test" : nothing) :
+           segment_label
+
+    title = isnothing(name) ?
+            "Ground truth vs estimated trajectories" :
+            "Ground truth vs estimated trajectories — $(name) segment"
+    subtitle = @sprintf("%d strides · %.1f s · %.1f m travelled",
+        n_strides, duration, distance)
+    # if !isnothing(gt_traj)
+    #     subtitle *= " · legend RMSE over this window"
+    # end
+
+    # An in-axis legend sooner or later sits on top of the track, since where the walk
+    # goes is data-dependent. Default to a legend outside the axis instead, and widen
+    # the figure to pay for it so the plotting area itself does not shrink.
+    fig_size = legend_position === :outer_right ? (1050, 600) :
+               legend_position === :outer_bottom ? (800, 700) : (800, 600)
+
+    fig = Figure(size=fig_size)
     ax = Axis(fig[1, 1];
         xlabel="X (m)",
         ylabel="Y (m)",
-        title="Ground truth vs estimated trajectories",
+        title=title,
+        subtitle=subtitle,
         aspect=DataAspect(),
         xgridvisible=true)
 
-    if !isnothing(gt_traj)
-        n = min(length(gt_traj.t), stop)
-        start = min(length(gt_traj.t), start)
+    entries, labels, series = _draw_tracks!(ax, trajs, gt_traj, win_start, win_stop;
+        show_heading=show_heading, heading_stride=heading_stride,
+        heading_length=heading_length, marker_stride=marker_stride)
 
-        lines!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
-            color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
+    if legend_position === :outer_right
+        Legend(fig[1, 2], entries, labels; framevisible=false)
+    elseif legend_position === :outer_bottom
+        Legend(fig[2, 1], entries, labels; framevisible=false,
+            orientation=:horizontal, nbanks=2, tellwidth=false, tellheight=true)
+    else
+        # Anything else is treated as an in-axis anchor (:rt, :lt, :rb, ...).
+        axislegend(ax, entries, labels; position=legend_position)
+    end
 
-        scatter!(ax, gt_traj.pos[1, start:n], gt_traj.pos[2, start:n];
-            color=:black, marker=:circle, markersize=5, alpha=0.6)
-
-        scatter!(ax, [gt_traj.pos[1, start]], [gt_traj.pos[2, start]];
-            color=:black, marker=:circle, markersize=12, label="Start")
-
-        scatter!(ax, [gt_traj.pos[1, n]], [gt_traj.pos[2, n]];
-            color=:black, marker=:rect, markersize=12, label="End")
-
-        if show_heading
-            idx = start:heading_stride:n
-            pts = Point2f[]
-            dirs = Vec2f[]
-
-            for i in idx
-                h = matrix_to_euler(gt_traj.R_nb[:, :, i])[3]
-                push!(pts, Point2f(gt_traj.pos[1, i], gt_traj.pos[2, i]))
-                push!(dirs, heading_length * Vec2f(cos(h), sin(h)))
-            end
-
-            arrows2d!(ax, pts, dirs;
-                color=:black, label="Ground truth")
+    # DataAspect() constrains what is *drawn*, not the layout cell: the cell keeps the
+    # whole column width, so the axis floats in the middle of it and a legend in the next
+    # column is pushed far off to the right by the leftover space. Size the column to the
+    # data instead, then shrink the figure onto the layout so no gap survives. Only
+    # :outer_right needs this -- a legend below is centred under the axis, so horizontal
+    # slack never strands it.
+    if legend_position === :outer_right
+        reset_limits!(ax)
+        lims = ax.finallimits[]
+        if lims.widths[1] > 0 && lims.widths[2] > 0
+            # Clamped: a long thin corridor would otherwise collapse the column to a
+            # sliver too narrow to hold the title, which trades one bad figure for another.
+            ratio = clamp(lims.widths[1] / lims.widths[2], 0.6, 3.0)
+            colsize!(fig.layout, 1, Aspect(1, ratio))
+            resize_to_layout!(fig)
         end
     end
 
-    colors = Makie.wong_colors()
-    color_cycle = Iterators.cycle(colors)
-
-    for (key, traj) in trajs
-        c = first(color_cycle)
-        color_cycle = Iterators.drop(color_cycle, 1)
-
-        n = min(length(traj.t), stop)
-
-        lines!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
-            color=c, linewidth=1, label=key)
-
-        scatter!(ax, traj.pos[1, start:n], traj.pos[2, start:n];
-            color=c, marker=:circle, markersize=5, alpha=0.6, label=key)
-
-        scatter!(ax, [traj.pos[1, start]], [traj.pos[2, start]];
-            color=c, marker=:circle, markersize=12, label=key)
-
-        scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
-            color=c, marker=:rect, markersize=12, label=key)
-
-        if show_heading
-            idx = start:heading_stride:n
-            pts = Point2f[]
-            dirs = Vec2f[]
-
-            for i in idx
-                h = matrix_to_euler(traj.R_nb[:, :, i])[3]
-                push!(pts, Point2f(traj.pos[1, i], traj.pos[2, i]))
-                push!(dirs, heading_length * Vec2f(cos(h), sin(h)))
-            end
-
-            arrows2d!(ax, pts, dirs;
-                color=c)
-        end
-    end
-
-    axislegend(ax; position=:rt, merge=true)
+    isnothing(save_path) || save(save_path, fig)
     return fig
 end
 
+
+"""
+    plot_trajectory_and_distance_error(trajs, gt_traj; kwargs...)
+
+Top-down 2D trajectory on the left, absolute horizontal distance error on the right, one
+shared legend for both.
+
+Both panels cover the *same* window of the track, chosen with `segment`/`train_ratio` (or
+an explicit `start`/`stop`) exactly as in [`plot_groundtruth_vs_inertial_positions`](@ref),
+so a bump in the error curve can be traced to a place on the map without the reader having
+to reconcile two different index ranges. Series colours are shared for the same reason:
+both panels are driven by one pass of [`_draw_tracks!`](@ref).
+
+Ground truth appears in the left panel and in the legend but not in the error panel, where
+its error is zero by construction.
+
+# Keywords
+Everything [`plot_groundtruth_vs_inertial_positions`](@ref) takes, plus:
+- `gt_available`: per-step `Bool` vector marking steps where ground truth was fed to the
+  filter; those points are dotted onto the error curve, as in
+  [`plot_position_distance_error`](@ref). Indexed over the same steps as `trajs`.
+- `legend_position`: `:outer_right` (default, a third column) or `:outer_bottom` (one
+  horizontal legend spanning both panels).
+
+# Returns
+- A `Figure` object (Makie figure).
+"""
+function plot_trajectory_and_distance_error(
+    trajs::AbstractDict{String,Trajectory},
+    gt_traj::Trajectory;
+    segment::Symbol=:full,
+    train_ratio::Union{Nothing,Real}=nothing,
+    start::Union{Nothing,Int}=nothing,
+    stop::Union{Nothing,Int}=nothing,
+    show_heading::Bool=false,
+    heading_stride::Int=10,
+    heading_length::Float64=0.15,
+    marker_stride::Int=0,
+    gt_available::Union{Nothing,AbstractVector{Bool}}=nothing,
+    segment_label::Union{Nothing,AbstractString}=nothing,
+    legend_position::Symbol=:outer_right,
+    save_path::Union{String,Nothing}=nothing
+)
+    n_ref = length(gt_traj.t)
+    seg_start, seg_stop = _segment_window(gt_traj, segment, train_ratio)
+    win_start = clamp(isnothing(start) ? seg_start : start, 1, n_ref)
+    win_stop = clamp(isnothing(stop) ? seg_stop : stop, win_start, n_ref)
+    window = win_start:win_stop
+
+    duration = gt_traj.t[win_stop] - gt_traj.t[win_start]
+    distance = total_distance(gt_traj[window])
+
+    name = isnothing(segment_label) ?
+           (segment === :train ? "Train" : segment === :test ? "Test" : nothing) :
+           segment_label
+    title = isnothing(name) ?
+            "Ground truth vs estimated trajectories" :
+            "Ground truth vs estimated trajectories — $(name) segment"
+    subtitle = @sprintf("%d strides · %.1f s · %.1f m travelled",
+        win_stop - win_start, duration, distance)
+
+    fig = Figure(size=legend_position === :outer_bottom ? (1200, 620) : (1500, 560))
+
+    ax_traj = Axis(fig[1, 1];
+        xlabel="X (m)",
+        ylabel="Y (m)",
+        title=title,
+        subtitle=subtitle,
+        aspect=DataAspect(),
+        xgridvisible=true)
+
+    entries, labels, series = _draw_tracks!(ax_traj, trajs, gt_traj, win_start, win_stop;
+        show_heading=show_heading, heading_stride=heading_stride,
+        heading_length=heading_length, marker_stride=marker_stride)
+
+    ax_err = Axis(fig[1, 2];
+        xlabel="Time (s)",
+        ylabel="Position error (m)",
+        title="Absolute distance error",
+        subtitle=" ",   # keeps the two panels' plot areas aligned under their titles
+        xgridvisible=true)
+
+    # Time is measured from the start of the window, not from the start of the recording,
+    # so a test segment reads as "0 s in" rather than starting at some arbitrary offset.
+    t0 = gt_traj.t[win_start]
+
+    for (traj, c, n) in series
+        idx = win_start:min(n, win_stop)
+        diff = traj.pos[1:2, idx] .- gt_traj.pos[1:2, idx]
+        dist = sqrt.(sum(diff .^ 2, dims=1))[:]
+
+        lines!(ax_err, traj.t[idx] .- t0, dist; color=c, linewidth=1.2)
+
+        if !isnothing(gt_available)
+            # Steps where ground truth was actually fed to the filter. Restricted to the
+            # drawn window, so this is empty on a :test segment -- which is correct, and
+            # the reason it is worth showing on :full.
+            marked = [i for i in idx if i <= length(gt_available) && gt_available[i]]
+            if !isempty(marked)
+                scatter!(ax_err, traj.t[marked] .- t0, dist[marked .- (win_start - 1)];
+                    marker=:circle, color=:black, markersize=6,
+                    strokewidth=1, strokecolor=:white)
+            end
+        end
+    end
+
+    if legend_position === :outer_bottom
+        Legend(fig[2, 1:2], entries, labels; framevisible=false,
+            orientation=:horizontal, nbanks=2, tellwidth=false, tellheight=true)
+    else
+        Legend(fig[1, 3], entries, labels; framevisible=false)
+    end
+
+    # Same DataAspect story as the single-panel figure: without this the map panel keeps a
+    # full share of the width whatever its shape, and the error panel is squeezed for room
+    # the map is not using. Sizing column 1 to the data hands that width back.
+    reset_limits!(ax_traj)
+    lims = ax_traj.finallimits[]
+    if lims.widths[1] > 0 && lims.widths[2] > 0
+        ratio = clamp(lims.widths[1] / lims.widths[2], 0.6, 3.0)
+        colsize!(fig.layout, 1, Aspect(1, ratio))
+        resize_to_layout!(fig)
+    end
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+function plot_trajectory_and_distance_error(
+    trajs::Trajectory, gt_traj::Trajectory; kwargs...
+)
+    plot_trajectory_and_distance_error(Dict("Estimation" => trajs), gt_traj; kwargs...)
+end
 
 """
     plot_position_rmse(trajs::Union{Dict{String, Trajectory}, Trajectory}, gt_traj::Trajectory)
@@ -745,7 +1100,7 @@ function plot_trajectory(positions::Vector{Point3f}, Rs::Vector{<:AbstractMatrix
 
     # --- Label (can also use @lift or lift) ---
     lbl = lift(sl.value) do idx
-        "Step: $idx / $N"
+        "Time step: $idx / $N"
     end
     Label(fig[0, 1], lbl, tellwidth=false)
 

@@ -9,7 +9,7 @@ m = 200
 
 # Load parameters with corresponding metatdata
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
-use_hand_tuned = true
+use_hand_tuned = false
 if use_hand_tuned
     new_hp = HybridZuptInsJl.SeHyperparams(
         [0.06063349111094665, 1.9009449161575966, 0.06392436373774413],
@@ -27,10 +27,13 @@ if use_hand_tuned
     hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_hp=new_hp)
 end
 
-data_key = "DCSC" # meta["data_key"]
+data_key = "ANG2" # meta["data_key"]
 data_dir_path = data_dir(data_key)
+# Saved figures go to out/Results/<section>/, the same tree scripts/5Results/ writes to.
+# Plain variable, not `const`: this script gets re-included in a live REPL.
+section = "1_Performance/Trajectory2D"
 
-var_pos = 1e-2
+var_pos = 1e-3
 var_yaw = 1e-3
 pos_std = 0.0 # 0.5
 att_std = 0.0 # 5*pi/180
@@ -40,14 +43,14 @@ sigma_groundtruth = (
     sqrt(var_pos)+pos_std,
     sqrt(var_yaw)+att_std
 )
-posyaw_measurement_update=false
+posyaw_measurement_update=true
 
-trial_id = 5 # meta["trial_id"]
+trial_id = 4 # meta["trial_id"]
 train_ratio = 0.5
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
+# sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir_path, trial_id; sim_config=sim_config
+    data_dir_path, trial_id;# sim_config=sim_config
 )
 
 # Extract the aligned initial state from the trajectory
@@ -81,10 +84,10 @@ zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_mo
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-static_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
-zupt, step_seg, stat_corr_traj, io_data["Joint Static"], joint_stat_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, static_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
+# static_corr = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
+# zupt, step_seg, stat_corr_traj, io_data["Joint Static"], joint_stat_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, noisy_gt_traj, static_corr;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
 decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
@@ -92,10 +95,10 @@ zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = 
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
 
-slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], hsgp_joint_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, slamHsgp_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
+# slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
+# zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], hsgp_joint_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, noisy_gt_traj, slamHsgp_corr;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
 input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
@@ -105,16 +108,33 @@ for (method_name, io_dict) in io_data
 end
 
 trajs = OrderedDict(
-    "Base" => def_corr_traj,
-    "Decoupled Static" => decoupled_stat_traj,
-    "Joint Static" => stat_corr_traj,
-    "Decoupled HSGP" => hsgp1_corr_traj,
-    "Joint HSGP" => slamHsgp_corr_traj
+    "ZUPT only" => def_corr_traj,
+    "Static" => decoupled_stat_traj,
+    # "Joint Static" => stat_corr_traj,
+    "HSGP" => hsgp1_corr_traj,
+    # "Joint HSGP" => slamHsgp_corr_traj
 )
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; stop=105, show_heading=false, heading_stride=1)
+
+# results_figure() == CairoMakie + theme_ggplot2(), the theme every saved results figure
+# uses. It has to be CairoMakie: saving SVG under GLMakie silently rasterises the figure.
+fig = results_figure() do
+    HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg];
+        segment=:test, train_ratio=train_ratio, show_heading=false, heading_stride=1,
+        save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
+end
+
+# Same test window as above, with the absolute distance error panel alongside it and a
+# single shared legend. Saved next to the map-only figure, under its own name.
+fig_traj_err = results_figure() do
+    HybridZuptInsJl.plot_trajectory_and_distance_error(trajs, gt_traj_aligned[step_seg];
+        segment=:test, train_ratio=train_ratio,
+        save_path=stamped(section, "trajectory2d_disterr_$(data_key)_trial$(trial_id)"))
+end
+# results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
+GLMakie.activate!()
 
 with_theme(theme_ggplot2()) do
     fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
@@ -187,16 +207,24 @@ for (method_name, io_dict) in io_data
 end
 
 trajs = OrderedDict(
-    "Base" => def_corr_traj,
-    "Decoupled Static" => decoupled_stat_traj,
+    "ZUPT only" => def_corr_traj,
+    "Static" => decoupled_stat_traj,
     "Joint Static" => joint_stat_traj,
-    "Decoupled HSGP" => hsgp1_corr_traj,
+    "HSGP" => hsgp1_corr_traj,
     "Joint HSGP" => slamHsgp_corr_traj
 )
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=100, show_heading=false, heading_stride=1)
+# results_figure() == CairoMakie + theme_ggplot2(), the theme every saved results figure
+# uses. It has to be CairoMakie: saving SVG under GLMakie silently rasterises the figure.
+fig = results_figure() do
+    HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg];
+        segment=:test, train_ratio=train_ratio, show_heading=false, heading_stride=1,
+        save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
+end
+# results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
+GLMakie.activate!()
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
 
 with_theme(theme_ggplot2()) do
