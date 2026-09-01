@@ -56,3 +56,17 @@ q1 = [0.1, 0.2, 0.3, 0.4]
 q1 = q1 ./ norm(q1)
 R1 = HybridZuptInsJl.quat_to_matrix(q1)
 R1_eq_65 = (q1[1]^2 - q1[2:4]' * q1[2:4]) * I(3) + 2 * q1[2:4] * q1[2:4]' + 2 * q1[1] * HybridZuptInsJl.skew(q1[2:4])
+
+## θ₃(qᵢ^wh) − θ₃(qᵢ₋₁^wh) = θ₃(Δqᵢ^b)
+using Random
+rng = Xoshiro(123)
+q1 = HybridZuptInsJl.normalize_quat(randn(rng, 4))
+q2 = HybridZuptInsJl.normalize_quat(randn(rng, 4))
+
+θ1 = HybridZuptInsJl.matrix_to_euler(HybridZuptInsJl.quat_to_matrix(q1))[3]
+θ2 = HybridZuptInsJl.matrix_to_euler(HybridZuptInsJl.quat_to_matrix(q2))[3]
+
+HybridZuptInsJl.wrap_pi(θ2 - θ1)
+
+Δq = HybridZuptInsJl.quat_multiply(HybridZuptInsJl.quat_conjugate(q1), q2)
+HybridZuptInsJl.wrap_pi(HybridZuptInsJl.matrix_to_euler(HybridZuptInsJl.quat_to_matrix(Δq))[3])

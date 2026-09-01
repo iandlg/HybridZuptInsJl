@@ -66,7 +66,7 @@ params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 # to evaluate key $(hsgp_p_key) as trained. Keeping this explicit matters: the
 # figure is otherwise labelled with a hyperparameter key whose values were not
 # the ones used.
-use_hand_tuned = true
+use_hand_tuned = false
 if use_hand_tuned
     new_hp = HybridZuptInsJl.SeHyperparams(
         [5e-1, 2.0, 0.09],
