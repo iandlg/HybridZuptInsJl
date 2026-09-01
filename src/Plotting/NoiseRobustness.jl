@@ -252,6 +252,8 @@ function plot_multi_track_training_quality(
 
     # ----- Create figure -----
     fig = Figure(size=(450 * n_cols, 450 * n_rows))
+    axs = Axis[]
+    first_col_axs = Axis[]
 
     for (idx, test_id) in enumerate(test_ids)
         row_i = (idx - 1) ÷ n_cols + 1
@@ -264,6 +266,8 @@ function plot_multi_track_training_quality(
             title="Tested on $test_name",
             ylabel=metric_name,
             xgridvisible=false)
+        push!(axs, ax)
+        col_i == 1 && push!(first_col_axs, ax)
 
         # Position each group at integer x: baseline at 1, step 1 at 2, etc.
         group_positions = Dict{Int,Float64}()
@@ -278,7 +282,7 @@ function plot_multi_track_training_quality(
             base_pos = group_positions[0]
             barplot!(ax, [base_pos], [base_val]; color=baseline_color, width=0.6)
             if !isnan(base_val)
-                text!(ax, base_pos, base_val; text=string(round(base_val, digits=4)),
+                text!(ax, base_pos, base_val; text=string(round(base_val, digits=2)),
                     align=(:center, :bottom), fontsize=9)
             end
         end
@@ -301,7 +305,7 @@ function plot_multi_track_training_quality(
                 xpos = group_center + offsets[j]
                 barplot!(ax, [xpos], [val]; color=est_colors[est], width=bar_width * 0.9)
                 if !isnan(val)
-                    text!(ax, xpos, val; text=string(round(val, digits=4)),
+                    text!(ax, xpos, val; text=string(round(val, digits=2)),
                         align=(:center, :bottom), fontsize=8)
                 end
             end
@@ -312,6 +316,18 @@ function plot_multi_track_training_quality(
         xticks_lab = [group_labels[order] for order in all_orders]
         ax.xticks = (xticks_pos, xticks_lab)
         ax.xticklabelrotation = π / 6
+    end
+
+    # ----- Share one y scale across panels -----
+    # Each panel is the same metric on a different test track, so autoscaling them
+    # independently makes bars of different magnitude draw at the same height and
+    # invites reading a bad track as a good one. Only the leftmost column keeps its
+    # ticks/label; the rest are redundant once the scale is common.
+    if length(axs) > 1
+        linkyaxes!(axs...)
+        for ax in axs
+            ax in first_col_axs || hideydecorations!(ax; grid=false)
+        end
     end
 
     # ----- Legend -----
