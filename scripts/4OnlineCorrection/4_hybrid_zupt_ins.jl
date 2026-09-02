@@ -45,7 +45,7 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
-trial_id = 4 # meta["trial_id"]
+trial_id = 15 # meta["trial_id"]
 train_ratio = 0.5
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)

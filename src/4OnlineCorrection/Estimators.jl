@@ -933,6 +933,7 @@ end
 function learned_measurement_update!(c::DecoupledHsgpEstimator;
     feature_type::FeatureType,
     feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
+    Δs_h::AbstractVector{Float64}=zeros(4),
     kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
 
     p = c.p
@@ -967,6 +968,12 @@ function learned_measurement_update!(c::DecoupledHsgpEstimator;
     # Denormalise (masked channels only)
     pred_masked = pred_masked .* c.params.output_stats[2][mask] .+ c.params.output_stats[1][mask]
     Σ_pred_masked = Diagonal(c.params.output_stats[2][mask]) * Σ_pred_masked * Diagonal(c.params.output_stats[2][mask])
+
+    # The GP was trained on the *raw INS* stride, so its prediction reconstructs
+    # the GT stride relative to that stride, not relative to the corrector's own
+    # nominal. Re-base it onto the corrector: innovation = ŷ + (s_ins - s_corr).
+    # Zero when the two nominals agree, which is the old (corrector-fed) case.
+    pred_masked .+= Δs_h[mask]
 
     # Update measurement matrix H_update
     c.H[1:p, 1:6, c.i] .= 0.0

@@ -35,6 +35,7 @@ function hybrid_zupt_aided_insv2(
     F_store = zeros(9, 9, N)
     ΔP = zeros(Float64, 9, 9)
     mat66 = zeros(Float64, 6, 6)
+    v, R_wb_prev, R_wb_curr = zeros(Float64, 3), zeros(Float64, 3, 3), zeros(Float64, 3, 3)
 
     P[1:3, 1:3, 1] = Diagonal(sigma_initial_pos_array(simdata) .^ 2)
     P[4:6, 4:6, 1] = Diagonal(sigma_initial_vel_array(simdata) .^ 2)
@@ -158,7 +159,21 @@ function hybrid_zupt_aided_insv2(
         )
 
         # Compute stride error and estimated stride 
-        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl = stride_error(ref_frame;
+        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wh_ins_prev = stride_error(ref_frame;
+            R_wb=(quat_to_matrix(quat[:, prev_step]), quat_to_matrix(quat[:, curr_step])),
+            Δp=x[1:3, curr_step] - x[1:3, prev_step],
+            Σ_ΔpΔθ3=ΔP[[1:3; 9], [1:3; 9]],
+            R_wb_gt=(gt_traj.R_nb[:, :, prev_step], gt_traj.R_nb[:, :, curr_step]),
+            Δp_gt=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step],
+            Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+        )
+
+        # Corrector's own nominal stride, in *its* heading frame. Same convention
+        # as the INS stride above: each stride is expressed in the heading frame
+        # of the estimator it came from, so the two are directly comparable and
+        # the accumulated heading difference between them must NOT be rotated
+        # out (see Δs_h below).
+        _, _, stride, _, R_aug_wh_prev = stride_error(ref_frame;
             R_wb=(quat_to_matrix(corrector.quat[:, corrector.i-1]), quat_to_matrix(corrector.quat[:, corrector.i])),
             Δp=corrector.pos[:, corrector.i] - corrector.pos[:, corrector.i-1],
             Σ_ΔpΔθ3=ΔP[[1:3; 9], [1:3; 9]],
@@ -166,6 +181,14 @@ function hybrid_zupt_aided_insv2(
             Δp_gt=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step],
             Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
         )
+
+        # Offset between the stride the GP was trained on (raw INS) and the
+        # corrector's nominal stride. Both live in the heading-frame convention,
+        # so this is a plain difference; it is ~0 when the corrector and the INS
+        # differ by a pure yaw, and reduces to 0 in the old formulation where the
+        # feature was built from the corrector itself.
+        Δs_h = ins_stride - stride
+        Δs_h[4] = wrap_pi(Δs_h[4])
 
         # Compute feature
         feature, Σ_feature = compute_feature(feature_type;
@@ -202,7 +225,7 @@ function hybrid_zupt_aided_insv2(
             residual, residual_var = stride_measurement_update!(corrector;
                 feature_type=feature_type,
                 stride_err=stride_err, Σ_err=Σ_err,
-                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl,
+                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wh_ins_prev,
             )
 
             if posyaw_measurement_update
@@ -230,7 +253,7 @@ function hybrid_zupt_aided_insv2(
             # @info "No GT available"
             pred, var_pred, pred_norm, var_pred_norm = learned_measurement_update!(corrector;
                 feature_type=feature_type,
-                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl)
+                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wh_prev, Δs_h=Δs_h)
             if !isnothing(pred) && !isnothing(var_pred)
                 append_io!(io_data["prediction"], inertial.t[prev_step], pred, sqrt.(var_pred))
             end
