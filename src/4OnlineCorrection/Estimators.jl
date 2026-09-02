@@ -309,10 +309,7 @@ function dynamic_update!(c::BaseEstimator; t::Float64, Δp::AbstractVector{Float
     c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
 end
 
-function stride_measurement_update!(c::BaseEstimator;
-    stride_err::AbstractVector{Float64}, Σ_err::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
-    kwargs...
-)
+function stride_measurement_update!(c::BaseEstimator; kwargs...)
     # c.H[1:3, 1:3, c.i] = R_aug_wl[1:3, 1:3]' # H[1:3, 1:3] = R_bw = R_wb^⊤
     # # c.H[4, 4:6, c.i] = ∂θ3_∂δθ_left(c.quat[:, c.i])
     # c.H[4, 6, c.i] = 1.0
