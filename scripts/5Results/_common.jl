@@ -102,7 +102,7 @@ end
 Timestamped output path. The timestamp goes *last* so `ls` sorts by experiment
 first and chronology second, which is the order you actually browse in.
 """
-function stamped(section::AbstractString, name::AbstractString; ext::AbstractString="svg")::String
+function stamped(section::AbstractString, name::AbstractString; ext::AbstractString="pdf")::String
     return results_path(section, "$(name)_$(Dates.now()).$(ext)")
 end
 
