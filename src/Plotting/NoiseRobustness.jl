@@ -159,6 +159,8 @@ figure cannot support.
 - `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
 - `metric`: only used to name the quantity in the axis label.
 - `show_points`: overlay the individual trials on each box.
+- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
+  when the document's own caption carries the same information.
 """
 function plot_noise_paired_relative_change(
     paired::DataFrame,
@@ -169,6 +171,7 @@ function plot_noise_paired_relative_change(
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
+    show_subtitle::Bool=true,
 )
     check_metric(metric)
     value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
@@ -186,7 +189,8 @@ function plot_noise_paired_relative_change(
         ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
                "change in $(metric_label(metric))",
         title="Paired per-trial change vs \"$reference_label\" — $dataset_name",
-        subtitle=as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
+        subtitle=!show_subtitle ? "" :
+                 as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
                  "estimator − $reference_label, per trial",
         subtitlesize=10,
         xticklabelsize=14,

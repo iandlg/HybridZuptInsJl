@@ -23,6 +23,8 @@ Plot 2D positions (X-Y) of ground truth and one or more estimated trajectories.
 - `legend_position`: `:outer_right` (default) or `:outer_bottom` put the legend outside
   the axis so it cannot cover the track. Any other symbol is passed to `axislegend` as an
   in-axis anchor (`:rt`, `:lt`, ...), which is compact but may overlap the trajectory.
+- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
+  when the document's own caption carries the same information.
 - `save_path`: write the figure here as well as returning it. Call inside
   `results_figure()` (`scripts/5Results/_common.jl`) so it is saved under the same
   CairoMakie theme as every other results figure.
@@ -42,6 +44,7 @@ function plot_groundtruth_vs_inertial_positions(
     marker_stride=0,
     segment_label::Union{Nothing,AbstractString}=nothing,
     legend_position::Symbol=:outer_right,
+    show_subtitle::Bool=true,
     save_path::Union{String,Nothing}=nothing,
 )
     plot_groundtruth_vs_inertial_positions(Dict("Estimation" => trajs), gt_traj;
@@ -55,6 +58,7 @@ function plot_groundtruth_vs_inertial_positions(
         marker_stride=marker_stride,
         segment_label=segment_label,
         legend_position=legend_position,
+        show_subtitle=show_subtitle,
         save_path=save_path,
     )
 end
@@ -258,6 +262,7 @@ function plot_groundtruth_vs_inertial_positions(
     marker_stride::Int=0,
     segment_label::Union{Nothing,AbstractString}=nothing,
     legend_position::Symbol=:outer_right,
+    show_subtitle::Bool=true,
     save_path::Union{String,Nothing}=nothing
 )
 
@@ -300,7 +305,7 @@ function plot_groundtruth_vs_inertial_positions(
         xlabel="X (m)",
         ylabel="Y (m)",
         title=title,
-        subtitle=subtitle,
+        subtitle=show_subtitle ? subtitle : "",
         aspect=DataAspect(),
         xgridvisible=true)
 
@@ -363,6 +368,8 @@ Everything [`plot_groundtruth_vs_inertial_positions`](@ref) takes, plus:
   [`plot_position_distance_error`](@ref). Indexed over the same steps as `trajs`.
 - `legend_position`: `:outer_right` (default, a third column) or `:outer_bottom` (one
   horizontal legend spanning both panels).
+- `show_subtitle`: drops the stride/duration/distance line from BOTH panels, so their
+  plot areas stay aligned.
 
 # Returns
 - A `Figure` object (Makie figure).
@@ -381,6 +388,7 @@ function plot_trajectory_and_distance_error(
     gt_available::Union{Nothing,AbstractVector{Bool}}=nothing,
     segment_label::Union{Nothing,AbstractString}=nothing,
     legend_position::Symbol=:outer_right,
+    show_subtitle::Bool=true,
     save_path::Union{String,Nothing}=nothing
 )
     n_ref = length(gt_traj.t)
@@ -407,7 +415,7 @@ function plot_trajectory_and_distance_error(
         xlabel="X (m)",
         ylabel="Y (m)",
         title=title,
-        subtitle=subtitle,
+        subtitle=show_subtitle ? subtitle : "",
         aspect=DataAspect(),
         xgridvisible=true)
 
@@ -419,7 +427,9 @@ function plot_trajectory_and_distance_error(
         xlabel="Time (s)",
         ylabel="Position error (m)",
         title="Absolute distance error",
-        subtitle=" ",   # keeps the two panels' plot areas aligned under their titles
+        # Blank, not absent: it keeps the two panels' plot areas aligned under
+        # their titles -- but only while the left panel HAS a subtitle.
+        subtitle=show_subtitle ? " " : "",
         xgridvisible=true)
 
     # Time is measured from the start of the window, not from the start of the recording,

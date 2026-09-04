@@ -320,6 +320,8 @@ takes explicit per-series colours -- a different figure with a different job, sh
   which they should be compared. Falls back to the predictions when there is no
   `true_data`. `nothing` (default) autoscales. Clipping crops the view only; it never
   changes a reported number.
+- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
+  when the document's own caption carries the same information.
 
 # Returns
 - A `Figure` object (Makie figure).
@@ -342,6 +344,7 @@ function plot_regression_comparison(
     show_mean_std::Bool=false,
     clip_quantile::Union{Nothing,Real}=nothing,
     title::Union{Nothing,AbstractString}=nothing,
+    show_subtitle::Bool=true,
     save_path::Union{String,Nothing}=nothing
 )
     isempty(pred_data) && throw(ArgumentError("pred_data is empty"))
@@ -394,7 +397,7 @@ function plot_regression_comparison(
         xlabel="Time [s]",
         ylabel=channel == 4 ? "Stride yaw error [rad]" : "Stride position error [m]",
         title=isnothing(title) ? "$(_OUTPUT_NAMES[channel]) correction — $(seg_name) segment" : title,
-        subtitle=isempty(provenance) ? "" : join(provenance, " · "),
+        subtitle=(show_subtitle && !isempty(provenance)) ? join(provenance, " · ") : "",
         subtitlesize=11,
         xgridvisible=true,
         ygridvisible=true)

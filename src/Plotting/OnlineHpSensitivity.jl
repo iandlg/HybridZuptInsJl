@@ -343,6 +343,8 @@ for the parameter the argument turns on.
 - `mark_best`: ring the lowest-RMSE point.
 - `show_values`: print the percentage beside every swept point (default off --
   the points are readable off the axis, and the labels crowd a steep curve).
+- `show_subtitle`: draw the subtitle line (default `true`). Turn it off for a
+  figure whose caption in the document already carries the same information.
 - `show_summary`: the line under the title carrying the baseline value, the best
   multiplier and the range (default off).
 """
@@ -353,6 +355,7 @@ function plot_hp_param_sensitivity(df::DataFrame, parameter::AbstractString;
     mark_best::Bool=true,
     show_values::Bool=false,
     show_summary::Bool=false,
+    show_subtitle::Bool=true,
     show_absolute_axis::Bool=true,
     max_ticks::Int=7,
     figsize::Tuple{Int,Int}=(760, 520))
@@ -430,7 +433,10 @@ function plot_hp_param_sensitivity(df::DataFrame, parameter::AbstractString;
     end
 
     title_ax.title = rich("Sensitivity to ", label)
-    if show_summary
+    # `show_summary` decides whether there is a summary line at all;
+    # `show_subtitle` is the flag every figure here takes to strip the subtitle
+    # when the caption underneath the figure will say the same thing.
+    if show_summary && show_subtitle
         title_ax.subtitle = join(annotations, "   |   ")
         title_ax.subtitlesize = 11
     end

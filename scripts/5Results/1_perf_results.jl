@@ -55,7 +55,7 @@ estimators = OrderedDict(
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
-train_ratios = [0.1, 0.5, 0.9] #  0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] #  0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
 
 ## 5. Run the sweep
 results_df = HybridZuptInsJl.run_online_correction_sweep(
@@ -103,13 +103,40 @@ end
 ## Paired view at the operating point used by the rest of the chapter.
 # Same trials at every train_ratio, so per-trial differences are the honest
 # summary at n ≈ 16.
-results_figure() do
-    HybridZuptInsJl.plot_paired_relative_change(
-        results_df;
-        metric=:rmse,
-        baseline="ZUPT only",
-        train_ratio=0.5,
-        label_trials=true,
-        save_path=stamped(SECTION, "paired_vs_baseline_tr0.5"),
-    )
+# results_figure() do
+#     HybridZuptInsJl.plot_paired_relative_change(
+#         results_df;
+#         metric=:rmse,
+#         baseline="ZUPT only",
+#         train_ratio=0.5,
+#         label_trials=true,
+#         save_path=stamped(SECTION, "paired_vs_baseline_tr0.5"),
+#     )
+# end
+
+## Paired view across the whole train_ratio sweep.
+# The cell above pins one operating point; this is the same paired contrast at
+# every ratio, in the layout 5_noise_robustness.jl uses for its noise specs
+# (train_ratio on the x axis, one box per estimator per group). Each point is a
+# per-trial difference against "ZUPT only" on the SAME trial at the SAME ratio,
+# so walk-to-walk difficulty cancels and the trend across ratios is readable --
+# which it is not in the unpaired boxplots of step 7, where the trial-to-trial
+# spread dominates.
+const BASE_ESTIMATOR = "ZUPT only"
+const DATASET = first(keys(data_dict))
+
+for metric in (:rmse, :rmse_rate, :rmse_yaw)
+    paired = HybridZuptInsJl.paired_estimator_contrast(
+        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
+    results_figure() do
+        HybridZuptInsJl.plot_train_ratio_paired_relative_change(
+            paired, DATASET;
+            metric=metric,
+            reference_label=BASE_ESTIMATOR,
+            show_outliers=true,
+            show_points=false,
+            show_subtitle=false,
+            save_path=stamped(SECTION, "train_ratio_paired_$(metric)"),
+        )
+    end
 end

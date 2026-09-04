@@ -60,6 +60,9 @@ estimator's column shows every trial as a point labelled with its `trial_id`
 (set `label_trials=false` to drop the labels), the median as a thick bar, and
 a percentile-bootstrap interval for that median; the subtitle carries the win
 count and n.
+
+`show_subtitle=false` drops that subtitle and the explanatory banner above the
+panels, for a figure whose caption in the document says the same thing.
 """
 function plot_paired_relative_change(df::DataFrame;
     metric::Symbol=:rmse_rate,
@@ -69,6 +72,7 @@ function plot_paired_relative_change(df::DataFrame;
     save_path::Union{String,Nothing}=nothing,
     level::Real=0.95,
     label_trials::Bool=true,
+    show_subtitle::Bool=true,
     figsize::Tuple{Int,Int}=(1000, 520))
 
     check_metric(metric)
@@ -154,8 +158,10 @@ function plot_paired_relative_change(df::DataFrame;
 
             push!(annotations, "$est: better on $wins/$n, median $(round(med, sigdigits=3))%")
         end
-        ax.subtitle = join(annotations, "\n")
-        ax.subtitlesize = 10
+        if show_subtitle
+            ax.subtitle = join(annotations, "\n")
+            ax.subtitlesize = 10
+        end
         # labels hang to the right of the last column; leave them room
         # label_trials && xlims!(ax, 0.5, length(others) + 0.8)
         push!(axs, ax)
@@ -167,10 +173,119 @@ function plot_paired_relative_change(df::DataFrame;
     # false equivalence this figure exists to avoid.
     length(axs) > 1 && linkyaxes!(axs...)
 
-    Label(fig[0, :],
+    # Figure-level caption, gated by the same flag: with the per-estimator
+    # subtitles off, a lone explanatory banner is the thing a thesis caption
+    # would repeat.
+    show_subtitle && Label(fig[0, :],
         "Paired per-trial relative change vs \"$baseline\", in %. " *
         "Bars: median and $(round(Int, 100 * level))% bootstrap interval.";
         fontsize=12, tellwidth=false)
+
+    if !isnothing(save_path)
+        mkpath(dirname(save_path))
+        save(save_path, fig)
+        @info "Saved figure: $save_path"
+    end
+    return fig
+end
+
+"""
+    function plot_train_ratio_paired_relative_change(
+        paired::DataFrame,
+        dataset_name::AbstractString;
+        value_col::Symbol=:rel_change_pct,
+        metric::Symbol=:rmse,
+        reference_label::AbstractString="baseline",
+        save_path::Union{String,Nothing}=nothing,
+        show_outliers::Bool=true,
+        show_points::Bool=false,
+        show_subtitle::Bool=true,
+    )
+
+`plot_noise_paired_relative_change` with `train_ratio` on the x axis instead of the
+noise spec: same grouped-boxplot machinery, same pairing, but each group is one
+ground-truth availability level rather than one noise realisation.
+
+Each point is one trial's change against the reference estimator on the **same**
+trial at the **same** `train_ratio` (from `paired_estimator_contrast`), so
+walk-to-walk difficulty cancels and a box clear of zero is a consistent effect —
+the claim `plot_corrector_boxplots` cannot make, because there the trial-to-trial
+spread swamps the estimator difference. The reference estimator has no box: it is
+the zero line.
+
+`plot_paired_relative_change` shows the same contrast at a *single* train ratio in
+more detail (per-trial labels, median with a bootstrap interval); this one trades
+that detail for the sweep across ratios.
+
+# Arguments
+- `paired`: output of `paired_estimator_contrast`.
+- `dataset_name`: which `dataset_name` to filter to.
+- `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
+- `metric`: only used to name the quantity in the axis label — it must be the one
+  `paired_estimator_contrast` was called with, which is not checked.
+- `show_points`: overlay the individual trials on each box. Worth turning on here:
+  a box typically summarises ~10 trials.
+- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
+  when the document's own caption carries the same information.
+"""
+function plot_train_ratio_paired_relative_change(
+    paired::DataFrame,
+    dataset_name::AbstractString;
+    value_col::Symbol=:rel_change_pct,
+    metric::Symbol=:rmse,
+    reference_label::AbstractString="baseline",
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=false,
+    show_subtitle::Bool=true,
+)
+    check_metric(metric)
+    value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
+        "value_col must be :delta or :rel_change_pct, got :$value_col"))
+
+    sub = paired[paired.dataset_name .== dataset_name, :]
+    isempty(sub) && error("No rows found for dataset_name = $dataset_name")
+
+    # Pairing is still one-to-one per (trial, noise spec, seed), but a box here
+    # groups on train_ratio only, so several noise specs/draws would be pooled
+    # into one box without saying so. Say so.
+    for splitter in (:noise_spec_tag, :seed)
+        hasproperty(sub, splitter) || continue
+        n = length(unique(sub[!, splitter]))
+        n > 1 && @warn "plot_train_ratio_paired_relative_change: pooling $n `$splitter` \
+                        values into each box; filter first if that is not intended."
+    end
+
+    as_pct = value_col === :rel_change_pct
+    fig = Figure(size=(900, 600))
+    ax = Axis(fig[1, 1],
+        xlabel="Ground truth available online (train_ratio)",
+        ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
+               "change in $(metric_label(metric))",
+        title="Per-trial change vs \"$reference_label\" — $dataset_name",
+        subtitle=(!show_subtitle ? "" :
+                  as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
+                  "estimator − $reference_label, per trial"
+    ),
+        subtitlesize=10,
+        xticklabelsize=14,
+    )
+    as_pct && (ax.ytickformat = vs -> [string(round(v; digits=1), "%") for v in vs])
+
+    hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
+    labeled = _grouped_boxplot!(ax, sub, value_col;
+        group_col=:train_ratio, group_order_col=:train_ratio_order,
+        show_outliers=show_outliers, show_points=show_points)
+
+    # `_grouped_boxplot!` labels the groups with the raw Float64; a percentage
+    # reads better against an axis titled "ground truth available".
+    ratio_order = Dict(r.train_ratio => r.train_ratio_order for r in eachrow(sub))
+    ratios = sort(unique(sub.train_ratio), by=r -> ratio_order[r])
+    ax.xticks = (1:length(ratios), ["$(round(Int, 100r))%" for r in ratios])
+
+    if !isempty(labeled)
+        Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
+    end
 
     if !isnothing(save_path)
         mkpath(dirname(save_path))
