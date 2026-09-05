@@ -108,10 +108,17 @@ function make_rmse_evaluator(
     # 5. Return the evaluator closure
     function rmse_evaluator(hsgp_params::HsgpParameters)::Float64
         # Optionally force m to be consistent (if needed)
+        # Rebuilt only to force `m`. Every other field must be carried across
+        # explicitly, because the constructor *defaults* what it is not given:
+        # `mid_norm` omitted here fell back to `fill(0.0, d)`, so this evaluator
+        # ran with no input centering at all while the rest of the pipeline used
+        # the trained value, and every `input_center[d]` row of a sensitivity
+        # sweep came back bit-identical (see notes/007).
         hsgp_params = HsgpParameters(
             hsgp_params.hp, hsgp_params.d, isnothing(m) ? hsgp_params.m : m, hsgp_params.LL;
             input_stats=hsgp_params.input_stats,
-            output_stats=hsgp_params.output_stats
+            output_stats=hsgp_params.output_stats,
+            mid_norm=hsgp_params.mid_norm
         )
         hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params,
             corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs],
@@ -215,6 +222,28 @@ function set_mid_norm_stat(p::HsgpParameters, dim::Int, new_val::Float64)
     return basecopy(p; new_mid=new_vec)
 end
 
+"""
+    make_stats_param_grid(base_params; output_channel_idxs, log_range, n_steps,
+                          include_input_params=true, include_output_params=true)
+
+One-at-a-time sweep specs for the *normalisation statistics* rather than the GP
+hyperparameters: the input mean and std that standardise a feature before it
+reaches the kernel, the centering offset (`mid_norm`) that places the HSGP
+domain around it, and the output mean/std that scale the prediction back.
+
+The specs are interchangeable with [`make_hp_param_grid`](@ref)'s -- same
+`ParamSpec` type, same multiplicative grid, same baseline -- so
+`vary_hsgp_parameters(params, f, vcat(hp_specs, stat_specs))` sweeps both
+families against one baseline evaluation and the signed-range figure can rank a
+length scale against an input std. The `ParamGrid` is per family, because it is
+only the panel layout for [`plot_hp_sensitivity`](@ref).
+
+Group names double as the `type` column, so each family gets its own symbol and
+colour in the figures ([`_STAT_PARAM_INFO`](@ref)). The centering family was
+typed `mid_norm` (the field it writes) while being *named* `input_center[d]`;
+it is now typed `input_center` to match, and the plotting layer aliases the old
+spelling so previously saved CSVs still resolve.
+"""
 function make_stats_param_grid(base_params::HsgpParameters;
     output_channel_idxs::Vector{Int}=[1, 2, 3, 4],
     log_range::Tuple{Float64,Float64}=(-2.0, 2.0),
@@ -238,60 +267,69 @@ function make_stats_param_grid(base_params::HsgpParameters;
         append!(group_names, ["output_mean", "output_std"])
     end
 
+    isempty(group_names) && throw(ArgumentError(
+        "make_stats_param_grid: include_input_params and include_output_params are both false"))
+
     grid = ParamGrid(group_names, max_indices)
     specs = ParamSpec[]
 
+    # Row indices are looked up by name rather than hard-coded: with
+    # include_input_params=false the output families are rows 1-2, and the
+    # literal 4/5 this used to place them at was an out-of-bounds error rather
+    # than a mislaid panel.
+    row_of(name) = findfirst(==(name), group_names)
+
     if include_input_params
-        # Input means (group_idx=1)
+        # Input means
         for dim in 1:d
             name = "input_mean[$dim]"
             getter(p) = p.input_stats[1][dim]
             setter(p, val) = set_input_stat(p, 1, dim, val)
             spec = ParamSpec(name, "input_mean", getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
-            place_spec!(grid, 1, dim, spec)
+            place_spec!(grid, row_of("input_mean"), dim, spec)
         end
 
-        # Input stds (group_idx=2)
+        # Input stds
         for dim in 1:d
             name = "input_std[$dim]"
             getter(p) = p.input_stats[2][dim]
             setter(p, val) = set_input_stat(p, 2, dim, val)
             spec = ParamSpec(name, "input_std", getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
-            place_spec!(grid, 2, dim, spec)
+            place_spec!(grid, row_of("input_std"), dim, spec)
         end
 
-        # Input Center
+        # Input centering (writes HsgpParameters.mid_norm)
         for dim in 1:d
             name = "input_center[$dim]"
             getter(p) = p.mid_norm[dim]
             setter(p, val) = set_mid_norm_stat(p, dim, val)
-            spec = ParamSpec(name, "mid_norm", getter, setter; log_range=log_range, n_steps=n_steps)
+            spec = ParamSpec(name, "input_center", getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
-            place_spec!(grid, 3, dim, spec)
+            place_spec!(grid, row_of("input_center"), dim, spec)
         end
     end
 
     if include_output_params
-        # Output means (group_idx=3)
+        # Output means
         for (i, dim) in enumerate(output_channel_idxs)
             name = "output_mean[$dim]"
             getter(p) = p.output_stats[1][dim]
             setter(p, val) = set_output_stat(p, 1, dim, val)
             spec = ParamSpec(name, "output_mean", getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
-            place_spec!(grid, 4, i, spec)
+            place_spec!(grid, row_of("output_mean"), i, spec)
         end
 
-        # Output stds (group_idx=4)
+        # Output stds
         for (i, dim) in enumerate(output_channel_idxs)
             name = "output_std[$dim]"
             getter(p) = p.output_stats[2][dim]
             setter(p, val) = set_output_stat(p, 2, dim, val)
             spec = ParamSpec(name, "output_std", getter, setter; log_range=log_range, n_steps=n_steps)
             push!(specs, spec)
-            place_spec!(grid, 5, i, spec)
+            place_spec!(grid, row_of("output_std"), i, spec)
         end
     end
 

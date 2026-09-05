@@ -53,21 +53,43 @@ rmse_fun = HybridZuptInsJl.make_rmse_evaluator(
 groups = [Symbol(HybridZuptInsJl._OUTPUT_NAMES[idx]) for idx in output_channel_idxs]
 
 log_range = (-1.0, 1.0)
-n_steps = 20
+n_steps = 21
 baseline_included = true
 
-specs = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs;
+# Two families of parameters, swept in one pass against one baseline:
+#
+#   * the GP hyperparameters -- ℓ_s, σ_f, and σ_n when `sweep_noise` connects it;
+#   * the input normalisation statistics -- mean, std and centering. These are as
+#     much a fitted input to the estimator as the kernel hyperparameters, and a
+#     wrong input std is not visible anywhere else in the chapter.
+#
+# WAS: `specs` was assigned twice and only the second assignment survived, so the
+# hyperparameter grid was built and thrown away and every figure in this section
+# showed the statistics *instead of* the hyperparameters -- with no way to rank
+# one family against the other, which is what the signed-range figure is for.
+# See notes/007-input-normalisation-sensitivity.md.
+include_stats_params = true
+include_output_stats = false   # output mean/std: fitted per channel, off by default
+
+hp_specs, hp_grid = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs;
     log_range=log_range, n_steps=n_steps, include_noise=sweep_noise)
-# specs = HybridZuptInsJl.make_stats_param_grid(hsgp_p;
-#     log_range=log_range, n_steps=n_steps, output_channel_idxs=output_channel_idxs,
-#     include_output_params=false)
+
+stats_specs, stats_grid = include_stats_params ?
+                          HybridZuptInsJl.make_stats_param_grid(hsgp_p;
+    log_range=log_range, n_steps=n_steps, output_channel_idxs=output_channel_idxs,
+    include_output_params=include_output_stats) :
+                          (HybridZuptInsJl.ParamSpec[], nothing)
+
+# One vector, so `vary_hsgp_parameters` evaluates the baseline once and every row
+# of the frame is a relative change against that same number.
+specs = vcat(hp_specs, stats_specs)
 
 ##
-# Now vary hyperparameters
+# Now vary the parameters
 df = HybridZuptInsJl.vary_hsgp_parameters(
     hsgp_p,
-    rmse_fun,                      # <-- uses only the HSGP hyperparams
-    specs[1];
+    rmse_fun,
+    specs;
     include_baseline=baseline_included
 )
 
@@ -98,7 +120,10 @@ metadata = Dict(
     "log10_range" => log_range,
     "n_steps" => n_steps,
     "baseline_included" => baseline_included,
-    "grid" => HybridZuptInsJl.grid_to_dict(specs[2]),
+    # One grid per family: the grid is only the panel layout for
+    # plot_hp_sensitivity, which draws one row per parameter group.
+    "grid" => HybridZuptInsJl.grid_to_dict(hp_grid),
+    "stats_grid" => isnothing(stats_grid) ? nothing : HybridZuptInsJl.grid_to_dict(stats_grid),
     "timestamp" => time,
     "trial_id" => trial_id,
     "train_ratio" => train_ratio,
@@ -120,7 +145,7 @@ println("Saved JSON: $json_path")
 # re-read a hard-coded basename from a dict of timestamps, so editing the
 # compute cell above had no effect on the figures unless you also remembered to
 # add a key down here.
-replot_basename = "ANG215_HEADING_TWOD_STEP_YAW_2026-08-27T13:12:11.074"
+replot_basename = nothing
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -131,37 +156,83 @@ plot_df, plot_meta = HybridZuptInsJl.load_hp_variation_results(
     joinpath(outdir, "$plot_name.json"))
 
 grid = HybridZuptInsJl.grid_from_dict(plot_meta["grid"])
+# `nothing` for a run that swept hyperparameters only, and missing entirely from
+# runs saved before the statistics were added to this script.
+stats_grid_meta = get(plot_meta, "stats_grid", nothing)
 plot_log_range = (float(plot_meta["log10_range"][1]), float(plot_meta["log10_range"][2]))
 
 results_figure() do
     HybridZuptInsJl.plot_hp_sensitivity(plot_df, grid, plot_log_range;
-        save_path=results_path(SECTION, "$(plot_name)_param_var.svg"))
+        save_path=results_path(SECTION, "$(plot_name)_param_var.pdf"))
+end
+
+# Same per-parameter curves for the normalisation statistics: one row per family
+# (mean / std / centering), one column per feature dimension.
+if !isnothing(stats_grid_meta)
+    results_figure() do
+        HybridZuptInsJl.plot_hp_sensitivity(plot_df,
+            HybridZuptInsJl.grid_from_dict(stats_grid_meta), plot_log_range;
+            save_path=results_path(SECTION, "$(plot_name)_stats_var.pdf"))
+    end
 end
 
 # Signed range: which parameters can be improved, and in which direction.
-# This is the one to read first. `plot_max_relative_change` below reduces each
-# parameter to maximum(relative_change), which for the yaw length scale is 0.0 --
-# it renders as a zero-height bar indistinguishable from a hyperparameter that
-# never reaches the code, while its true range is [-0.60, 0.0].
+# This is the one to read first, and it is the one figure that puts both families
+# on the same axis -- a hyperparameter and an input statistic are directly
+# comparable there because both are quoted as percent RMSE change against the
+# same baseline. `plot_max_relative_change` below reduces each parameter to
+# maximum(relative_change), which for the yaw length scale is 0.0 -- it renders
+# as a zero-height bar indistinguishable from a hyperparameter that never reaches
+# the code, while its true range is [-0.60, 0.0].
 results_figure() do
     HybridZuptInsJl.plot_signed_relative_change(plot_df;
-        save_path=results_path(SECTION, "$(plot_name)_signed_rel_change.svg"))
+        save_path=results_path(SECTION, "$(plot_name)_signed_rel_change.pdf"))
 end
 
-# Close-up of the single most consequential parameter. The signed-range plot
-# above compresses each parameter to the interval [min, max], which says how far
-# RMSE moved but not *how* it got there -- and for the yaw length scale the shape
-# is the result: the baseline sits on a local minimum, so perturbing it in either
-# direction reduces RMSE. 
-focus_param = HybridZuptInsJl.hp_param_name(:yaw, :length_scale)
-focus_slug = replace(focus_param, "[" => "_", "]" => "")  # "yaw[2]" -> "yaw_2", filename-safe
-results_figure() do
-    HybridZuptInsJl.plot_hp_param_sensitivity(plot_df, focus_param;
-        log_range=plot_log_range,
-        save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.svg"))
+# Close-ups of the most consequential parameters, one figure each. The
+# signed-range plot above compresses each parameter to the interval [min, max],
+# which says how far RMSE moved but not *how* it got there -- and the shape is
+# often the result: for the yaw length scale the baseline sits on a local
+# optimum, so both directions move RMSE the same way, which a bar cannot show.
+#
+# Both families are addressable here. `hp_param_name` names a GP hyperparameter
+# by channel and kind; `stat_param_name` names a normalisation statistic by
+# family and feature dimension. Spelling both out beats writing "yaw[2]" and
+# "input_std[2]" as literals, where the bracketed number means a hyperparameter
+# kind in the first and a feature dimension in the second.
+#
+# The defaults are the three widest rows of notes/007 §5 that are not each
+# other's family-mates: the yaw length scale, the input std of feature dim 2
+# (the widest row in that sweep, wider than any hyperparameter), and the
+# centering of the same dimension.
+focus_params = [
+    HybridZuptInsJl.hp_param_name(:yaw, :length_scale),
+    HybridZuptInsJl.stat_param_name(:input_std, 2),
+    HybridZuptInsJl.stat_param_name(:input_center, 2),
+]
+
+# A sweep run with `include_stats_params=false` (or an older CSV predating the
+# statistics) has no rows for the stats entries, and `plot_hp_param_sensitivity`
+# throws for a parameter it cannot find. Skipping with a warning keeps the rest
+# of the figures being written; a typo'd name still shows up, as a warning
+# naming a parameter that is not in the frame.
+swept_params = Set(plot_df.parameter)
+for focus_param in focus_params
+    if !(focus_param in swept_params)
+        @warn "Skipping close-up: \"$focus_param\" was not swept in $plot_name"
+        continue
+    end
+    # "yaw[2]" -> "yaw_2", "input_std[2]" -> "input_std_2": filename-safe.
+    focus_slug = HybridZuptInsJl.param_slug(focus_param)
+    results_figure() do
+        HybridZuptInsJl.plot_hp_param_sensitivity(plot_df, focus_param;
+            log_range=plot_log_range,
+            save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"))
+    end
 end
+
 
 results_figure() do
     HybridZuptInsJl.plot_max_relative_change(plot_df;
-        save_path=results_path(SECTION, "$(plot_name)_max_rel_change.svg"))
+        save_path=results_path(SECTION, "$(plot_name)_max_rel_change.pdf"))
 end

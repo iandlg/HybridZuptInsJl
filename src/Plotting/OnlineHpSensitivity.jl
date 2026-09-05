@@ -64,28 +64,86 @@ const _HP_COLOR_INDICES = Dict{Int,Int}(
 const _HP_FALLBACK_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
 
 """
+Display data for the normalisation statistics `make_stats_param_grid` sweeps
+alongside the GP hyperparameters: the input mean and std that standardise a
+feature before it reaches the kernel, the centering offset (`mid_norm`) that
+places the HSGP domain around it, and the output mean/std that scale the
+prediction back.
+
+These are swept in the same units and against the same baseline as the
+hyperparameters, so a sweep can contain both families and the signed-range
+figure can rank them against each other. Without an entry here they fall back to
+their raw name in a neutral grey -- readable, but three grey rows called
+`input_mean[1]`, `input_std[1]`, `input_center[1]` cannot be told apart at a
+glance, which is the whole point of that figure.
+
+Keyed by the *name prefix* the sweep emits (`input_mean[2]` -> `"input_mean"`),
+which is also the `type` column for every family except the centering term; see
+`_STAT_TYPE_ALIASES`.
+
+Colours are Tol muted, not more of the Wong palette: Wong 1-3 belong to the
+correction methods in `scripts/5Results/`, 4-6 to the three hyperparameters
+above, and 7 (yellow) is too light to read. A figure holding both families
+therefore carries eight series with no two sharing a colour.
+"""
+const _STAT_PARAM_INFO = Dict{String,@NamedTuple{sym::String, sub::String, words::String, color::String}}(
+    "input_mean" => (sym="μ", sub="x", words="input mean", color="#332288"),
+    "input_std" => (sym="σ", sub="x", words="input std", color="#44AA99"),
+    "input_center" => (sym="c", sub="x", words="input centering", color="#999933"),
+    "output_mean" => (sym="μ", sub="y", words="output mean", color="#882255"),
+    "output_std" => (sym="σ", sub="y", words="output std", color="#AA4499"),
+)
+
+"""
+`type` strings that name the same family as a different `_STAT_PARAM_INFO` key.
+
+The centering sweep is *named* `input_center[d]` but *typed* `mid_norm`, after
+the field it writes (`HsgpParameters.mid_norm`). Both spellings appear in saved
+CSVs, so both resolve here rather than one of them dropping to grey.
+"""
+const _STAT_TYPE_ALIASES = Dict{String,String}("mid_norm" => "input_center")
+
+"""
+    _stat_info(key) -> NamedTuple or nothing
+
+Look up a statistics family by its name prefix or `type` string, resolving
+[`_STAT_TYPE_ALIASES`](@ref). `nothing` for anything that is not one.
+"""
+function _stat_info(key::AbstractString)
+    k = String(key)
+    k = get(_STAT_TYPE_ALIASES, k, k)
+    return get(_STAT_PARAM_INFO, k, nothing)
+end
+
+"""
     hp_type_color(idx_or_type)
 
-Colour for a hyperparameter type, given either its index (1/2/3) or its type
-name (`"noise"` / `"length_scale"` / `"signal_variance"`). Anything else -- the
-input/output statistics from `make_stats_param_grid` -- gets a neutral grey
-rather than silently borrowing another type's colour.
+Colour for a swept parameter type, given either a hyperparameter's index (1/2/3)
+or a type name -- `"noise"` / `"length_scale"` / `"signal_variance"` for the GP
+hyperparameters, or one of the [`_STAT_PARAM_INFO`](@ref) families for the
+normalisation statistics. Anything else gets a neutral grey rather than silently
+borrowing another type's colour.
 """
 hp_type_color(idx::Int) =
     haskey(_HP_COLOR_INDICES, idx) ? Makie.wong_colors()[_HP_COLOR_INDICES[idx]] : _HP_FALLBACK_COLOR
-hp_type_color(type::AbstractString) = hp_type_color(get(_HP_TYPE_INDEX, String(type), 0))
+function hp_type_color(type::AbstractString)
+    info = _stat_info(type)
+    isnothing(info) || return Makie.RGBAf(Makie.to_color(info.color))
+    return hp_type_color(get(_HP_TYPE_INDEX, String(type), 0))
+end
 
 """
     hp_param_color(name)
 
-Colour for a sweep parameter such as `"yaw[2]"`, resolved through its
-hyperparameter type so that every figure agrees. Same channel guard as
+Colour for a sweep parameter such as `"yaw[2]"` or `"input_std[3]"`, resolved
+through its type so that every figure agrees. Same channel guard as
 [`hp_param_label`](@ref).
 """
 function hp_param_color(name::AbstractString)
     parsed = _parse_hp_param(name)
     isnothing(parsed) && return _HP_FALLBACK_COLOR
     channel, idx = parsed
+    isnothing(_stat_info(channel)) || return hp_type_color(channel)
     channel in _OUTPUT_NAMES || return _HP_FALLBACK_COLOR
     return hp_type_color(idx)
 end
@@ -93,10 +151,12 @@ end
 """
     _parse_hp_param(name) -> (channel, idx) or nothing
 
-Split a parameter name such as `"yaw[2]"` into its channel and hyperparameter
-index. Returns `nothing` for anything that is not of that shape (`"baseline"`,
-the input/output-statistic names from `make_stats_param_grid`), so callers can
-fall back to showing the raw name.
+Split a parameter name such as `"yaw[2]"` or `"input_mean[3]"` into its prefix
+and bracketed index. What the index *means* depends on the prefix -- a
+hyperparameter kind for an output channel, a feature dimension for a statistics
+family -- so callers must resolve the prefix before using it. Returns `nothing`
+for anything not of that shape (`"baseline"`), so callers can fall back to
+showing the raw name.
 """
 function _parse_hp_param(name::AbstractString)
     mt = match(r"^(.*)\[(\d+)\]$", name)
@@ -107,20 +167,29 @@ end
 """
     hp_param_label(name; with_channel=true) -> rich text
 
-Display label for a sweep parameter: the hyperparameter's math symbol, with the
-output channel it belongs to, e.g. `yaw[2]` renders as `ℓ_s (yaw)`. Falls back to
-the raw name for parameters outside the `channel[idx]` scheme.
+Display label for a sweep parameter: the parameter's math symbol with what it
+belongs to -- `yaw[2]` renders as `ℓ_s (yaw)` (hyperparameter, output channel),
+`input_std[3]` as `σ_x [3]` (normalisation statistic, feature dimension). Falls
+back to the raw name for anything outside both schemes.
 
-The channel must be one of `_OUTPUT_NAMES`. `make_stats_param_grid` emits names
-of the same *shape* -- `input_mean[1]`, `output_std[2]` -- where the bracketed
-number is an input dimension, not a hyperparameter kind; without this check
-those would be relabelled as σ_n and friends, which would be wrong rather than
-merely ugly.
+`make_stats_param_grid` emits names of the same *shape* -- `input_mean[1]`,
+`output_std[2]` -- where the bracketed number is a feature dimension, not a
+hyperparameter kind. They are resolved through [`_STAT_PARAM_INFO`](@ref) first
+for exactly that reason: matched against `_HP_SYMBOL_PARTS` instead, `input_mean[1]`
+would be relabelled σ_n, which is wrong rather than merely ugly. A channel that
+is neither a statistics family nor one of `_OUTPUT_NAMES` keeps its raw name.
 """
 function hp_param_label(name::AbstractString; with_channel::Bool=true)
     parsed = _parse_hp_param(name)
     isnothing(parsed) && return rich(String(name))
     channel, idx = parsed
+    # Statistics first: their names have the same `prefix[idx]` shape, but the
+    # bracketed number is a feature dimension, so it stays in the label instead
+    # of selecting a hyperparameter symbol.
+    info = _stat_info(channel)
+    isnothing(info) || return with_channel ?
+                              rich(info.sym, subscript(info.sub), " [$idx]") :
+                              rich(info.sym, subscript(info.sub))
     (channel in _OUTPUT_NAMES && haskey(_HP_SYMBOL_PARTS, idx)) || return rich(String(name))
     base, sub = _HP_SYMBOL_PARTS[idx]
     return with_channel ?
@@ -131,11 +200,13 @@ end
 """
     _hp_type_label(type) -> rich text
 
-Legend label for a hyperparameter `type` (`"length_scale"`, ...): the math symbol
-followed by the name in words, e.g. `ℓ_s  length scale`. Unknown types -- the
-input/output statistics from `make_stats_param_grid` -- pass through unchanged.
+Legend label for a swept `type` (`"length_scale"`, `"input_std"`, ...): the math
+symbol followed by the name in words, e.g. `ℓ_s  length scale` or
+`σ_x  input std`. Unknown types pass through unchanged.
 """
 function _hp_type_label(type::AbstractString)
+    info = _stat_info(type)
+    isnothing(info) || return rich(info.sym, subscript(info.sub), "  ", info.words)
     key = get(_HP_TYPE_INDEX, String(type), 0)
     haskey(_HP_SYMBOL_PARTS, key) || return rich(String(type))
     base, sub = _HP_SYMBOL_PARTS[key]
@@ -216,8 +287,20 @@ function _draw_hp_panel!(ax::Axis, sub::AbstractDataFrame;
     max_ticks::Int=7)
 
     base_val = first(sub.base_value)
-    order = sortperm(sub.tested_value)
-    mults = float.(sub.tested_value[order]) ./ base_val
+    iszero(base_val) && throw(ArgumentError(
+        "parameter \"$(first(sub.parameter))\" has base value 0, so the multiplicative " *
+        "sweep never moved it and there is no multiplier axis to draw " *
+        "(tested/base is 0/0). `output_mean` is the known case -- it is fitted to " *
+        "zero, which is why `include_output_stats` is off by default; see notes/007 §3."))
+
+    # Ordered by *multiplier*, not by tested value. The two agree for every
+    # positive base, but `input_center[d]` is a location parameter and can be
+    # negative (−0.432 in the artifact notes/007 §5 sweeps), and there ascending
+    # tested value is descending multiplier -- the curve would be drawn right to
+    # left against the axis it is plotted on.
+    mults = float.(sub.tested_value) ./ base_val
+    order = sortperm(mults)
+    mults = mults[order]
     pct = 100 .* float.(sub.relative_change[order])
 
     # Baseline reference: 0% change. There is deliberately no rule at ×1 -- the
@@ -319,6 +402,44 @@ function hp_param_name(channel::Union{Symbol,AbstractString}, kind::Union{Symbol
         "unknown hyperparameter kind \"$want\"; have $(sort(collect(keys(_HP_TYPE_INDEX))))"))
     return "$(String(channel))[$key]"
 end
+
+"""
+    stat_param_name(family, dim) -> String
+
+The `parameter` string `vary_hsgp_parameters` uses for one normalisation
+statistic, e.g. `stat_param_name(:input_std, 2) == "input_std[2]"`. The
+counterpart to [`hp_param_name`](@ref) for the other family
+`make_stats_param_grid` sweeps, so a script naming a focus parameter never has
+to hard-code a bracketed index whose meaning differs between the two families.
+
+`family` is one of the [`_STAT_PARAM_INFO`](@ref) keys -- `:input_mean`,
+`:input_std`, `:input_center`, `:output_mean`, `:output_std` -- or an alias of
+one (`:mid_norm` resolves to `:input_center`, matching the `type` string older
+CSVs carry). `dim` is a *feature dimension* for the input families and an output
+channel index for the output ones; unlike `hp_param_name`'s index it selects
+which quantity is perturbed, not which kind of parameter it is.
+"""
+function stat_param_name(family::Union{Symbol,AbstractString}, dim::Integer)::String
+    key = String(family)
+    key = get(_STAT_TYPE_ALIASES, key, key)
+    haskey(_STAT_PARAM_INFO, key) || throw(ArgumentError(
+        "unknown statistics family \"$(family)\"; have $(sort(collect(keys(_STAT_PARAM_INFO))))"))
+    dim >= 1 || throw(ArgumentError("dim must be >= 1, got $dim"))
+    return "$key[$dim]"
+end
+
+"""
+    param_slug(name) -> String
+
+Filename-safe form of a sweep parameter name: `"yaw[2]"` -> `"yaw_2"`,
+`"input_std[3]"` -> `"input_std_3"`. Brackets are legal in a POSIX filename but
+are glob metacharacters, so a saved figure called `..._yaw[2]_sensitivity.svg`
+is awkward to reach from a shell and from LaTeX's `\\includegraphics`.
+
+Lives here rather than in a script because both parameter families produce names
+of this shape and every caller wants the same transformation.
+"""
+param_slug(name::AbstractString)::String = replace(String(name), "[" => "_", "]" => "")
 
 """
     plot_hp_param_sensitivity(df, parameter; log_range=nothing, save_path=nothing, ...)
