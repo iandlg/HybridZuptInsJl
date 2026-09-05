@@ -26,13 +26,11 @@ function _grouped_boxplot!(
     series = sort(unique(sub[:, series_col]), by=e -> series_order_map[e])
     n_groups, n_series = length(groups), length(series)
 
-    colors = Makie.wong_colors()
-    # Colour by `series_order_col`, not by position within THIS figure: the paired
-    # figure omits the baseline, and indexing by position would shift every
-    # remaining estimator onto the colour its neighbour had in the unpaired one.
-    # With the estimators declared Base, Static, HSGP the mapping is wong 1/2/3
-    # everywhere, and the paired figure simply has no wong-1 box.
-    series_color = Dict(ser => colors[mod1(series_order_map[ser], length(colors))] for ser in series)
+    # Colour by name, not by position within THIS figure: the paired figure omits
+    # the baseline, and indexing by position would shift every remaining estimator
+    # onto the colour its neighbour had in the unpaired one. The shared table keys
+    # on the estimator name, so the paired figure simply has no "ZUPT only" box.
+    series_color = series_color_map(series)
 
     group_width = 0.8
     bar_width = n_series > 0 ? group_width / n_series : group_width
@@ -242,9 +240,11 @@ function plot_multi_track_training_quality(
     n_est = length(estimators)
 
     # ----- Colour palette -----
-    colors = Makie.wong_colors()
-    baseline_color = colors[1]
-    est_colors = Dict(estimators[i] => colors[mod1(i+1, length(colors))] for i in 1:n_est)
+    # The baseline is drawn from its own `train_set == "Base"` rows and is absent
+    # from `estimators`, so it is named explicitly rather than reserving slot 1
+    # and shifting everything else along by one.
+    baseline_color = method_color("ZUPT only")
+    est_colors = series_color_map(estimators)
 
     # ----- Training step groups: order 0 = baseline, then 1,2,… -----
     group_labels = Dict{Int,String}()

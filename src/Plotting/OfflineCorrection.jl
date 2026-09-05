@@ -221,31 +221,19 @@ function plot_input_features(
 end
 
 """
-Colour index into `Makie.wong_colors()` for each correction method, so a method keeps
-one colour across every figure instead of getting whatever its position in a
-`Dict` happened to earn. Wong 1-3 were already spoken for by these three by
-convention (see `_HP_COLOR_INDICES` in `Plotting/OnlineHpSensitivity.jl`, which
-avoids them for exactly this reason); this states the convention rather than
-leaving it to iteration order.
-"""
-const _METHOD_COLOR_INDICES = Dict{String,Int}(
-    "ZUPT only" => 1,
-    "Static" => 2,
-    "HSGP" => 3,
-)
-
-const _METHOD_FALLBACK_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
-
-"""
     method_color(name) -> colour
 
-Canonical colour for a correction method name (`"ZUPT only"`, `"Static"`, `"HSGP"`).
-Anything else gets a neutral grey rather than silently borrowing another method's colour.
+Canonical colour for a correction method name (`"ZUPT only"`, `"Static"`, `"HSGP"`),
+so a method keeps one colour across every figure instead of getting whatever its
+position in a `Dict` happened to earn.
+
+The three names are slots 1-3 of the shared table in `Plotting/Palette.jl`, which
+also holds the swept parameter types; kept as its own function because the call
+sites read as "the colour of this method" rather than "the colour of this series".
+Anything else gets [`FALLBACK_COLOR`](@ref) rather than silently borrowing another
+method's colour.
 """
-function method_color(name::AbstractString)
-    idx = get(_METHOD_COLOR_INDICES, String(name), nothing)
-    return isnothing(idx) ? _METHOD_FALLBACK_COLOR : Makie.wong_colors()[idx]
-end
+method_color(name::AbstractString) = series_color(name)
 
 """
     color_shades(base, n; spread=26) -> Vector

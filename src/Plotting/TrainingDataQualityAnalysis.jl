@@ -34,9 +34,11 @@ function plot_train_data_quality(
     estimators = sort(unique(trained_df.estimator), by=e -> est_order_map[e])
     n_est = length(estimators)
 
-    colors = Makie.wong_colors()
-    est_color = Dict(estimators[i] => colors[mod1(i + 1, length(colors))] for i in 1:n_est)
-    baseline_color = colors[1]
+    # The baseline is drawn from its own rows and is absent from `estimators`, so
+    # it is named explicitly rather than reserving the first colour and shifting
+    # every estimator along by one.
+    est_color = series_color_map(estimators)
+    baseline_color = method_color("ZUPT only")
 
     fig = Figure(size=(450 * n_cols, 450 * n_rows))
 

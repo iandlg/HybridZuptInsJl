@@ -44,24 +44,15 @@ inverse of `_HYPERPARAM_TYPES`, so the mapping is stated once.
 const _HP_TYPE_INDEX = Dict{String,Int}(v => k for (k, v) in _HYPERPARAM_TYPES)
 
 """
-One colour per hyperparameter type, fixed by type rather than by plotting order,
-so ℓ_s is the same colour in every sensitivity figure regardless of which
-parameters a given sweep happened to contain. Keyed by the index in a channel's
-parameter vector (1 = σ_n, 2 = ℓ_s, 3 = σ_f).
+Offset from a hyperparameter's index in a channel's parameter vector (1 = σ_n,
+2 = ℓ_s, 3 = σ_f) to its slot in the shared palette (`Plotting/Palette.jl`).
 
-These are Wong 4-6. Wong 1-3 are spoken for: they are what the estimator figures
-in `scripts/5Results/` give to the three correction types (ZUPT only / Static /
-HSGP), and reusing them here would put the same colour on a correction method in
-one figure and a hyperparameter in the next. Wong 7 is the yellow, which is too
-light to read as a thin line on the light background these figures use.
+The three correction methods occupy slots 1-3, so the hyperparameters follow at
+4-6. Colour is fixed by type rather than by plotting order, so ℓ_s is the same
+colour in every sensitivity figure regardless of which parameters a given sweep
+happened to contain.
 """
-const _HP_COLOR_INDICES = Dict{Int,Int}(
-    1 => 4,   # σ_n  -> Wong 4, #CC79A7
-    2 => 5,   # ℓ_s  -> Wong 5, #56B4E9
-    3 => 6,   # σ_f  -> Wong 6, #D55E00
-)
-
-const _HP_FALLBACK_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
+const _HP_SLOT_OFFSET = 3
 
 """
 Display data for the normalisation statistics `make_stats_param_grid` sweeps
@@ -81,17 +72,18 @@ Keyed by the *name prefix* the sweep emits (`input_mean[2]` -> `"input_mean"`),
 which is also the `type` column for every family except the centering term; see
 `_STAT_TYPE_ALIASES`.
 
-Colours are Tol muted, not more of the Wong palette: Wong 1-3 belong to the
-correction methods in `scripts/5Results/`, 4-6 to the three hyperparameters
-above, and 7 (yellow) is too light to read. A figure holding both families
-therefore carries eight series with no two sharing a colour.
+Symbols and words only -- colour lives in the shared table in
+`Plotting/Palette.jl`, which gives the families slots 7-9, one per *statistic*:
+`input_mean` and `output_mean` share a colour, as do the two stds. What
+separates them in a figure is the subscript below, μ_x against μ_y, which
+[`_hp_type_label`](@ref) puts in the legend.
 """
-const _STAT_PARAM_INFO = Dict{String,@NamedTuple{sym::String, sub::String, words::String, color::String}}(
-    "input_mean" => (sym="μ", sub="x", words="input mean", color="#332288"),
-    "input_std" => (sym="σ", sub="x", words="input std", color="#44AA99"),
-    "input_center" => (sym="c", sub="x", words="input centering", color="#999933"),
-    "output_mean" => (sym="μ", sub="y", words="output mean", color="#882255"),
-    "output_std" => (sym="σ", sub="y", words="output std", color="#AA4499"),
+const _STAT_PARAM_INFO = Dict{String,@NamedTuple{sym::String, sub::String, words::String}}(
+    "input_mean" => (sym="μ", sub="x", words="input mean"),
+    "input_std" => (sym="σ", sub="x", words="input std"),
+    "input_center" => (sym="c", sub="x", words="input centering"),
+    "output_mean" => (sym="μ", sub="y", words="output mean"),
+    "output_std" => (sym="σ", sub="y", words="output std"),
 )
 
 """
@@ -121,16 +113,18 @@ end
 Colour for a swept parameter type, given either a hyperparameter's index (1/2/3)
 or a type name -- `"noise"` / `"length_scale"` / `"signal_variance"` for the GP
 hyperparameters, or one of the [`_STAT_PARAM_INFO`](@ref) families for the
-normalisation statistics. Anything else gets a neutral grey rather than silently
+normalisation statistics. Both routes land in the shared table
+(`Plotting/Palette.jl`), so a type has one colour here and in the estimator
+figures. Anything else gets [`FALLBACK_COLOR`](@ref) rather than silently
 borrowing another type's colour.
+
+The `type` method goes to the table by name, which already carries every
+statistics family and both spellings of the centering one, so it needs no
+[`_stat_info`](@ref) detour.
 """
 hp_type_color(idx::Int) =
-    haskey(_HP_COLOR_INDICES, idx) ? Makie.wong_colors()[_HP_COLOR_INDICES[idx]] : _HP_FALLBACK_COLOR
-function hp_type_color(type::AbstractString)
-    info = _stat_info(type)
-    isnothing(info) || return Makie.RGBAf(Makie.to_color(info.color))
-    return hp_type_color(get(_HP_TYPE_INDEX, String(type), 0))
-end
+    haskey(_HYPERPARAM_TYPES, idx) ? palette_color(idx + _HP_SLOT_OFFSET) : FALLBACK_COLOR
+hp_type_color(type::AbstractString) = series_color(type)
 
 """
     hp_param_color(name)
@@ -141,10 +135,10 @@ through its type so that every figure agrees. Same channel guard as
 """
 function hp_param_color(name::AbstractString)
     parsed = _parse_hp_param(name)
-    isnothing(parsed) && return _HP_FALLBACK_COLOR
+    isnothing(parsed) && return FALLBACK_COLOR
     channel, idx = parsed
     isnothing(_stat_info(channel)) || return hp_type_color(channel)
-    channel in _OUTPUT_NAMES || return _HP_FALLBACK_COLOR
+    channel in _OUTPUT_NAMES || return FALLBACK_COLOR
     return hp_type_color(idx)
 end
 

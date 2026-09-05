@@ -36,11 +36,12 @@ function plot_corrector_boxplots(
 
     ratios = sort(unique(df.train_ratio))
     correctors = isnothing(corrector_names) ? sort(unique(df.estimator)) : corrector_names
-    @show correctors #  
     n_correctors = length(correctors)
 
-    colors = Makie.wong_colors()
-    corr_to_color = Dict(correctors[i] => colors[mod1(i, length(colors))] for i in 1:n_correctors)
+    # Keyed by name: `correctors` falls back to alphabetical order when
+    # `corrector_names` is not given, which used to hand a method whichever
+    # colour its initial letter earned.
+    corr_to_color = series_color_map(correctors)
 
     min_gap = length(ratios) > 1 ? minimum(diff(ratios)) : 1.0
     total_width = 0.8 * min_gap

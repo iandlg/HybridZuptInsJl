@@ -54,8 +54,7 @@ function boxplot_dataset_comparison(
     estimators = sort(unique(plot_df.estimator), by=e -> est_order_map[e])
     n_est = length(estimators)
 
-    colors = Makie.wong_colors()
-    est_color = Dict(estimators[i] => colors[mod1(i, length(colors))] for i in 1:n_est)
+    est_color = series_color_map(estimators)
 
     group_width = 0.8
     bar_width = n_est > 0 ? group_width / n_est : group_width

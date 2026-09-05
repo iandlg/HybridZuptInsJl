@@ -109,7 +109,6 @@ function plot_paired_relative_change(df::DataFrame;
     isempty(others) && throw(ArgumentError("nothing to compare against the baseline"))
 
     fig = Figure(size=figsize)
-    colors = Makie.wong_colors()
     axs = Axis[]
 
     for (gi, gname) in enumerate(groups)
@@ -143,7 +142,7 @@ function plot_paired_relative_change(df::DataFrame;
             lo, hi = median_bootstrap_ci(deltas; level=level)
 
             x = fill(float(ei), n) .+ (rand(Random.Xoshiro(ei), n) .- 0.5) .* 0.18
-            scatter!(ax, x, deltas; color=(colors[mod1(ei+1, length(colors))], 0.75), markersize=9)
+            scatter!(ax, x, deltas; color=(series_color(est), 0.75), markersize=9)
             if label_trials
                 # pixel offset so the label clears the marker regardless of zoom
                 text!(ax, x, deltas; text=[string(t) for (t, _) in paired],

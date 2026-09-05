@@ -145,7 +145,7 @@ println("Saved JSON: $json_path")
 # re-read a hard-coded basename from a dict of timestamps, so editing the
 # compute cell above had no effect on the figures unless you also remembered to
 # add a key down here.
-replot_basename = nothing
+replot_basename = "ANG215_HEADING_TWOD_STEP_YAW_2026-09-05T11:17:56.693"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
