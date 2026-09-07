@@ -37,8 +37,31 @@ const TRIAL_IDS = Dict{String,Vector{Int}}(
     "DCSC" => [1, 2, 3, 4, 5, 6, 8, 10, 12, 14],
 )
 
+"""
+Train/test split used when *fitting* hyperparameters
+(scripts/4OnlineCorrection/6_hyperparam_optim.jl), as opposed to `TRIAL_IDS`,
+which is the trial list the comparison figures sweep over. The two are not
+interchangeable: swapping them changes which walks reach the optimiser and so
+changes the fitted hyperparameters.
+
+NOTE: the DCSC test id (10) also appears in the DCSC train list, i.e. that split
+leaks. Preserved as-is because the currently trained DCSC artifacts were fitted
+with it; fix it deliberately, and retrain, rather than by accident.
+"""
+const TRAIN_IDS = Dict{String,Vector{Int}}(
+    "ANG2" => [1, 2, 3, 4, 8, 9, 13, 15, 16],
+    "DCSC" => [1, 2, 3, 4, 5, 6, 8, 10, 12, 14],
+)
+
+const TEST_IDS = Dict{String,Vector{Int}}(
+    "ANG2" => [14],
+    "DCSC" => [10],
+)
+
 data_dir(key::AbstractString) = DATA_DIRS[key]
 trial_ids(key::AbstractString) = TRIAL_IDS[key]
+train_ids(key::AbstractString) = TRAIN_IDS[key]
+test_ids(key::AbstractString) = TEST_IDS[key]
 
 # ---------------------------------------------------------------------------
 # Trained hyperparameter sets
