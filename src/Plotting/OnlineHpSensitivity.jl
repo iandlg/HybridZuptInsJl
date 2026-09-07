@@ -86,7 +86,7 @@ correction methods in `scripts/5Results/`, 4-6 to the three hyperparameters
 above, and 7 (yellow) is too light to read. A figure holding both families
 therefore carries eight series with no two sharing a colour.
 """
-const _STAT_PARAM_INFO = Dict{String,@NamedTuple{sym::String, sub::String, words::String, color::String}}(
+const _STAT_PARAM_INFO = Dict{String,@NamedTuple{sym::String,sub::String,words::String,color::String}}(
     "input_mean" => (sym="μ", sub="x", words="input mean", color="#332288"),
     "input_std" => (sym="σ", sub="x", words="input std", color="#44AA99"),
     "input_center" => (sym="c", sub="x", words="input centering", color="#999933"),
@@ -214,6 +214,52 @@ function _hp_type_label(type::AbstractString)
 end
 
 """
+Display order for the normalisation statistics: inputs before outputs, and within
+each the mean, the spread, then the domain offset. `_STAT_PARAM_INFO` is a `Dict`
+and so carries no order of its own.
+"""
+const _STAT_TYPE_ORDER = String[
+    "input_mean", "input_std", "input_center", "output_mean", "output_std",
+]
+
+"""
+    _hp_type_rank(type) -> (family, position)
+
+Sort key putting the two swept families in a fixed order rather than in whatever
+order the bars happened to land in: the GP hyperparameters first (σ_n, ℓ_s, σ_f,
+by their index in a channel's parameter vector), then the normalisation
+statistics in [`_STAT_TYPE_ORDER`](@ref), then anything unrecognised.
+
+A sweep holds both families and `plot_signed_relative_change` sorts its rows by
+span, so the `type`s appear interleaved down the axis. Reading the legend in that
+order means reading a hyperparameter, a statistic, another hyperparameter -- the
+legend is the one place the two families are named, so it is the place to keep
+them apart.
+"""
+function _hp_type_rank(type::AbstractString)
+    key = String(type)
+    key = get(_STAT_TYPE_ALIASES, key, key)
+    hp_idx = get(_HP_TYPE_INDEX, key, nothing)
+    isnothing(hp_idx) || return (1, hp_idx)
+    stat_pos = findfirst(==(key), _STAT_TYPE_ORDER)
+    isnothing(stat_pos) || return (2, stat_pos)
+    return (3, 0)
+end
+
+"""
+    _hp_ordered_types(types) -> Vector
+
+`types` in [`_hp_type_rank`](@ref) order. Ties keep their relative input order --
+the position is carried in the sort key rather than left to the algorithm's
+stability -- so a sweep carrying a type this file has never heard of still gets
+one legend entry per type rather than losing or reordering it silently.
+"""
+function _hp_ordered_types(types)
+    ts = collect(types)
+    return ts[sortperm(eachindex(ts); by=i -> (_hp_type_rank(ts[i]), i))]
+end
+
+"""
     _hp_tick_positions(mults; max_ticks=7) -> Vector{Float64}
 
 Which of the swept multipliers get a labelled tick. A tick per swept value is
@@ -234,7 +280,7 @@ function _hp_tick_positions(mults::AbstractVector{<:Real}; max_ticks::Int=7)
 
     anchor = argmin(abs.(log.(pos)))          # the ×1 tick, or the nearest to it
     stride = cld(n - 1, max_ticks - 1)
-    idx = sort(unique(vcat(collect(anchor:-stride:1), collect(anchor:stride:n))))
+    idx = sort(unique(vcat(collect(anchor:(-stride):1), collect(anchor:stride:n))))
 
     for e in (1, n)
         if !(e in idx) && minimum(abs.(idx .- e)) > 1
@@ -464,10 +510,11 @@ for the parameter the argument turns on.
 - `mark_best`: ring the lowest-RMSE point.
 - `show_values`: print the percentage beside every swept point (default off --
   the points are readable off the axis, and the labels crowd a steep curve).
-- `show_subtitle`: draw the subtitle line (default `true`). Turn it off for a
-  figure whose caption in the document already carries the same information.
-- `show_summary`: the line under the title carrying the baseline value, the best
-  multiplier and the range (default off).
+- `show_subtitle`: draw the subtitle line at all (default `true`). Turn it off
+  for a figure whose caption in the document already carries the same
+  information; nothing below can put a subtitle back.
+- `show_summary`: what goes on that line. Off (default) is the baseline value
+  alone; on adds the best multiplier and the range.
 """
 function plot_hp_param_sensitivity(df::DataFrame, parameter::AbstractString;
     log_range::Union{Tuple{Float64,Float64},Nothing}=nothing,
@@ -478,7 +525,7 @@ function plot_hp_param_sensitivity(df::DataFrame, parameter::AbstractString;
     show_summary::Bool=false,
     show_subtitle::Bool=true,
     show_absolute_axis::Bool=true,
-    max_ticks::Int=7,
+    max_ticks::Int=5,
     figsize::Tuple{Int,Int}=(760, 520))
 
     sub = df[df.parameter .== parameter, :]
@@ -554,11 +601,14 @@ function plot_hp_param_sensitivity(df::DataFrame, parameter::AbstractString;
     end
 
     title_ax.title = rich("Sensitivity to ", label)
-    # `show_summary` decides whether there is a summary line at all;
-    # `show_subtitle` is the flag every figure here takes to strip the subtitle
-    # when the caption underneath the figure will say the same thing.
-    if show_summary && show_subtitle
-        title_ax.subtitle = join(annotations, "   |   ")
+    # `show_subtitle` alone decides whether there is a line under the title --
+    # it is the flag every figure here takes to strip the subtitle when the
+    # caption underneath the figure will say the same thing. `show_summary` only
+    # decides how much goes on it. WAS: `show_summary && show_subtitle`, which
+    # made `show_subtitle` a no-op, since the summary was the only thing that
+    # could ever be a subtitle and it defaults to off.
+    if show_subtitle
+        title_ax.subtitle = show_summary ? join(annotations, "   |   ") : first(annotations)
         title_ax.subtitlesize = 11
     end
 
@@ -815,7 +865,11 @@ function plot_signed_relative_change(df::DataFrame;
 
     # Fixed per type, so the colours mean the same thing here as in the
     # sensitivity curves -- and do not shuffle when a sweep omits a type.
-    types = unique(g.type)
+    #
+    # The rows are sorted by span, so `unique(g.type)` is the order the two
+    # families happen to interleave down the axis. The legend takes the canonical
+    # order instead: every GP hyperparameter, then every normalisation statistic.
+    types = _hp_ordered_types(unique(g.type))
     tcolor = Dict(t => hp_type_color(t) for t in types)
 
     n = nrow(g)
