@@ -60,15 +60,20 @@ results_figure() do
     )
 end
 
-# Same trials go through every estimator, so the design is paired. Plot the
+# Same trials go through every estimator, so the design is paired. Box the
 # per-trial difference against the uncorrected baseline rather than reading two
 # independent-looking boxes side by side.
+paired = HybridZuptInsJl.paired_estimator_contrast(
+    results_df; metric=:rmse, reference_estimator="ZUPT only")
+
 results_figure() do
-    HybridZuptInsJl.plot_paired_relative_change(
-        results_df;
+    HybridZuptInsJl.plot_dataset_paired_relative_change(
+        paired;
         metric=:rmse,
-        baseline="ZUPT only",
-        group=:dataset_name,
+        reference_label="ZUPT only",
+        show_points=false,
+        show_outliers=true,
+        show_subtitle=false,
         save_path=stamped(SECTION, "dataset_comparison_paired"),
     )
 end

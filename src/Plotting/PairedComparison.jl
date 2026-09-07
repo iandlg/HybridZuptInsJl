@@ -294,3 +294,92 @@ function plot_train_ratio_paired_relative_change(
     end
     return fig
 end
+
+"""
+    plot_dataset_paired_relative_change(
+        paired::DataFrame;
+        value_col::Symbol=:rel_change_pct,
+        metric::Symbol=:rmse,
+        reference_label::AbstractString="baseline",
+        save_path::Union{String,Nothing}=nothing,
+        show_outliers::Bool=true,
+        show_points::Bool=false,
+        show_subtitle::Bool=true,
+    )
+
+`plot_train_ratio_paired_relative_change` with the dataset on the x axis: one group
+per `dataset_name`, estimators side by side within it, so a frozen hyperparameter
+set can be read across datasets in the same visual language as the noise and
+train-ratio figures.
+
+Each box spans the per-trial changes against the reference estimator on the **same**
+trial (from `paired_estimator_contrast`), so walk-to-walk difficulty cancels and a
+box clear of zero is a consistent effect. The reference estimator has no box: it is
+the zero line. `plot_paired_relative_change` shows the same contrast per trial
+(labelled points, median with a bootstrap interval) if the detail is wanted.
+
+# Arguments
+- `paired`: output of `paired_estimator_contrast`.
+- `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
+- `metric`: only used to name the quantity in the axis label — it must be the one
+  `paired_estimator_contrast` was called with, which is not checked.
+- `show_points`: overlay the individual trials on each box. Worth turning on here:
+  a box typically summarises ~10 trials.
+- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
+  when the document's own caption carries the same information.
+"""
+function plot_dataset_paired_relative_change(
+    paired::DataFrame;
+    value_col::Symbol=:rel_change_pct,
+    metric::Symbol=:rmse,
+    reference_label::AbstractString="baseline",
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=false,
+    show_subtitle::Bool=true,
+)
+    check_metric(metric)
+    value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
+        "value_col must be :delta or :rel_change_pct, got :$value_col"))
+    isempty(paired) && error("No rows to plot")
+
+    # A box here groups on dataset only, so several train ratios / noise specs /
+    # draws would be pooled into one box without saying so. Say so.
+    for splitter in (:train_ratio, :noise_spec_tag, :seed)
+        hasproperty(paired, splitter) || continue
+        n = length(unique(paired[!, splitter]))
+        n > 1 && @warn "plot_dataset_paired_relative_change: pooling $n `$splitter` \
+                        values into each box; filter first if that is not intended."
+    end
+
+    as_pct = value_col === :rel_change_pct
+    fig = Figure(size=(900, 600))
+    ax = Axis(fig[1, 1],
+        xlabel="Dataset",
+        ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
+               "change in $(metric_label(metric))",
+        title="Per-trial change vs \"$reference_label\"",
+        subtitle=(!show_subtitle ? "" :
+                  as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
+                  "estimator − $reference_label, per trial"),
+        subtitlesize=10,
+        xticklabelsize=14,
+    )
+    as_pct && (ax.ytickformat = vs -> [string(round(v; digits=1), "%") for v in vs])
+
+    hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
+    labeled = _grouped_boxplot!(ax, paired, value_col;
+        group_col=:dataset_name, group_order_col=:dataset_order,
+        show_outliers=show_outliers, show_points=show_points)
+
+    if !isempty(labeled)
+        Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
+    end
+
+    if !isnothing(save_path)
+        mkpath(dirname(save_path))
+        save(save_path, fig)
+        @info "Saved figure: $save_path"
+    end
+    return fig
+end

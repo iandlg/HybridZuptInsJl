@@ -145,7 +145,7 @@ println("Saved JSON: $json_path")
 # re-read a hard-coded basename from a dict of timestamps, so editing the
 # compute cell above had no effect on the figures unless you also remembered to
 # add a key down here.
-replot_basename = nothing
+replot_basename = "ANG215_HEADING_TWOD_STEP_YAW_2026-09-05T11:17:56.693"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -227,6 +227,10 @@ for focus_param in focus_params
     results_figure() do
         HybridZuptInsJl.plot_hp_param_sensitivity(plot_df, focus_param;
             log_range=plot_log_range,
+            mark_best=false,
+            show_subtitle=false,
+            show_summary=false,
+            show_absolute_axis=true,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"))
     end
 end
