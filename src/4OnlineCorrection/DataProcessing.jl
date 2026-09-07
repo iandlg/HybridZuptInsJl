@@ -209,38 +209,72 @@ function mahal_sqdistances(M::Matrix{Float64})
     Σ = (C * C') ./ (n - 1) + 1e-8 * I
     L = cholesky(Symmetric(Σ)).U
     Y = L' \ C                      # L'⁻¹ * C
-    sqdists = vec(sum(Y .^ 2, dims=1))   # D² per sample, χ²_d distributed
+    sqdists = vec(sum(Y .^ 2, dims=1))   # D² per sample, χ²_d under a Gaussian
     return sqdists, d
+end
+
+"""
+    mahal_keep(data, keep_fraction) -> BitVector
+
+Keep-mask retaining the `keep_fraction` of samples closest to the centre of the
+joint cloud, cutting at the empirical `keep_fraction` quantile of the squared
+Mahalanobis distance.
+
+Empirical rather than χ²: `quantile(Chisq(d), alpha)` only retains `alpha` of the
+samples if D² really is χ²_d, which needs the data to be Gaussian *and* μ, Σ to be
+estimated independently of it. Neither holds here — outliers inflate the Σ computed
+from the same sample and so partly mask themselves — so a χ² `alpha` behaves as an
+opaque distance whose realized trim varies with the data and with `d`. The
+empirical quantile keeps exactly the fraction it names, in any dimension.
+"""
+function mahal_keep(data::Matrix{Float64}, keep_fraction::Float64)
+    0 < keep_fraction <= 1 ||
+        throw(ArgumentError("keep_fraction must be in (0,1], got $keep_fraction"))
+    sqdists, _ = mahal_sqdistances(data)
+    return sqdists .<= quantile(sqdists, keep_fraction)
 end
 
 
 """
     remove_outliers(input_io::CorrectionIO, output_io::CorrectionIO;
-                    method="zscore", threshold=3.0, dims=:both)
+                    method="zscore", dims=:both,
+                    threshold=3.0, keep_fraction=0.85)
 
-Remove outlier samples from paired input/output `CorrectionIO` data.
+Remove outlier samples from paired input/output `CorrectionIO` data. Samples are
+dropped from *both* objects together, so the two stay row-aligned.
 
 # Arguments
-- `input_io`, `output_io`: objects containing data matrices (features x samples) and aligned time vectors.
-- `method`: outlier detection method. Currently only `"zscore"` is implemented.
-- `threshold`: absolute z-score above which a sample is considered an outlier.
-- `dims`: where to look for outliers (`:input`, `:output`, or `:both`). Default `:both` removes a sample if it is an outlier in either the input or output space.
+- `input_io`, `output_io`: data matrices (features x samples) plus aligned time vectors.
+- `method`: `"zscore"` (per-channel, marginal) or `"mahalanobis"` (joint, accounts
+  for correlation between channels). `"iqr"` is not implemented.
+- `dims`: where to look (`:input`, `:output`, or `:both`). `:both` drops a sample
+  that is an outlier in *either* space, so the two cuts compound — the retained
+  fraction is smaller than either one alone.
+- `threshold`: `"zscore"` only. Absolute z-score above which a sample is an outlier.
+- `keep_fraction`: `"mahalanobis"` only. Fraction of samples retained, cut at that
+  empirical quantile of the squared Mahalanobis distance — see [`mahal_keep`](@ref).
 
 # Returns
-- `(input_clean, output_clean)`: new `CorrectionIO` objects with outlier samples removed.
+- `(input_clean, output_clean)`: new `CorrectionIO` objects with outliers removed.
 
 # Example
 ```julia
+# per-channel z-score
 input_clean, output_clean = remove_outliers(input_io, output_io;
                                             method="zscore", threshold=3.0, dims=:both)
 
+# keep the innermost 85% of the joint output cloud
+input_clean, output_clean = remove_outliers(input_io, output_io;
+                                            method="mahalanobis", dims=:output,
+                                            keep_fraction=0.85)
+```
 """
 function remove_outliers(
     input_io::CorrectionIO, output_io::CorrectionIO;
     method::String="zscore",
     dims::Symbol=:both,
     threshold::Float64=3.0,
-    alpha::Float64=0.975,
+    keep_fraction::Float64=0.85,
 )
     # Check same t
     if input_io.t != output_io.t
@@ -268,14 +302,10 @@ function remove_outliers(
     elseif method == "mahalanobis"
         keep = trues(n_samples)
         if dims == :input || dims == :both
-            sqdists, d = mahal_sqdistances(input_io.data)
-            thresh = sqrt(quantile(Chisq(d), alpha))
-            keep .&= sqdists .< thresh
+            keep .&= mahal_keep(input_io.data, keep_fraction)
         end
         if dims == :output || dims == :both
-            sqdists, d = mahal_sqdistances(output_io.data)
-            thresh = sqrt(quantile(Chisq(d), alpha))
-            keep .&= sqdists .< thresh
+            keep .&= mahal_keep(output_io.data, keep_fraction)
         end
 
     elseif method == "iqr"
