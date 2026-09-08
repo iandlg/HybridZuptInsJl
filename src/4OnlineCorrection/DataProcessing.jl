@@ -723,7 +723,8 @@ function _require_cols(df::DataFrame, cols, who::AbstractString)
 end
 
 """
-    paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="ZUPT only") -> DataFrame
+    paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="ZUPT only",
+                              train_ratios=nothing) -> DataFrame
 
 Per-trial change in `metric` relative to `reference_estimator`, for every noise spec.
 
@@ -732,6 +733,12 @@ Each row pairs one estimator against the reference on the **same**
 realisation, which `run_online_correction_sweep` guarantees by drawing the noise
 outside the estimator loop. The reference estimator itself is not in the output: it
 is the zero line.
+
+`train_ratios` keeps only those ratios, e.g. `train_ratios=[0.1, 0.5, 0.9]` to plot
+three groups out of a nine-ratio sweep. It is a filter on rows, not on the pairing:
+every pair is still formed within one train_ratio, so dropping ratios cannot change
+the pairs that survive. A ratio that is not in `df` is an error rather than an empty
+group — asking for 0.15 out of a 0.1-step sweep is a typo, not a request.
 
 # Returns
 `DataFrame` with the trial keys plus `estimator`, `noise_spec_tag`, `seed`, and:
@@ -747,9 +754,18 @@ function paired_estimator_contrast(
     df::DataFrame;
     metric::Symbol=:rmse_rate,
     reference_estimator::AbstractString="ZUPT only",
+    train_ratios::Union{Nothing,AbstractVector{<:Real}}=nothing,
 )::DataFrame
     _require_cols(df, vcat(_TRIAL_KEYS, [:estimator, :estimator_order, :noise_spec_tag,
             :noise_spec_order, :seed, metric]), "paired_estimator_contrast")
+
+    if !isnothing(train_ratios)
+        absent = setdiff(train_ratios, unique(df.train_ratio))
+        isempty(absent) || throw(ArgumentError(
+            "paired_estimator_contrast: train_ratio(s) $(absent) are not in the frame. \
+             Available: $(sort(unique(df.train_ratio)))"))
+        df = df[in.(df.train_ratio, Ref(train_ratios)), :]
+    end
 
     key_cols = vcat(_TRIAL_KEYS, [:noise_spec_tag, :noise_spec_order, :seed])
 
