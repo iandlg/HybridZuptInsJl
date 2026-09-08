@@ -45,8 +45,8 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
-trial_id = 4 # meta["trial_id"]
-train_ratio = 0.5
+trial_id = 14 # meta["trial_id"]
+train_ratio = 0.3
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -107,41 +107,68 @@ for (method_name, io_dict) in io_data
     output_data["$method_name : Prediction"] = io_dict["prediction"]
 end
 
+# cutoff 
+cutoff = 1e9 # s
+mask = def_corr_traj.t .< cutoff
+
+
+
 trajs = OrderedDict(
-    "ZUPT only" => def_corr_traj,
-    "Static" => decoupled_stat_traj,
+    "ZUPT only" => def_corr_traj[mask],
+    "Static" => decoupled_stat_traj[mask],
     # "Joint Static" => stat_corr_traj,
-    "HSGP" => hsgp1_corr_traj,
+    "HSGP" => hsgp1_corr_traj[mask],
     # "Joint HSGP" => slamHsgp_corr_traj
 )
 
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
+fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg][mask])
+fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg][mask])
 
 # results_figure() == CairoMakie + theme_ggplot2(), the theme every saved results figure
 # uses. It has to be CairoMakie: saving SVG under GLMakie silently rasterises the figure.
 fig = results_figure() do
-    HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg];
+    HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg][mask];
         segment=:test, train_ratio=train_ratio, show_heading=false, heading_stride=1,
         save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
 end
 
+# Same test window again, but one panel per correction instead of one overlaid map, with
+# the ground truth repeated dashed in each panel as the shared reference.
+fig_traj_panels = results_figure() do
+    HybridZuptInsJl.plot_trajectory_panels(
+        OrderedDict(
+            "ZUPT Only" => trajs["ZUPT only"],
+            "Static" => trajs["Static"],
+            "HSGP" => trajs["HSGP"],
+        ),
+        gt_traj_aligned[step_seg][mask];
+        segment=:test, train_ratio=train_ratio,
+        save_path=stamped(section, "trajectory2d_panels_$(data_key)_trial$(trial_id)"))
+end
+
 # Same test window as above, with the absolute distance error panel alongside it and a
 # single shared legend. Saved next to the map-only figure, under its own name.
-fig_traj_err = results_figure() do
-    HybridZuptInsJl.plot_trajectory_and_distance_error(trajs, gt_traj_aligned[step_seg];
-        segment=:test, train_ratio=train_ratio,
-        save_path=stamped(section, "trajectory2d_disterr_$(data_key)_trial$(trial_id)"))
+# fig_traj_err = results_figure() do
+#     HybridZuptInsJl.plot_trajectory_and_distance_error(trajs, gt_traj_aligned[step_seg][mask];
+#         segment=:test, train_ratio=train_ratio,
+#         save_path=stamped(section, "trajectory2d_disterr_$(data_key)_trial$(trial_id)"))
+# end
+
+# These two take no save_path, so the figure is saved here instead — still inside
+# results_figure(), so `save` is served by CairoMakie like every other results figure.
+fig_dist = results_figure() do
+    f = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
+    save(stamped(section, "distance_error_$(data_key)_trial$(trial_id)"), f)
+    f
+end
+fig_rmse_hybrid = results_figure() do
+    f = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=false)
+    save(stamped(section, "rmse_$(data_key)_trial$(trial_id)"), f)
+    f
 end
 # results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
 GLMakie.activate!()
 
-with_theme(theme_ggplot2()) do
-    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
-end
-with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
-end
 # fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
 # fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
@@ -223,13 +250,16 @@ fig = results_figure() do
         segment=:test, train_ratio=train_ratio, show_heading=false, heading_stride=1,
         save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
 end
+fig_dist = results_figure() do
+    f = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
+    save(stamped(section, "distance_error_$(data_key)_trial$(trial_id)"), f)
+    f
+end
+fig_rmse_hybrid = results_figure() do
+    f = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
+    save(stamped(section, "rmse_$(data_key)_trial$(trial_id)"), f)
+    f
+end
 # results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
 GLMakie.activate!()
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
-
-with_theme(theme_ggplot2()) do
-    fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
-end
-with_theme(theme_ggplot2()) do
-    fig_rmse_hybrid = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
-end

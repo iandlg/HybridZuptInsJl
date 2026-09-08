@@ -485,6 +485,87 @@ function plot_trajectory_and_distance_error(
 end
 
 """
+    plot_trajectory_panels(trajs, gt_traj; kwargs...)
+
+One top-down 2D panel per estimate, side by side, with the ground truth drawn dashed in
+every panel as the common reference. Panels share their limits, so a track that wanders
+further off is read straight off the position of the line, not off differing axis ranges.
+
+Window and colours follow [`plot_groundtruth_vs_inertial_positions`](@ref): `segment` /
+`train_ratio` pick the drawn window, and the nth estimate gets the nth Wong colour, so a
+series keeps the colour it has in the overlaid figures.
+"""
+function plot_trajectory_panels(
+    trajs::AbstractDict{String,Trajectory},
+    gt_traj::Trajectory;
+    segment::Symbol=:full,
+    train_ratio::Union{Nothing,Real}=nothing,
+    save_path::Union{String,Nothing}=nothing
+)
+    n_ref = length(gt_traj.t)
+    seg_start, seg_stop = _segment_window(gt_traj, segment, train_ratio)
+    win_start = clamp(seg_start, 1, n_ref)
+    win_stop = clamp(seg_stop, win_start, n_ref)
+    window = win_start:win_stop
+
+    name = segment === :train ? "Train" : segment === :test ? "Test" : nothing
+    title = isnothing(name) ?
+            "Ground truth vs estimated trajectories" :
+            "Ground truth vs estimated trajectories — $(name) segment"
+    subtitle = @sprintf("%d strides · %.1f s · %.1f m travelled",
+        win_stop - win_start, gt_traj.t[win_stop] - gt_traj.t[win_start],
+        total_distance(gt_traj[window]))
+
+    line_width = 1.2
+    fig = Figure(size=(420 * length(trajs), 560))
+    Label(fig[0, :], title; fontsize=16, font=:bold)
+    Label(fig[1, :], subtitle; fontsize=12)
+
+    axes = Axis[]
+    for (i, ((key, traj), c)) in enumerate(zip(trajs, Iterators.cycle(Makie.wong_colors())))
+        n = min(length(traj.t), win_stop)
+        window_rmse = _window_rmse(traj, gt_traj, win_start:n)
+        ax = Axis(fig[2, i];
+            xlabel="X (m)",
+            ylabel=i == 1 ? "Y (m)" : "",
+            title=isnothing(window_rmse) ? key : @sprintf("%s — RMSE %.2f m", key, window_rmse),
+            aspect=DataAspect(),
+            xgridvisible=true)
+        i == 1 || hideydecorations!(ax; grid=false)
+        push!(axes, ax)
+
+        gt_n = min(n_ref, win_stop)
+        lines!(ax, gt_traj.pos[1, win_start:gt_n], gt_traj.pos[2, win_start:gt_n];
+            color=:black, linestyle=:dash, linewidth=line_width)
+        lines!(ax, traj.pos[1, win_start:n], traj.pos[2, win_start:n];
+            color=c, linewidth=line_width)
+
+        scatter!(ax, [traj.pos[1, win_start]], [traj.pos[2, win_start]];
+            color=c, marker=:circle, markersize=12)
+        scatter!(ax, [traj.pos[1, n]], [traj.pos[2, n]];
+            color=c, marker=:rect, markersize=12)
+        scatter!(ax, [gt_traj.pos[1, win_start]], [gt_traj.pos[2, win_start]];
+            color=:black, marker=:circle, markersize=12)
+        scatter!(ax, [gt_traj.pos[1, gt_n]], [gt_traj.pos[2, gt_n]];
+            color=:black, marker=:rect, markersize=12)
+    end
+
+    linkaxes!(axes...)
+
+    Legend(fig[3, :],
+        [LineElement(color=:black, linestyle=:dash, linewidth=line_width),
+            MarkerElement(color=:black, marker=:circle, markersize=12),
+            MarkerElement(color=:black, marker=:rect, markersize=12)],
+        ["Ground truth", "Start", "End"];
+        framevisible=false, orientation=:horizontal, tellwidth=false, tellheight=true)
+
+    resize_to_layout!(fig)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+"""
     plot_position_rmse(trajs::Union{Dict{String, Trajectory}, Trajectory}, gt_traj::Trajectory)
 
 Plot the cumulative root-mean-square error (RMSE) of the horizontal position (x-y) over time

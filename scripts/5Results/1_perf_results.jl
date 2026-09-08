@@ -30,8 +30,18 @@ data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
     "Angerman" => (data_dir_path, ids),
 )
 
-# 2. Align INS / GT trajectories once per trial
-aligned = HybridZuptInsJl.collect_aligned_trajectories(data_dict)
+const SECTION = "1_Performance"
+
+# Set this to the file name of a scores CSV under out/Results/1_Performance/ to re-plot a
+# finished sweep instead of recomputing it, e.g.
+results_csv = "results_ANG2_HEADING_TWOD_STEP_YAW_2026-09-04T16:54:43.420.csv"
+# `nothing` runs the sweep and writes a fresh CSV.
+# results_csv = nothing
+
+# 2. Align INS / GT trajectories once per trial.
+# Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
+# script, and nothing downstream of the scores table needs the trajectories.
+aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(data_dict) : nothing
 
 ## 3. Hyperparameters
 hsgp_p_key = 42
@@ -57,36 +67,55 @@ estimators = OrderedDict(
 output_channels = [:pos_1, :pos_2, :yaw]
 train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] #  0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
 
-## 5. Run the sweep
-results_df = HybridZuptInsJl.run_online_correction_sweep(
-    aligned,
-    FRAME,
-    FEATURE_TYPE,
-    hsgp_p,
-    train_ratios,
-    estimators,
-    output_channels;
-    estimator_alloc=300,
-)
+## 5/6. Run the sweep and save the scores, or read a finished run back
+# Only the scalar columns are written: the sweep also carries the raw zupt/step_seg/
+# corr_traj/io_data/model objects, which have no CSV representation -- so a re-read frame
+# has the score columns and nothing else, which is all the plots below use.
+# dataset_order/noise_spec_tag/noise_spec_order/seed are here because they are the keys
+# `paired_estimator_contrast` pairs on: without them a re-read CSV plots the boxplots but
+# throws in the paired cells below.
+score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_ratio_order,
+    :estimator, :estimator_order, :noise_spec_tag, :noise_spec_order, :seed,
+    :rmse, :rmse_rate, :rmse_yaw]
 
-## 6. Save the scores
-# Only the scalar columns: the sweep also carries the raw zupt/step_seg/corr_traj/
-# io_data/model objects, which have no CSV representation.
-const SECTION = "1_Performance"
-
-score_cols = [:dataset_name, :trial_id, :train_ratio, :train_ratio_order,
-    :estimator, :estimator_order, :rmse, :rmse_rate, :rmse_yaw]
-csv_path = stamped(SECTION, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
-CSV.write(csv_path, results_df[:, score_cols])
-@info "Saved results table: $csv_path"
+if isnothing(results_csv)
+    results_df = HybridZuptInsJl.run_online_correction_sweep(
+        aligned,
+        FRAME,
+        FEATURE_TYPE,
+        hsgp_p,
+        train_ratios,
+        estimators,
+        output_channels;
+        estimator_alloc=300,
+    )
+    csv_path = stamped(SECTION, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
+    CSV.write(csv_path, results_df[:, score_cols])
+    @info "Saved results table: $csv_path"
+else
+    csv_path = results_path(SECTION, results_csv)
+    results_df = CSV.read(csv_path, DataFrame)
+    # CSVs written before the pairing keys joined `score_cols` hold the scores only. This
+    # script runs one dataset, no noise and one seed, so each missing key has exactly one
+    # value across the whole file -- filling it in restores it rather than inventing it.
+    for (col, val) in (:dataset_order => 1, :noise_spec_tag => "NoiseSpec",
+        :noise_spec_order => 1, :seed => 123)
+        hasproperty(results_df, col) || (results_df[!, col] .= val)
+    end
+    @info "Loaded results table: $csv_path" nrow(results_df)
+end
 
 ## 7. Plot
 # WAS: this cell re-read a hard-coded CSV path from June while stamping the
 # output filenames with the data_key/FRAME/FEATURE of whatever the compute cell
 # above had set -- so the figure legend could describe a different run than the
-# data plotted. It now plots the DataFrame just computed. To re-plot an older
-# run, set `results_df = CSV.read(<path>, DataFrame)` here deliberately.
-corrector_names = collect(keys(estimators))
+# data plotted. It now plots whatever `results_df` holds: the sweep just computed,
+# or the CSV named by `results_csv` at the top of the script.
+#
+# Corrector order comes from the frame rather than from `estimators`, so a re-read CSV
+# keeps the order (and hence the colours) of the run that produced it, whether or not it
+# swept the same estimators as the cell above.
+corrector_names = unique(sort(results_df, :estimator_order).estimator)
 
 for metric in (:rmse, :rmse_rate), show_outliers in (true, false)
     suffix = show_outliers ? "" : "_nooutliers"
@@ -123,11 +152,12 @@ end
 # which it is not in the unpaired boxplots of step 7, where the trial-to-trial
 # spread dominates.
 const BASE_ESTIMATOR = "ZUPT only"
-const DATASET = first(keys(data_dict))
+# From the frame, not `data_dict`, for the same reason as `corrector_names`.
+const DATASET = first(unique(results_df.dataset_name))
 
 for metric in (:rmse, :rmse_rate, :rmse_yaw)
     paired = HybridZuptInsJl.paired_estimator_contrast(
-        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
+        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR, train_ratios=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     results_figure() do
         HybridZuptInsJl.plot_train_ratio_paired_relative_change(
             paired, DATASET;
