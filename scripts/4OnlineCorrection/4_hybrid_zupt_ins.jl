@@ -32,6 +32,7 @@ data_dir_path = data_dir(data_key)
 # Saved figures go to out/Results/<section>/, the same tree scripts/5Results/ writes to.
 # Plain variable, not `const`: this script gets re-included in a live REPL.
 section = "1_Performance/Trajectory2D"
+regression_section = "1_Performance/Regression"
 
 var_pos = 1e-3
 var_yaw = 1e-3
@@ -46,7 +47,7 @@ sigma_groundtruth = (
 posyaw_measurement_update=true
 
 trial_id = 14 # meta["trial_id"]
-train_ratio = 0.3
+train_ratio = 0.5
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -132,17 +133,15 @@ fig = results_figure() do
         save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
 end
 
-# Same test window again, but one panel per correction instead of one overlaid map, with
-# the ground truth repeated dashed in each panel as the shared reference.
+# Zoom on where the corrections diverge: the first strides after the model takes over
+# (top row) and the end of the walk (bottom row), one column per correction, ground
+# truth dashed underneath each.
+n_first_strides = 20
+n_last_strides = 20
 fig_traj_panels = results_figure() do
-    HybridZuptInsJl.plot_trajectory_panels(
-        OrderedDict(
-            "ZUPT Only" => trajs["ZUPT only"],
-            "Static" => trajs["Static"],
-            "HSGP" => trajs["HSGP"],
-        ),
-        gt_traj_aligned[step_seg][mask];
-        segment=:test, train_ratio=train_ratio,
+    HybridZuptInsJl.plot_trajectory_start_end_panels(
+        trajs, gt_traj_aligned[step_seg][mask];
+        train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides,
         save_path=stamped(section, "trajectory2d_panels_$(data_key)_trial$(trial_id)"))
 end
 
@@ -171,6 +170,20 @@ GLMakie.activate!()
 
 # fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
+
+# The three channels the corrections actually estimate (Δz is left alone), on one stacked
+# figure: target grey, Static wong yellow, HSGP wong green, a single shared legend. Keys
+# have to be exactly "Static"/"HSGP" — that is what picks the colours.
+fig_regr_panels = results_figure() do
+    HybridZuptInsJl.plot_regression_panels(
+        OrderedDict(
+            "Static" => io_data["Decoupled Static"]["prediction"],
+            "HSGP" => io_data["Decoupled HSGP"]["prediction"],
+        ),
+        io_data["Base"]["target"];
+        save_path=stamped(regression_section, "regression_panels_$(data_key)_trial$(trial_id)"))
+end
+GLMakie.activate!()
 # fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
 # fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])
 
@@ -179,7 +192,7 @@ trial_id = 14
 train_ratio = 0.1
 posyaw_measurement_update = true
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir_path, trial_id; sim_config=sim_config
+    data_dir_path, trial_id;# sim_config=sim_config
 )
 # sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
 noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
@@ -211,20 +224,25 @@ zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = HybridZupt
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=decoup_stat_model, posyaw_measurement_update=posyaw_measurement_update)
 
-joint_static_est = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, joint_stat_traj, io_data["Joint Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, joint_static_est;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=joint_stat_model, posyaw_measurement_update=posyaw_measurement_update)
+# Disabled to match the first block, which does not run the Joint estimators:
+# `init_model=joint_stat_model` needs the model that block's commented-out
+# JointStatic run would have returned. Re-enable both together or neither.
+# joint_static_est = HybridZuptInsJl.JointStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
+# zupt, step_seg, joint_stat_traj, io_data["Joint Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, noisy_gt_traj, joint_static_est;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=joint_stat_model, posyaw_measurement_update=posyaw_measurement_update)
 
 decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)
 
-slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, slamHsgp_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_joint_model, posyaw_measurement_update=posyaw_measurement_update)
+# Disabled for the same reason: `init_model=hsgp_joint_model` comes from the
+# first block's commented-out JointHsgp run.
+# slamHsgp_corr = HybridZuptInsJl.JointHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
+# zupt, step_seg, slamHsgp_corr_traj, io_data["Joint HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+#     inertial_updated, sim_config_updated, noisy_gt_traj, slamHsgp_corr;
+#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_joint_model, posyaw_measurement_update=posyaw_measurement_update)
 
 input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
@@ -236,9 +254,9 @@ end
 trajs = OrderedDict(
     "ZUPT only" => def_corr_traj,
     "Static" => decoupled_stat_traj,
-    "Joint Static" => joint_stat_traj,
+    # "Joint Static" => joint_stat_traj,
     "HSGP" => hsgp1_corr_traj,
-    "Joint HSGP" => slamHsgp_corr_traj
+    # "Joint HSGP" => slamHsgp_corr_traj
 )
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])

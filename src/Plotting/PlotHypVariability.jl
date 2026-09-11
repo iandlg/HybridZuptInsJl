@@ -24,8 +24,8 @@ function plot_hyperparameter_rmse_variability(
 
     fig = Figure(size=(1200, 500))
     # Left subplot: bar chart
-    ax1 = Axis(fig[1, 1]; title="RMSE per fold",
-        xlabel="Hyperparameter fold", ylabel="RMSE (m)")
+    ax1 = Axis(fig[1, 1]; title=rich(metric_symbol(:rmse), " per fold"),
+        xlabel="Hyperparameter fold", ylabel=metric_label(:rmse))
     bars = barplot!(ax1, fold_ids, rmse_per_fold; color=:steelblue, alpha=0.75,
         strokewidth=0.6, strokecolor=:white)
     # Baselines
@@ -34,7 +34,8 @@ function plot_hyperparameter_rmse_variability(
     hlines!(ax1, [static_rmse]; color=:tomato, linestyle=:dot, linewidth=1.2,
         label="Static correction")
     hlines!(ax1, [mean(rmse_per_fold)]; color=:steelblue, linewidth=1.0, alpha=0.6,
-        label="GP mean (RMSE = $(round(mean(rmse_per_fold), digits=4)) m)")
+        label=rich("GP mean (", metric_symbol(:rmse),
+            " = $(round(mean(rmse_per_fold), digits=4)) m)"))
 
     # Annotate each bar with its RMSE value
     for (i, val) in enumerate(rmse_per_fold)
@@ -45,7 +46,7 @@ function plot_hyperparameter_rmse_variability(
 
     # Right subplot: boxplot + jittered scatter
     ax2 = Axis(fig[1, 2]; title="Distribution  μ = $(round(mean(rmse_per_fold), digits=4)) m  σ = $(round(std(rmse_per_fold), digits=4)) m",
-        ylabel="RMSE (m)")
+        ylabel=metric_label(:rmse))
     # Simple boxplot: manual using quantiles
     q = quantile(rmse_per_fold, [0.25, 0.5, 0.75])
     iqr_box = q[3] - q[1]

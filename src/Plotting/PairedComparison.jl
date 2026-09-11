@@ -120,7 +120,8 @@ function plot_paired_relative_change(df::DataFrame;
 
         ax = Axis(fig[1, gi];
             title=string(gname),
-            ylabel=gi == 1 ? "relative change in $(metric_quantity(metric))  (estimator − baseline) / |baseline|  [%]" : "",
+            ylabel=gi == 1 ? rich("relative change in ", metric_symbol(metric),
+                "  (estimator − baseline) / |baseline|  [%]") : rich(""),
             xticks=(1:length(others), others),
             xticklabelrotation=π / 6,
             ytickformat=vs -> [string(round(v; digits=1), "%") for v in vs])
@@ -260,8 +261,8 @@ function plot_train_ratio_paired_relative_change(
     fig = Figure(size=(900, 600))
     ax = Axis(fig[1, 1],
         xlabel="Ground truth available online (train_ratio)",
-        ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
-               "change in $(metric_label(metric))",
+        ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
+               rich("change in ", metric_label(metric)),
         title="Per-trial change vs \"$reference_label\" — $dataset_name",
         subtitle=(!show_subtitle ? "" :
                   as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
@@ -356,8 +357,8 @@ function plot_dataset_paired_relative_change(
     fig = Figure(size=(900, 600))
     ax = Axis(fig[1, 1],
         xlabel="Dataset",
-        ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
-               "change in $(metric_label(metric))",
+        ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
+               rich("change in ", metric_label(metric)),
         title="Per-trial change vs \"$reference_label\"",
         subtitle=(!show_subtitle ? "" :
                   as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :

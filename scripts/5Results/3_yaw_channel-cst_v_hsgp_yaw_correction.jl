@@ -36,7 +36,7 @@ estimators = OrderedDict(
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
-output_channels = [:yaw]
+output_channels = [:pos_1, :pos_2, :yaw]
 train_ratios = [0.5]
 
 ## 5. Run the sweep
@@ -74,15 +74,20 @@ results_figure() do
 end
 
 # Paired view: five estimators x two datasets from n≈10 each is a lot of boxes
-# to compare by eye, and they are all the same trials.
+# to compare by eye, and they are all the same trials. Same grouped-boxplot
+# view as section 2's dataset comparison, so the two figures read alike.
 for metric in (:rmse_yaw, :rmse)
+    paired = HybridZuptInsJl.paired_estimator_contrast(
+        results_df; metric=metric, reference_estimator="ZUPT only")
+
     results_figure() do
-        HybridZuptInsJl.plot_paired_relative_change(
-            results_df;
+        HybridZuptInsJl.plot_dataset_paired_relative_change(
+            paired;
             metric=metric,
-            baseline="ZUPT only",
-            group=:dataset_name,
-            train_ratio=0.5,
+            reference_label="ZUPT only",
+            show_points=false,
+            show_outliers=true,
+            show_subtitle=false,
             save_path=stamped(SECTION, "yaw_only_correction_paired_$(metric)"),
         )
     end

@@ -13,6 +13,25 @@ function log_around(base::Float64, exp_range::Tuple{Float64,Float64}, n_steps::I
     return base .* 10.0 .^ exps
 end
 
+"""
+    offset_around(base, unit, delta_range, n_steps)
+
+Additive counterpart to [`log_around`](@ref): `base + unit * delta` over a linear
+grid of `delta`. `unit` is the scale the offset is quoted in, so the probe is
+`delta` in that unit regardless of how large `base` happens to be.
+
+This is the right orbit for a *location* parameter, where `log_around` is not:
+a multiplier sizes the probe by the base value, cannot cross zero, reverses
+direction when the base is negative, and has zero as a fixed point. Use a
+symmetric `delta_range` with an odd `n_steps` so `delta = 0` -- the unperturbed
+value -- is hit exactly.
+"""
+function offset_around(base::Float64, unit::Float64, delta_range::Tuple{Float64,Float64}, n_steps::Int)
+    lo, hi = delta_range
+    deltas = range(lo, hi, length=n_steps)
+    return base .+ unit .* deltas
+end
+
 const Optional{T} = Union{Nothing,T}
 
 """

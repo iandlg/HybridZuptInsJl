@@ -186,8 +186,8 @@ function plot_noise_paired_relative_change(
         xlabel="Noise specification",
         # Kept short on purpose: spelling the formula out here overflows the axis
         # once `reference_label` is a real estimator name. The subtitle carries it.
-        ylabel=as_pct ? "relative change in $(metric_quantity(metric)) [%]" :
-               "change in $(metric_label(metric))",
+        ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
+               rich("change in ", metric_label(metric)),
         title="Paired per-trial change vs \"$reference_label\" — $dataset_name",
         subtitle=!show_subtitle ? "" :
                  as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :

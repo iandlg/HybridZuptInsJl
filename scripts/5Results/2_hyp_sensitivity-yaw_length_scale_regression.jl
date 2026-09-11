@@ -38,8 +38,8 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 # the same point on the same data rather than a nearby one.
 data_key = "ANG2"
 data_dir_path = data_dir(data_key)
-trial_id = 15
-train_ratio = 0.45
+trial_id = 14
+train_ratio = 0.3
 
 # Only the yaw channel is corrected, matching section 3 -- that is the setting in
 # which HSGP and static came out level.
@@ -151,7 +151,7 @@ const SECTION = "2_HypSensitivity/YawLengthScaleRegression"
 # the top of the panel, which is itself the point being made about it.
 results_figure() do
     HybridZuptInsJl.plot_regression_comparison(predictions, target;
-        channel=4, segment=:test, train_ratio=train_ratio,
+        channel=4, segment=:full, train_ratio=train_ratio,
         colors=series_colors, labels=series_labels,
         linestyles=series_styles, linewidths=series_widths, clip_quantile=1.1,
         dataset=data_key, trial_id=trial_id,
@@ -160,21 +160,21 @@ end
 
 # Companion: unclipped, with the predictive bands and the numbers, so the figure
 # above is auditable rather than something the reader has to take on trust.
-results_figure() do
-    HybridZuptInsJl.plot_regression_comparison(predictions, target;
-        channel=4, segment=:test, train_ratio=train_ratio,
-        colors=series_colors, labels=series_labels,
-        linestyles=series_styles, linewidths=series_widths,
-        show_std=true, show_rmse=true, show_mean_std=true,
-        dataset=data_key, trial_id=trial_id,
-        save_path=stamped(SECTION, "yaw_length_scale_$(data_key)$(trial_id)_unclipped"))
-end
+# results_figure() do
+#     HybridZuptInsJl.plot_regression_comparison(predictions, target;
+#         channel=4, segment=:test, train_ratio=train_ratio,
+#         colors=series_colors, labels=series_labels,
+#         linestyles=series_styles, linewidths=series_widths,
+#         show_std=true, show_rmse=true, show_mean_std=true,
+#         dataset=data_key, trial_id=trial_id,
+#         save_path=stamped(SECTION, "yaw_length_scale_$(data_key)$(trial_id)_unclipped"))
+# end
 
 # Zoomed view: 40 s of the test segment, enough strides to see the shape of each
 # correction without the whole segment compressed into a few hundred pixels.
 results_figure() do
     HybridZuptInsJl.plot_regression_comparison(predictions, target;
-        channel=4, segment=:test, train_ratio=train_ratio,
+        channel=4, segment=:full, train_ratio=train_ratio,
         colors=series_colors, labels=series_labels,
         linestyles=series_styles, linewidths=series_widths, clip_quantile=1.1,
         time_window=(400.0, 440.0),
