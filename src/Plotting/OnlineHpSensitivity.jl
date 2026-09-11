@@ -1,6 +1,12 @@
 """
 Hyperparameter sensitivity curves.
 
+NOTE: for a sweep carrying `probe`/`probe_kind` columns, use `OnlineHpProbe.jl`
+instead. The multiplier axis these functions recover as `tested_value /
+base_value` is only meaningful for a scale parameter; a location parameter swept
+additively needs the offset axis it was swept on. This file is kept for the
+sweeps and saved CSVs that predate that distinction.
+
 Both the full grid ([`plot_hp_sensitivity`](@ref)) and the single-parameter
 close-up ([`plot_hp_param_sensitivity`](@ref)) draw the same curve through
 `_draw_hp_panel!`, so a panel of the grid and the close-up of the same parameter
