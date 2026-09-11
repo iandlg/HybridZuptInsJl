@@ -693,3 +693,145 @@ function sweep_over_trials(
     end
     return vcat(frames...)
 end
+
+"""
+    sign_test_p(k, n) -> Float64
+
+Two-sided exact binomial sign test: the probability of a split at least as
+lopsided as `k` of `n` under p = 0.5.
+
+The sweep is paired -- every trial is scored against its own baseline -- so the
+question "did this perturbation move RMSE the same way in every trial" is a sign
+test on `n` paired observations, and needs no assumption about the (very
+skewed, see notes/009 section 6) distribution of the changes themselves.
+"""
+function sign_test_p(k::Int, n::Int)::Float64
+    n == 0 && return 1.0
+    tail = sum(binomial(n, i) for i in 0:min(k, n - k))
+    return min(1.0, 2 * tail / 2.0^n)
+end
+
+"""
+    probe_agreement(df) -> DataFrame
+
+Reduce a [`sweep_over_trials`](@ref) frame to one row per parameter: how far the
+across-trial median moved, and whether the trials agreed about it.
+
+Columns: `parameter`, `type`, `probe_kind`, `span` (range of the across-trial
+median curve), `worst_probe` (the non-identity probe with the largest |median|),
+`median_pct`, `q25`, `q75` (across trials at `worst_probe`), `n_agree`,
+`n_trials`, `p_value`.
+
+`n_agree` is the majority count `max(k, n-k)` over the sign of the change, and
+`p_value` is [`sign_test_p`](@ref) on it. This is the statistic that separates a
+parameter that moved RMSE from one whose wide range is a handful of trials
+disagreeing: with the pipeline deterministic under a fixed seed there is no
+run-to-run noise floor to test against, so agreement across trials is the
+reference the design does provide.
+
+All percentages, matching the plotting layer and `relative_change * 100`.
+"""
+function probe_agreement(df::DataFrame)::DataFrame
+    work = df[df.parameter.!="baseline", :]
+    isempty(work) && throw(ArgumentError("probe_agreement: no swept rows in frame"))
+    work = copy(work)
+    work.pct = 100 .* float.(work.relative_change)
+
+    rows = []
+    for sub in groupby(work, :parameter)
+        identity_probe = first(sub.probe_kind) == "multiplicative" ? 1.0 : 0.0
+        by_probe = combine(groupby(sub, :probe), :pct => median => :med)
+        span = maximum(by_probe.med) - minimum(by_probe.med)
+
+        moved = by_probe[abs.(by_probe.probe .- identity_probe).>1e-9, :]
+        nrow(moved) == 0 && continue
+        worst = moved.probe[argmax(abs.(moved.med))]
+
+        vals = sub[isapprox.(sub.probe, worst; atol=1e-9), :pct]
+        n = length(vals)
+        k = count(>(0), vals)
+        push!(rows, (
+            parameter=first(sub.parameter),
+            type=first(sub.type),
+            probe_kind=first(sub.probe_kind),
+            span=span,
+            worst_probe=worst,
+            median_pct=median(vals),
+            q25=n < 4 ? minimum(vals) : quantile(vals, 0.25),
+            q75=n < 4 ? maximum(vals) : quantile(vals, 0.75),
+            n_agree=max(k, n - k),
+            n_trials=n,
+            p_value=sign_test_p(k, n),
+        ))
+    end
+    return sort!(DataFrame(rows), :span; rev=true)
+end
+
+"""
+    box_exit_over_trials(data_dir, trial_ids, base_params, param_specs, feature_type) -> DataFrame
+
+[`box_exit_frame`](@ref) for each trial, stacked with a `trial_id` column.
+
+The domain boundary is not a constant: across the 11 ANG2 trials the multiplier
+at which `sigma_x` carries the features outside `±LL` ranges ×0.13 to ×0.47, and
+one trial is already outside before any perturbation. Shading a single trial's
+boundary as though it were *the* boundary would misstate that, and the
+diagnostic is closed-form in the normalisation statistics, so every trial costs
+one feature extraction and no filter runs.
+"""
+function box_exit_over_trials(
+    data_dir::AbstractString,
+    trial_ids::AbstractVector{Int},
+    base_params::HsgpParameters,
+    param_specs::Vector{ParamSpec},
+    feature_type::FeatureType;
+    ref_frame::ReferenceFrame
+)::DataFrame
+    frames = DataFrame[]
+    for tid in trial_ids
+        X = raw_features(data_dir, tid; ref_frame=ref_frame, feature_type=feature_type)
+        f = box_exit_frame(X, base_params, param_specs, feature_type)
+        f.trial_id = fill(tid, nrow(f))
+        push!(frames, f)
+    end
+    return vcat(frames...)
+end
+
+"""
+    box_outside_spans(box_df, parameter; level=0.5) -> Vector{Tuple{Float64,Float64}}
+
+The contiguous probe intervals over which at least `level` of the trials have
+features outside `±LL`.
+
+Returned as intervals rather than a single threshold because a *location*
+parameter leaves the domain at both ends of its probe, so there are two spans
+and a lone exit point would describe neither. A parameter that never leaves
+returns an empty vector, which is a result in its own right and the caller is
+expected to say so rather than draw nothing.
+"""
+function box_outside_spans(box_df::DataFrame, parameter::AbstractString;
+    level::Real=0.5)::Vector{Tuple{Float64,Float64}}
+    sub = box_df[box_df.parameter.==parameter, :]
+    isempty(sub) && return Tuple{Float64,Float64}[]
+
+    frac = combine(groupby(sub, :probe),
+        :max_z_ratio => (v -> count(>(1.0), v) / length(v)) => :frac)
+    sort!(frac, :probe)
+    outside = frac.frac .>= level
+
+    spans = Tuple{Float64,Float64}[]
+    i = 1
+    while i <= length(outside)
+        if outside[i]
+            j = i
+            while j < length(outside) && outside[j+1]
+                j += 1
+            end
+            push!(spans, (frac.probe[i], frac.probe[j]))
+            i = j + 1
+        else
+            i += 1
+        end
+    end
+    return spans
+end

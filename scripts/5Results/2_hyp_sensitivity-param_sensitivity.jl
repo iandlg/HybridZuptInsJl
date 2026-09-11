@@ -46,7 +46,7 @@ data_dir_path = data_dir(data_key)
 # mostly on the hyperparameters' own training walks and the sensitivity would be
 # partly a statement about fit rather than about transfer. Swap in
 # `trial_ids(data_key)` to sweep everything, knowing that.
-sweep_trial_ids = setdiff(trial_ids(data_key), train_ids(data_key))
+sweep_trial_ids = trial_ids(data_key)
 
 train_ratio = 0.5
 output_channel_idxs = [1, 2, 4]
@@ -64,7 +64,7 @@ sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 5 : 21
+n_steps = smoke_test ? 5 : 7
 log_range = (-1.0, 1.0)     # scale families: decades
 delta_range = (-2.0, 2.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 
@@ -75,6 +75,18 @@ delta_range = (-2.0, 2.0)   # location families: units of sigma_x (mu_x) or z (c
 box_n_steps = 121
 box_log_range = (-1.5, 1.5)
 box_delta_range = (-12.0, 12.0)
+
+# Parameters that get their own single-panel figure. `hp_param_name` names a GP
+# hyperparameter by channel and kind; `stat_param_name` names a normalisation
+# statistic by family and feature dimension -- spelling both out beats writing
+# "yaw[2]" and "input_std[2]" as literals, where the bracketed number means a
+# hyperparameter kind in the first and a feature dimension in the second.
+# Normalisation parameters additionally get domain-containment shading.
+focus_params = [
+    HybridZuptInsJl.hp_param_name(:yaw, :length_scale),
+    HybridZuptInsJl.stat_param_name(:input_std, 2),
+    HybridZuptInsJl.stat_param_name(:input_center, 2),
+]
 
 if smoke_test
     sweep_trial_ids = sweep_trial_ids[1:1]
@@ -141,26 +153,29 @@ df = HybridZuptInsJl.sweep_over_trials(
 
 ## ----- Box occupancy -------------------------------------------------------
 
-# Features come from the first swept trial. They are a property of the
-# segmentation, not of the hyperparameters, and the box question is about where
-# the trained `LL` sits relative to a walk's feature cloud.
-box_trial = first(sweep_trial_ids)
-X = HybridZuptInsJl.raw_features(data_dir_path, box_trial;
-    ref_frame=FRAME, feature_type=FEATURE_TYPE)
-
+# Computed for every swept trial, not just one: the boundary is not a constant
+# (×0.13-×0.47 across the ANG2 trials), so a single trial's exit point would
+# misstate it. Closed-form in the normalisation statistics, so this is one
+# feature extraction per trial and no filter runs.
 box_specs, _ = HybridZuptInsJl.make_stats_param_grid(hsgp_p;
     log_range=box_log_range, delta_range=box_delta_range, n_steps=box_n_steps,
     output_channel_idxs=output_channel_idxs, include_output_params=false)
 
-box_df = HybridZuptInsJl.box_exit_frame(X, hsgp_p, box_specs, FEATURE_TYPE)
+box_df = HybridZuptInsJl.box_exit_over_trials(data_dir_path, sweep_trial_ids,
+    hsgp_p, box_specs, FEATURE_TYPE; ref_frame=FRAME)
 exit_df = HybridZuptInsJl.box_exit_points(box_df)
 
-base_occ = HybridZuptInsJl.box_occupancy(X, hsgp_p, FEATURE_TYPE)
-@info "Unperturbed box occupancy (trial $box_trial)" base_occ.frac_outside base_occ.max_z_ratio
 # LL was built from the training features with a margin, so the trained
-# parameters must place every stride inside the domain. If they do not, the
-# artifact and the data disagree and the box figure is measuring that instead.
-@assert base_occ.frac_outside == 0.0 "trained parameters already place $(100*base_occ.frac_outside)% of strides outside ±LL"
+# parameters should place every stride inside the domain. A trial that is
+# already outside is not a reason to stop -- it is a finding (notes/009 §6) --
+# but it must be reported rather than absorbed into the figures silently.
+for tid in sweep_trial_ids
+    X = HybridZuptInsJl.raw_features(data_dir_path, tid;
+        ref_frame=FRAME, feature_type=FEATURE_TYPE)
+    occ = HybridZuptInsJl.box_occupancy(X, hsgp_p, FEATURE_TYPE)
+    occ.frac_outside == 0.0 ||
+        @warn "trial $tid is already outside ±LL at the trained parameters" occ.frac_outside occ.max_z_ratio
+end
 
 ## ----- Save ----------------------------------------------------------------
 
@@ -168,15 +183,20 @@ csv_path = joinpath(outdir, "$base_name.csv")
 json_path = joinpath(outdir, "$base_name.json")
 box_path = joinpath(outdir, "$(base_name)_box.csv")
 exit_path = joinpath(outdir, "$(base_name)_box_exit.csv")
+agree_path = joinpath(outdir, "$(base_name)_agreement.csv")
 
 CSV.write(csv_path, df)
 CSV.write(box_path, box_df)
 CSV.write(exit_path, exit_df)
+# One row per parameter: span, worst probe, across-trial IQR and the sign test.
+# This is the table notes/009 §4 quotes, so it is generated rather than
+# recomputed by hand whenever the sweep is rerun.
+CSV.write(agree_path, HybridZuptInsJl.probe_agreement(df))
 
 metadata = Dict(
     "data_key" => meta["data_key"],
     "sweep_trial_ids" => sweep_trial_ids,
-    "box_trial" => box_trial,
+    "box_trial_ids" => sweep_trial_ids,
     "frame" => string(FRAME),
     "feature_type" => string(FEATURE_TYPE),
     "log10_range" => log_range,
@@ -206,6 +226,7 @@ println("Saved CSV:  $csv_path")
 println("Saved JSON: $json_path")
 println("Saved box:  $box_path")
 println("Saved exit: $exit_path")
+println("Saved agree: $agree_path")
 println()
 println("Box exit points:")
 show(stdout, MIME("text/plain"), exit_df)
@@ -263,30 +284,20 @@ results_figure() do
         save_path=results_path(SECTION, "$(plot_name)_box_exit.pdf"))
 end
 
-# Signed range: which parameters move RMSE, in which direction, and whether the
-# trials agree. This is the one to read first.
+# Ranking: which parameters move RMSE, by how much, and whether the trials
+# agree. This is the one to read first. Its x limits come from the bars, not the
+# data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
-    HybridZuptInsJl.plot_probe_signed_range(plot_df;
-        save_path=results_path(SECTION, "$(plot_name)_signed_rel_change.pdf"))
+    HybridZuptInsJl.plot_probe_ranking(plot_df;
+        save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"))
 end
 
-# Close-ups of the most consequential parameters, one figure each. The
-# signed-range plot compresses each parameter to [min, max], which says how far
-# RMSE moved but not how it got there -- and the shape is often the result: for
-# the yaw length scale the baseline sits on a local optimum, so both directions
-# move RMSE the same way, which a bar cannot show.
-#
-# `hp_param_name` names a GP hyperparameter by channel and kind; `stat_param_name`
-# names a normalisation statistic by family and feature dimension. Spelling both
-# out beats writing "yaw[2]" and "input_std[2]" as literals, where the bracketed
-# number means a hyperparameter kind in the first and a feature dimension in the
-# second.
-focus_params = [
-    HybridZuptInsJl.hp_param_name(:yaw, :length_scale),
-    HybridZuptInsJl.stat_param_name(:input_std, 2),
-    HybridZuptInsJl.stat_param_name(:input_center, 2),
-]
-
+# Close-ups, one figure per parameter, sized for the write-up. The ranking
+# compresses each parameter to [min, max], which says how far RMSE moved but not
+# how it got there -- and the shape is often the result: the yaw length scale
+# saturates above x2, which is a bar of the same height as a curve that rises
+# steadily. Normalisation parameters also get domain-containment shading, so the
+# box story travels with the parameter instead of needing the 3x3 grid figure.
 swept_params = Set(plot_df.parameter)
 for focus_param in focus_params
     if !(focus_param in swept_params)
@@ -294,11 +305,9 @@ for focus_param in focus_params
         continue
     end
     focus_slug = HybridZuptInsJl.param_slug(focus_param)
-    sub_grid = HybridZuptInsJl.ParamGrid([focus_param], [1])
-    HybridZuptInsJl.place_spec!(sub_grid, 1, 1,
-        only(filter(s -> s.name == focus_param, specs)))
     results_figure() do
-        HybridZuptInsJl.plot_probe_sensitivity(plot_df, sub_grid;
+        HybridZuptInsJl.plot_param_closeup(plot_df, focus_param;
+            box_df=plot_box,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"))
     end
 end
