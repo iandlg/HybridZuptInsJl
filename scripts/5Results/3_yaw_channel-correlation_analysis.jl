@@ -53,7 +53,7 @@ for frame in frames
         # was χ²_d, which these residuals are not, so it removed fewer points than the
         # 0.975 suggested. This figure therefore changes slightly on a re-run.
         input_io, output_io = HybridZuptInsJl.remove_outliers(input_io, output_io;
-            method="mahalanobis", threshold=3.0, keep_fraction=0.975, dims=:output)
+            method="mahalanobis", threshold=3.0, keep_fraction=0.85, dims=:output)
 
 
         # Compute training IO and CCA (reuse run_correlation_analysis but only return CCA results)

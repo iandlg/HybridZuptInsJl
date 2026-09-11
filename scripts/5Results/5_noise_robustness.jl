@@ -18,23 +18,41 @@
 #
 # Each realisation comes from its own Xoshiro(seed), drawn once per
 # (trial, noise spec, seed) and shared by every estimator in that cell -- that is
-# what makes figure 2 a paired comparison. WAS: add_gaussian_noise was called
-# without an rng and fell back to a fixed Xoshiro(123), so every trial and every
-# estimator saw one identical draw.
+# what makes figure 2 a paired comparison.
+#
+# Set `results_csv` below to re-plot a finished sweep from its scores CSV instead
+# of paying for it again.
 
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("_common.jl")
 using OrderedCollections, DataFrames
+import CSV
+
+# Figures go in the section directory, scores tables in its data/ subdirectory.
+# results_path mkpaths whatever nested section it is handed, as the sibling
+# 5_noise_robustness-more_data.jl already relies on.
+const SECTION = "5_NoiseRobustness/NoiseSweep"
+const DATA_SECTION = "$(SECTION)/data"
 
 # 1. Define datasets / trials to process
+data_key = "DCSC"
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
-    "Angermann" => (data_dir("ANG2"), trial_ids("ANG2")),
-    # "TuDCSC" => (data_dir("DCSC"), trial_ids("DCSC")),
+    # "Angermann" => (data_dir(data_key), trial_ids(data_key)),
+    "DCSC" => (data_dir(data_key), trial_ids(data_key)),
 )
 
+# Set this to the file name of a scores CSV under
+# out/Results/5_NoiseRobustness/NoiseSweep/data/ to re-plot a finished sweep instead
+# of recomputing it, e.g.
+# results_csv = "noise_results_ANG2_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T09:12:33.123.csv"
+# `nothing` runs the sweep and writes a fresh CSV.
+results_csv = "noise_results_DCSC_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T12:50:51.024.csv"
+
 # 2. Align INS / GT trajectories for every trial
-aligned = HybridZuptInsJl.collect_aligned_trajectories(data_dict)
+# Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
+# script, and nothing downstream of the scores table needs the trajectories.
+aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(data_dict) : nothing
 
 ## 3. Load HSGP hyperparameters / Input feature type
 m = 200
@@ -63,6 +81,7 @@ noise_specs = [
     HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=10*pi/180, tag="Heading Noise Only (10°)"),
     HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"),
     HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±10°)"),
+    HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180, tag="Position & Heading Noise (1.0m, ±10°)"),
 ]
 ## 5. Run the sweep
 # Each draw is shared by all estimators in its cell, so the paired figure below
@@ -74,27 +93,44 @@ noise_specs = [
 N_NOISE_DRAWS = 5
 SEEDS = collect(1:N_NOISE_DRAWS)
 
-results_df = HybridZuptInsJl.run_online_correction_sweep(
-    aligned,
-    FRAME,
-    FEATURE_TYPE,
-    hsgp_p,
-    train_ratios,
-    estimators,
-    output_channels;
-    noise_specs=noise_specs,
-    seeds=SEEDS,
-    keep_artifacts=false,
-)
+# Only the scalar columns are written: the sweep also carries the raw zupt/step_seg/
+# corr_traj/io_data/model objects and the pos/att std/bias columns, which have no CSV
+# representation -- so a re-read frame has the score columns and nothing else, which is
+# all the plots below use. noise_spec_tag/noise_spec_order/seed are here because they
+# are the keys `paired_estimator_contrast` pairs on: without them a re-read CSV plots
+# the boxplots but throws in the paired cells below.
+score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_ratio_order,
+    :estimator, :estimator_order, :noise_spec_tag, :noise_spec_order, :seed,
+    :rmse, :rmse_rate, :rmse_yaw]
 
-
+if isnothing(results_csv)
+    results_df = HybridZuptInsJl.run_online_correction_sweep(
+        aligned,
+        FRAME,
+        FEATURE_TYPE,
+        hsgp_p,
+        train_ratios,
+        estimators,
+        output_channels;
+        noise_specs=noise_specs,
+        seeds=SEEDS,
+        keep_artifacts=false,
+    )
+    # The draw count is in the name because a 1-draw and a 10-draw file are different
+    # artifacts: at one seed the spread is trial-to-trial only, and that is precisely
+    # the distinction this script exists to make.
+    csv_path = stamped(DATA_SECTION,
+        "noise_results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws"; ext="csv")
+    CSV.write(csv_path, results_df[:, score_cols])
+    @info "Saved results table: $csv_path" nrow(results_df)
+else
+    csv_path = results_path(DATA_SECTION, results_csv)
+    results_df = CSV.read(csv_path, DataFrame)
+    @info "Loaded results table: $csv_path" nrow(results_df)
+end
 
 ##
-# WAS: called without save_path, so this script produced no artifact at all and
-# out/Results/5_NoiseRobustness/ sat empty while the thesis cited noise figures
-# pasted in as PNGs from a REPL session.
-const SECTION = "5_NoiseRobustness"
-const DATASET = "Angermann"
+const DATASET = data_key
 const BASE_ESTIMATOR = "ZUPT only"
 
 for metric in (:rmse, :rmse_yaw)

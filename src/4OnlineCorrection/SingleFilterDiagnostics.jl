@@ -235,7 +235,7 @@ function zupt_consistency(diagnostics::StepDiagnostics)
 end
 
 """
-    zupt_gain_series(diagnostics; from_k)
+    zupt_gain_series(diagnostics; from_k, to_k)
 
 Per-ZUPT-epoch view of how much position-correction authority the ZUPT actually
 has. Position is never directly observed in a ZUPT-aided INS: the only channel
@@ -249,18 +249,21 @@ absolute `P[1:3,1:3]`. `dpos` is the position correction that gain actually
 delivered at each epoch, and `cum_dpos` its running total -- the integrated
 shortfall is what shows up as position RMSE.
 
-`from_k` restricts to epochs at or after a sample index (e.g. the start of the
-test half, where the correction is active). Attitude counterparts are returned
-alongside as a control: they should be much less affected.
+`from_k`/`to_k` restrict to the epochs in `from_k <= k <= to_k`. That window is
+how one run is split into its two phases: the train half, where the mocap update
+shrinks `P`, and the test half, where the GP correction does (or does not).
+Attitude counterparts are returned alongside as a control: they should be much
+less affected.
 """
-function zupt_gain_series(diagnostics::StepDiagnostics; from_k::Int=1)
+function zupt_gain_series(diagnostics::StepDiagnostics; from_k::Int=1,
+    to_k::Int=typemax(Int))
     isempty(diagnostics.zupt_k) &&
         error("No ZUPT epochs recorded; the ZUPT branch fills these.")
     length(diagnostics.zupt_K_pos) == length(diagnostics.zupt_k) ||
         error("ZUPT gain fields not recorded for this run.")
 
-    sel = findall(>=(from_k), diagnostics.zupt_k)
-    isempty(sel) && error("No ZUPT epochs at or after k=$from_k.")
+    sel = findall(k -> from_k <= k <= to_k, diagnostics.zupt_k)
+    isempty(sel) && error("No ZUPT epochs in k = $from_k:$to_k.")
 
     dpos = diagnostics.zupt_dpos[sel]
     return (k=diagnostics.zupt_k[sel],

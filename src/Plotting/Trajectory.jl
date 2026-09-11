@@ -566,6 +566,74 @@ function plot_trajectory_panels(
 end
 
 """
+    plot_trajectory_start_end_panels(trajs, gt_traj; train_ratio, n_first=40, n_last=40,
+                                     save_path=nothing)
+
+Six panels: the first `n_first` strides of the test segment on the top row and the last
+`n_last` strides of the trial on the bottom row, one column per correction in `trajs`, with
+the ground truth dashed underneath in every panel and one shared legend in the third row.
+
+Panels are linked within a row but not across rows -- the two rows are different parts of
+the walk, so a common scale would say nothing.
+"""
+function plot_trajectory_start_end_panels(
+    trajs::AbstractDict{String,Trajectory},
+    gt_traj::Trajectory;
+    train_ratio::Real,
+    n_first::Int=40,
+    n_last::Int=40,
+    save_path::Union{String,Nothing}=nothing
+)
+    # Clamped against the shortest series so a correction that ended early cannot index
+    # past its own end, and so both windows stay inside the test segment.
+    n = min(length(gt_traj.t), minimum(length(traj.t) for traj in values(trajs)))
+    test_start, test_stop = _segment_window(gt_traj, :test, train_ratio)
+    stop = clamp(test_stop, 1, n)
+    start = clamp(test_start, 1, stop)
+
+    windows = (
+        start:clamp(start + n_first - 1, start, stop),
+        clamp(stop - n_last + 1, start, stop):stop,
+    )
+    row_labels = ("First $n_first test strides", "Last $n_last strides")
+    # Column identity is carried by the top row only; the bottom row sits under it.
+    titles = (collect(keys(trajs)), fill("", length(trajs)))
+
+    line_width = 1.2
+    fig = Figure(size=(400 * length(trajs), 620))
+
+    for (row, window) in enumerate(windows)
+        Label(fig[row, 0], row_labels[row]; rotation=pi / 2, tellheight=false, font=:bold)
+        axs = Axis[]
+        for (col, (key, traj)) in enumerate(trajs)
+            ax = Axis(fig[row, col];
+                title=titles[row][col],
+                xlabel="X (m)",
+                ylabel="Y (m)",
+                aspect=DataAspect(),
+                xgridvisible=true)
+            lines!(ax, gt_traj.pos[1, window], gt_traj.pos[2, window];
+                color=:black, linestyle=:dash, linewidth=line_width)
+            lines!(ax, traj.pos[1, window], traj.pos[2, window];
+                color=method_color(key), linewidth=line_width)
+            push!(axs, ax)
+        end
+        linkaxes!(axs...)
+    end
+
+    Legend(fig[3, :],
+        vcat([LineElement(color=:black, linestyle=:dash, linewidth=line_width)],
+            [LineElement(color=method_color(k), linewidth=line_width) for k in keys(trajs)]),
+        vcat(["Ground truth"], collect(keys(trajs)));
+        orientation=:horizontal, framevisible=false, tellwidth=false, tellheight=true)
+
+    resize_to_layout!(fig)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+"""
     plot_position_rmse(trajs::Union{Dict{String, Trajectory}, Trajectory}, gt_traj::Trajectory)
 
 Plot the cumulative root-mean-square error (RMSE) of the horizontal position (x-y) over time

@@ -21,8 +21,8 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 data_key = "ANG2"
 data_dir_path = data_dir(data_key)
 
-trial_id = 15
-train_ratio = 0.45
+trial_id = 14
+train_ratio = 0.5
 
 output_channel_idxs = [1, 2, 4]
 
@@ -145,7 +145,7 @@ println("Saved JSON: $json_path")
 # re-read a hard-coded basename from a dict of timestamps, so editing the
 # compute cell above had no effect on the figures unless you also remembered to
 # add a key down here.
-replot_basename = "ANG215_HEADING_TWOD_STEP_YAW_2026-09-05T11:17:56.693"
+replot_basename = nothing
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically

@@ -480,3 +480,81 @@ function plot_regression_comparison(
     isnothing(save_path) || save(save_path, fig)
     return fig
 end
+
+"""
+The three channels this figure draws: the two horizontal position components of the stride
+and its heading increment. Channel 3 (Δz) is dropped — it is the one the corrections are
+not asked to reproduce.
+"""
+const _REGRESSION_PANELS = [
+    (1, "Stride Δx", "Δx [m]"),
+    (2, "Stride Δy", "Δy [m]"),
+    (4, "Stride Δθ", "Δθ [rad]"),
+]
+
+const _REGRESSION_TARGET_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
+
+"""
+Wong index per series: yellow for the static corrector, green for the HSGP one. Distinct
+from `_METHOD_COLOR_INDICES` (which colours whole *trajectories*) because this figure has
+no ZUPT-only series and gives grey to the target instead.
+"""
+const _REGRESSION_COLOR_INDICES = Dict{String,Int}("Static" => 2, "HSGP" => 3)
+
+function _regression_color(name::AbstractString)
+    idx = get(_REGRESSION_COLOR_INDICES, String(name), nothing)
+    return isnothing(idx) ? method_color(name) : Makie.wong_colors()[idx]
+end
+
+"""
+    plot_regression_panels(pred_data, true_data; show_std=true, save_path=nothing)
+
+Regression outputs on three stacked panels — stride Δx, Δy and heading Δθ — each line with
+its ±1σ band, and one shared legend below the panels instead of one per axis.
+
+Target is grey, `"Static"` wong yellow and `"HSGP"` wong green; any other series name falls
+back to [`method_color`](@ref). Per-panel RMSE against the target goes in the panel title,
+which is where it has to live once there is a single legend.
+"""
+function plot_regression_panels(
+    pred_data::AbstractDict{String,CorrectionIO},
+    true_data::CorrectionIO;
+    show_std::Bool=true,
+    save_path::Union{String,Nothing}=nothing
+)
+    size(true_data.data, 1) == 4 ||
+        throw(ArgumentError("expected a 4-row correction vector, got $(size(true_data.data, 1))"))
+
+    fig = Figure(size=(900, 800))
+    axes = Axis[]
+
+    for (idx, (ch, name, ylabel)) in enumerate(_REGRESSION_PANELS)
+        last_panel = idx == length(_REGRESSION_PANELS)
+
+        ax = Axis(fig[idx, 1];
+            title=name,
+            ylabel=ylabel,
+            xlabel=last_panel ? "Time [s]" : "",
+            xgridvisible=true,
+            ygridvisible=true)
+        last_panel || hidexdecorations!(ax; grid=false)
+        push!(axes, ax)
+
+        plot_line_with_std!(ax, true_data.t, true_data.data[ch, :],
+            (show_std && !isnothing(true_data.data_std)) ? true_data.data_std[ch, :] : nothing;
+            color=_REGRESSION_TARGET_COLOR, linewidth=0.9, label="Target")
+
+        for (series, pred) in pred_data
+            plot_line_with_std!(ax, pred.t, pred.data[ch, :],
+                (show_std && !isnothing(pred.data_std)) ? pred.data_std[ch, :] : nothing;
+                color=_regression_color(series), label=series)
+        end
+    end
+
+    linkxaxes!(axes...)
+    Legend(fig[length(axes)+1, 1], axes[1]; orientation=:horizontal, nbanks=1,
+        tellwidth=false, tellheight=true, framevisible=false, merge=true)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end

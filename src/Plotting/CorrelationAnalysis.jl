@@ -144,6 +144,7 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
         xticks=(1:n_in, input_labels),
         yticks=(1:n_out, output_labels),
         xticklabelrotation=0,          # no rotation
+        yreversed=true,                # outputs top-to-bottom, matching their order
         title=title,
         xlabel="Input features",
         ylabel="Output corrections",
