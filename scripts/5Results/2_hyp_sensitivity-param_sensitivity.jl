@@ -184,6 +184,7 @@ json_path = joinpath(outdir, "$base_name.json")
 box_path = joinpath(outdir, "$(base_name)_box.csv")
 exit_path = joinpath(outdir, "$(base_name)_box_exit.csv")
 agree_path = joinpath(outdir, "$(base_name)_agreement.csv")
+rank_path = joinpath(outdir, "$(base_name)_ranking.csv")
 
 CSV.write(csv_path, df)
 CSV.write(box_path, box_df)
@@ -192,6 +193,10 @@ CSV.write(exit_path, exit_df)
 # This is the table notes/009 §4 quotes, so it is generated rather than
 # recomputed by hand whenever the sweep is rerun.
 CSV.write(agree_path, HybridZuptInsJl.probe_agreement(df))
+# Box geometry behind the ranking figure, including the values that figure clips
+# at its frame -- the input std rows run to roughly +100% where the axis stops
+# near +49%, so the untruncated numbers have to live somewhere quotable.
+CSV.write(rank_path, HybridZuptInsJl.probe_extremes_summary(df))
 
 metadata = Dict(
     "data_key" => meta["data_key"],
@@ -227,6 +232,7 @@ println("Saved JSON: $json_path")
 println("Saved box:  $box_path")
 println("Saved exit: $exit_path")
 println("Saved agree: $agree_path")
+println("Saved rank:  $rank_path")
 println()
 println("Box exit points:")
 show(stdout, MIME("text/plain"), exit_df)

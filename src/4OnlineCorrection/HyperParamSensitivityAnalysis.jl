@@ -835,3 +835,76 @@ function box_outside_spans(box_df::DataFrame, parameter::AbstractString;
     end
     return spans
 end
+
+"""
+    probe_extremes_by_trial(df) -> DataFrame
+
+For each parameter and each trial, the two extremes of that trial's sweep:
+
+    best  = minimum over probes of the RMSE change   (the most a setting improved)
+    worst = maximum over probes of the RMSE change   (the most one degraded)
+
+Columns: `parameter`, `type`, `trial_id`, `best`, `worst`, as percentages.
+
+Both are the same kind of number -- a per-trial extreme in percent of that
+trial's own baseline -- which is what lets the ranking figure draw them as two
+box plots on one signed axis. The previous figure mixed a range taken over
+*probes* with an inter-quartile range taken over *trials*, two perpendicular
+slices of the same grid shown as the same kind of mark.
+
+`best` is 0 exactly when no tested setting beat the trained value, since the
+identity probe reproduces the baseline: a degenerate box on zero is the
+statement that the trained value was optimal in that trial.
+"""
+function probe_extremes_by_trial(df::DataFrame)::DataFrame
+    work = df[df.parameter.!="baseline", :]
+    isempty(work) && throw(ArgumentError("probe_extremes_by_trial: no swept rows in frame"))
+    hasproperty(work, :trial_id) || throw(ArgumentError(
+        "probe_extremes_by_trial: frame has no trial_id column; it needs a sweep_over_trials run"))
+    work = copy(work)
+    work.pct = 100 .* float.(work.relative_change)
+    return combine(groupby(work, [:parameter, :trial_id]),
+        :type => first => :type,
+        :pct => minimum => :best,
+        :pct => maximum => :worst)
+end
+
+"""
+    probe_extremes_summary(df) -> DataFrame
+
+Box geometry for [`probe_extremes_by_trial`](@ref), long form: one row per
+parameter per side, `side` being `"best"` or `"worst"`.
+
+Columns: `parameter`, `type`, `side`, `q25`, `med`, `q75`, `whisker_lo`,
+`whisker_hi`, `n_trials`, `gap`. Whiskers are Tukey's -- the furthest sample
+still within `1.5 x IQR` of the box -- so the plotting layer does no statistics
+of its own and every number in the figure is also in the saved CSV.
+
+`gap = median(worst) - median(best)` is carried on both rows of a parameter and
+is the sort key: how far apart the typical best and typical worst settings are,
+which is the ranking the figure exists to show.
+"""
+function probe_extremes_summary(df::DataFrame)::DataFrame
+    ext = probe_extremes_by_trial(df)
+
+    function box(v::AbstractVector{<:Real})
+        n = length(v)
+        q25, med, q75 = n < 4 ? (minimum(v), median(v), maximum(v)) :
+                        (quantile(v, 0.25), median(v), quantile(v, 0.75))
+        fence = 1.5 * (q75 - q25)
+        inside = filter(x -> q25 - fence <= x <= q75 + fence, v)
+        lo, hi = isempty(inside) ? (q25, q75) : (minimum(inside), maximum(inside))
+        return (q25=q25, med=med, q75=q75, whisker_lo=lo, whisker_hi=hi, n_trials=n)
+    end
+
+    rows = []
+    for sub in groupby(ext, :parameter)
+        b, w = box(sub.best), box(sub.worst)
+        gap = w.med - b.med
+        for (side, s) in (("best", b), ("worst", w))
+            push!(rows, merge((parameter=first(sub.parameter), type=first(sub.type),
+                    side=side), s, (gap=gap,)))
+        end
+    end
+    return sort!(DataFrame(rows), [order(:gap, rev=true), :side])
+end

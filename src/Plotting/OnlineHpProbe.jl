@@ -257,103 +257,123 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
 end
 
 """
-    plot_probe_ranking(df; save_path=nothing, figsize=(940, 560), max_label=nothing)
+    _hbox!(ax, y, half_h, b; color, fill_alpha, xlo, xhi)
 
-Which parameters move RMSE, by how much, and whether the trials agree. The
-overview figure, and the one to read first.
+One horizontal box-and-whisker drawn from precomputed geometry `b` (a row of
+[`probe_extremes_summary`](@ref)), clipped to `[xlo, xhi]` with an arrowhead
+wherever a mark is cut off.
 
-One row per parameter, sorted by the span of the across-trial median curve,
-largest at the top. The bar is that median range; the thin whisker is the
-across-trial inter-quartile range at the probe where the median moved furthest;
-the right-hand column reports how many trials agreed on the sign there, starred
-when an exact sign test puts it below 0.05.
+Drawn by hand rather than through `boxplot!` so the figure and the saved
+`_ranking.csv` cannot disagree: `boxplot!` would recompute the quartiles with its
+own convention, and this figure's numbers are meant to be quotable.
+"""
+function _hbox!(ax::Axis, y::Real, half_h::Real, b;
+    color, fill_alpha::Real, xlo::Real, xhi::Real)
 
-**The x limits are set from the bars, not from the data.** This is the whole
-point of the figure. Drawing every trial's own extremes, as the previous version
-did, let a handful of trials set the scale -- on the 11-trial ANG2 sweep they run
-to +458% while all fifteen median ranges fit inside -4% to +39%, so every bar
-collapsed to at most 8% of the plot width and the ranking was unreadable. A
-whisker that runs past the frame is clipped and marked with an arrowhead, so
-"this parameter's trials disagree wildly" is still visible without those trials
-dictating the axis.
+    cut(v) = clamp(v, xlo, xhi)
 
-Agreement is carried alongside magnitude because the two answer different
-questions and a wide bar alone answers neither: the pipeline is deterministic,
-so a large span with 6/11 agreement is eleven trials disagreeing, not an effect.
+    # Whisker, then box over it, then the median line on top.
+    lines!(ax, [cut(b.whisker_lo), cut(b.whisker_hi)], [y, y]; color=(color, 0.75), linewidth=1)
+
+    lo, hi = cut(b.q25), cut(b.q75)
+    if hi > lo
+        poly!(ax, Rect2f(lo, y - half_h, hi - lo, 2 * half_h);
+            color=(color, fill_alpha), strokecolor=color, strokewidth=1.2)
+    else
+        # A degenerate box -- every trial gave the same extreme. `yaw[2]`'s best
+        # case is exactly this: in all 11 trials the best setting *is* the
+        # trained one, so the box collapses onto zero. Drawn as a bar so it is
+        # visible rather than vanishing into the median line.
+        lines!(ax, [lo, lo], [y - half_h, y + half_h]; color=color, linewidth=2.5)
+    end
+    xlo <= b.med <= xhi &&
+        lines!(ax, [b.med, b.med], [y - half_h, y + half_h]; color=color, linewidth=2.5)
+
+    # Clip markers last, or a solid box paints over them -- which is exactly the
+    # case that most needs marking, since a box wide enough to leave the frame
+    # has a whisker leaving it too. Marks the outermost mark that was cut on each
+    # side, whichever it was.
+    for (side, mk) in ((:lo, :ltriangle), (:hi, :rtriangle))
+        v = side === :lo ? min(b.whisker_lo, b.q25) : max(b.whisker_hi, b.q75)
+        isapprox(v, cut(v); rtol=1e-9) && continue
+        scatter!(ax, [cut(v)], [y]; color=color, marker=mk, markersize=11,
+            strokecolor=:white, strokewidth=0.5)
+    end
+    return nothing
+end
+
+"""
+    plot_probe_ranking(df; save_path=nothing, figsize=(940, 560))
+
+Which parameters move RMSE, by how much, and in which direction. The overview
+figure, and the one to read first.
+
+Two boxes per parameter over the trials, both of the same quantity -- a
+**per-trial extreme** of the RMSE change (`probe_extremes_by_trial`). The lower,
+solid box is the worst setting found in each trial; the upper, pale box is the
+best. Rows are sorted by the gap between the two medians, largest at top.
+
+Showing one quantity twice is the point. The previous version put a range taken
+over *probes* (the median curve's extent) and an inter-quartile range taken over
+*trials* on the same row as the same kind of mark -- perpendicular slices of the
+same grid, with nothing in the figure to say so.
+
+What the pairing buys over a single bar: whether **any** tested setting beat the
+trained one. On the 11-trial ANG2 sweep 13 of 15 parameters have a best-case box
+below zero; `yaw[2]` is one of the two that do not, and its best-case box is
+identically zero -- in every trial the optimum was the trained value.
+
+**X limits come from the box medians, not from the boxes or whiskers.** The input
+std rows carry a q75 near +100 while every median fits inside -6% to +41%, so
+letting the boxes set the scale reintroduces exactly the compression this figure
+was rebuilt to remove. Anything past the frame is clipped and marked with an
+arrowhead, and `_ranking.csv` carries the untruncated numbers.
 """
 function plot_probe_ranking(df::DataFrame;
     save_path::Union{String,Nothing}=nothing,
     figsize::Tuple{Int,Int}=(940, 560))
 
-    work = df[df.parameter.!="baseline", :]
-    isempty(work) && throw(ArgumentError("plot_probe_ranking: no swept rows in frame"))
-    work = copy(work)
-    work.pct = 100 .* float.(work.relative_change)
+    g = probe_extremes_summary(df)          # sorted by gap, descending
+    params = unique(g.parameter)
+    n = length(params)
 
-    agree = probe_agreement(df)            # already sorted by span, descending
-    med = combine(groupby(work, [:parameter, :probe]), :pct => median => :med)
-    bars = combine(groupby(med, :parameter),
-        :med => minimum => :lo, :med => maximum => :hi)
-    # `leftjoin` does not preserve row order, so the descending-span order
-    # `probe_agreement` established has to be restored explicitly -- without this
-    # the rows come back in sweep order and the figure is not a ranking at all.
-    g = sort!(leftjoin(agree, bars; on=:parameter), :span; rev=true)
-    n = nrow(g)
-
-    # Axis limits from the bars alone, padded. Whiskers may exceed these; the
-    # per-trial extremes certainly will, and neither is allowed to set the scale.
-    lo = min(0.0, minimum(g.lo))
-    hi = max(0.0, maximum(g.hi))
-    pad = 0.15 * max(hi - lo, eps())
+    lo = min(0.0, minimum(g.med))
+    hi = max(0.0, maximum(g.med))
+    pad = 0.18 * max(hi - lo, eps())
     xlo, xhi = lo - pad, hi + pad
 
     fig = Figure(size=figsize)
-    # Largest span at the top: Makie's y increases upward, so row i of a
-    # descending-sorted frame is drawn at n - i + 1.
+    # Largest gap at the top: Makie's y increases upward.
     ypos(i) = n - i + 1
     ax = Axis(fig[1, 1];
         xlabel="RMSE change vs baseline [%]",
         xtickformat=_HP_PCT_TICKFORMAT,
-        yticks=(1:n, [hp_param_label(g.parameter[ypos(i)]) for i in 1:n]),
-        title="Sensitivity ranking: signed range of the across-trial median",
+        yticks=(1:n, [hp_param_label(params[ypos(i)]) for i in 1:n]),
+        title="Sensitivity ranking: best and worst setting found per trial",
         xgridstyle=:dash, ygridvisible=false)
     vlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
 
-    for i in 1:n
-        r = g[i, :]
+    for (i, pname) in enumerate(params)
         y = ypos(i)
-        c = hp_param_color(r.parameter)
-        # Whisker first, so the bar reads on top of it.
-        wlo, whi = clamp(r.q25, xlo, xhi), clamp(r.q75, xlo, xhi)
-        lines!(ax, [wlo, whi], [y, y]; color=(c, 0.5), linewidth=1.5)
-        for (v, cl, mk) in ((r.q25, wlo, :ltriangle), (r.q75, whi, :rtriangle))
-            isapprox(v, cl; rtol=1e-9) && continue
-            scatter!(ax, [cl], [y]; color=(c, 0.7), marker=mk, markersize=9)
-        end
-        lines!(ax, [r.lo, r.hi], [y, y]; color=c, linewidth=7)
+        c = hp_param_color(pname)
+        sub = g[g.parameter.==pname, :]
+        # Best above the row centre, worst below, so the two never overlap even
+        # where both sit against zero -- the normal case for the location rows.
+        _hbox!(ax, y + 0.19, 0.15, only(eachrow(sub[sub.side.=="best", :]));
+            color=c, fill_alpha=0.18, xlo=xlo, xhi=xhi)
+        _hbox!(ax, y - 0.19, 0.15, only(eachrow(sub[sub.side.=="worst", :]));
+            color=c, fill_alpha=0.85, xlo=xlo, xhi=xhi)
     end
     xlims!(ax, xlo, xhi)
     ylims!(ax, 0.5, n + 0.5)
 
-    # Agreement column: its own axis so the text sits outside the data frame.
-    ax_a = Axis(fig[1, 2]; title="agree", titlesize=11, titlegap=6)
-    hidedecorations!(ax_a)
-    hidespines!(ax_a)
-    xlims!(ax_a, 0, 1)
-    ylims!(ax_a, 0.5, n + 0.5)
-    for i in 1:n
-        r = g[i, :]
-        star = r.p_value < 0.05 ? "*" : ""
-        text!(ax_a, 0.5, ypos(i); text="$(r.n_agree)/$(r.n_trials)$star",
-            align=(:center, :center), fontsize=10,
-            font=(r.p_value < 0.05 ? :bold : :regular))
-    end
-    colsize!(fig.layout, 2, Fixed(56))
-
     types = _hp_ordered_types(unique(g.type))
-    Legend(fig[1, 3],
-        [PolyElement(color=hp_type_color(t)) for t in types],
-        [_hp_type_label(t) for t in types];
+    Legend(fig[1, 2],
+        [[PolyElement(color=(:gray, 0.85)), PolyElement(color=(:gray, 0.18), strokecolor=:gray)],
+            [PolyElement(color=hp_type_color(t)) for t in types]],
+        [["worst setting per trial", "best setting per trial"],
+            [_hp_type_label(t) for t in types]],
+        ["reading", "parameter type"];
         tellheight=false)
 
     if !isnothing(save_path)
