@@ -161,7 +161,10 @@ function _draw_tracks!(
     # objects: the tracks are drawn as per-stride segments below, so there is no single
     # plot per series to point the legend at.
     entries = Vector{Any}[]
-    labels = String[]
+    # `Any`, not `String`: the labels carry the metric symbol as rich text so the
+    # subscript renders (`metric_symbol`, MetricLabels.jl). Narrowing this back
+    # to String throws on the push below.
+    labels = Any[]
     # Markers and heading arrows go on last, after every line segment: drawn inline they
     # would be clipped by the casing of whatever is drawn after them.
     overlay_passes = Function[]
