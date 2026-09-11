@@ -25,6 +25,14 @@ const _PROBE_XLABELS = Dict{String,String}(
     "input_mean" => "offset [σₓ]",
     "input_center" => "offset [z]",
 )
+"""
+Axis label shared by every figure in this file: the percent change in position
+RMSE against the unperturbed baseline. Composed once so the four axes cannot
+drift, and built from [`metric_symbol`](@ref) so renaming the metric is still a
+one-line edit in `MetricLabels.jl`.
+"""
+_rmse_change_label() = rich(metric_symbol(:rmse), " change vs baseline [%]")
+
 const _PROBE_MULT_XLABEL = "multiplier"
 const _PROBE_OFFSET_XLABEL = "offset"
 
@@ -151,7 +159,7 @@ function plot_probe_sensitivity(
         _draw_probe_panel!(ax, sub; color=hp_param_color(spec.name), max_ticks=max_ticks)
     end
 
-    Label(fig[1:n_rows, 0], "RMSE change vs baseline [%]", rotation=π / 2, fontsize=14)
+    Label(fig[1:n_rows, 0], _rmse_change_label(), rotation=π / 2, fontsize=14)
 
     if !isnothing(save_path)
         mkpath(dirname(save_path))
@@ -200,7 +208,7 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
 
         ax = Axis(fig[row, col];
             xlabel=_probe_xlabel(kind, first(bsub.type)),
-            ylabel="RMSE change [%]",
+            ylabel=rich(metric_symbol(:rmse), " change [%]"),
             xscale=scale, ytickformat=_HP_PCT_TICKFORMAT,
             title=hp_param_label(pname), xgridstyle=:dash, ygridstyle=:dash)
         ax_box = Axis(fig[row, col];
@@ -256,8 +264,10 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
     return fig
 end
 
+const _BOX_FILL_ALPHA = 0.75
+
 """
-    _hbox!(ax, y, half_h, b; color, fill_alpha, xlo, xhi)
+    _hbox!(ax, y, half_h, b; color, xlo, xhi)
 
 One horizontal box-and-whisker drawn from precomputed geometry `b` (a row of
 [`probe_extremes_summary`](@ref)), clipped to `[xlo, xhi]` with an arrowhead
@@ -268,7 +278,7 @@ Drawn by hand rather than through `boxplot!` so the figure and the saved
 own convention, and this figure's numbers are meant to be quotable.
 """
 function _hbox!(ax::Axis, y::Real, half_h::Real, b;
-    color, fill_alpha::Real, xlo::Real, xhi::Real)
+    color, xlo::Real, xhi::Real)
 
     cut(v) = clamp(v, xlo, xhi)
 
@@ -278,7 +288,7 @@ function _hbox!(ax::Axis, y::Real, half_h::Real, b;
     lo, hi = cut(b.q25), cut(b.q75)
     if hi > lo
         poly!(ax, Rect2f(lo, y - half_h, hi - lo, 2 * half_h);
-            color=(color, fill_alpha), strokecolor=color, strokewidth=1.2)
+            color=(color, _BOX_FILL_ALPHA), strokecolor=color, strokewidth=1.2)
     else
         # A degenerate box -- every trial gave the same extreme. `yaw[2]`'s best
         # case is exactly this: in all 11 trials the best setting *is* the
@@ -303,15 +313,20 @@ function _hbox!(ax::Axis, y::Real, half_h::Real, b;
 end
 
 """
-    plot_probe_ranking(df; save_path=nothing, figsize=(940, 560))
+    plot_probe_ranking(df; xlims=nothing, save_path=nothing, figsize=(940, 560))
 
 Which parameters move RMSE, by how much, and in which direction. The overview
 figure, and the one to read first.
 
 Two boxes per parameter over the trials, both of the same quantity -- a
-**per-trial extreme** of the RMSE change (`probe_extremes_by_trial`). The lower,
-solid box is the worst setting found in each trial; the upper, pale box is the
-best. Rows are sorted by the gap between the two medians, largest at top.
+**per-trial extreme** of the RMSE change (`probe_extremes_by_trial`) -- drawn on
+one row and told apart by which side of zero they fall. Rows are sorted by the
+gap between the two medians, largest at top.
+
+Nothing marks best from worst because nothing needs to: `best` is the minimum
+over probes and `worst` the maximum, and the identity probe contributes exactly
+`0.0` to every trial, so `best <= 0 <= worst` holds by construction. The zero
+line separates them, and the axis says which side is which.
 
 Showing one quantity twice is the point. The previous version put a range taken
 over *probes* (the median curve's extent) and an inter-quartile range taken over
@@ -330,6 +345,7 @@ was rebuilt to remove. Anything past the frame is clipped and marked with an
 arrowhead, and `_ranking.csv` carries the untruncated numbers.
 """
 function plot_probe_ranking(df::DataFrame;
+    xlims::Union{Nothing,Tuple{Float64,Float64}}=nothing,
     save_path::Union{String,Nothing}=nothing,
     figsize::Tuple{Int,Int}=(940, 560))
 
@@ -337,16 +353,20 @@ function plot_probe_ranking(df::DataFrame;
     params = unique(g.parameter)
     n = length(params)
 
-    lo = min(0.0, minimum(g.med))
-    hi = max(0.0, maximum(g.med))
-    pad = 0.18 * max(hi - lo, eps())
-    xlo, xhi = lo - pad, hi + pad
+    if isnothing(xlims)
+        lo = min(0.0, minimum(g.med))
+        hi = max(0.0, maximum(g.med))
+        pad = 0.18 * max(hi - lo, eps())
+        xlo, xhi = lo - pad, hi + pad
+    else
+        xlo, xhi = xlims
+    end
 
     fig = Figure(size=figsize)
     # Largest gap at the top: Makie's y increases upward.
     ypos(i) = n - i + 1
     ax = Axis(fig[1, 1];
-        xlabel="RMSE change vs baseline [%]",
+        xlabel=_rmse_change_label(),
         xtickformat=_HP_PCT_TICKFORMAT,
         yticks=(1:n, [hp_param_label(params[ypos(i)]) for i in 1:n]),
         title="Sensitivity ranking: best and worst setting found per trial",
@@ -357,23 +377,28 @@ function plot_probe_ranking(df::DataFrame;
         y = ypos(i)
         c = hp_param_color(pname)
         sub = g[g.parameter.==pname, :]
-        # Best above the row centre, worst below, so the two never overlap even
-        # where both sit against zero -- the normal case for the location rows.
-        _hbox!(ax, y + 0.19, 0.15, only(eachrow(sub[sub.side.=="best", :]));
-            color=c, fill_alpha=0.18, xlo=xlo, xhi=xhi)
-        _hbox!(ax, y - 0.19, 0.15, only(eachrow(sub[sub.side.=="worst", :]));
-            color=c, fill_alpha=0.85, xlo=xlo, xhi=xhi)
+        # Both on one row: they cannot overlap, so the zero line does the work
+        # that a vertical offset and two fill alphas used to.
+        for side in ("best", "worst")
+            _hbox!(ax, y, 0.22, only(eachrow(sub[sub.side.==side, :]));
+                color=c, xlo=xlo, xhi=xhi)
+        end
     end
     xlims!(ax, xlo, xhi)
-    ylims!(ax, 0.5, n + 0.5)
+    # A row of headroom above the top parameter for the two axis annotations.
+    ylims!(ax, 0.5, n + 1.1)
+    # Placed in data space, anchored either side of zero, so they stay on the
+    # zero line whatever the x limits are -- relative placement would drift the
+    # moment `xlims` is passed.
+    text!(ax, -1.0, n + 0.8; text="← best setting", align=(:right, :center),
+        fontsize=11, color=(:black, 0.6))
+    text!(ax, 1.0, n + 0.8; text="worst setting →", align=(:left, :center),
+        fontsize=11, color=(:black, 0.6))
 
     types = _hp_ordered_types(unique(g.type))
     Legend(fig[1, 2],
-        [[PolyElement(color=(:gray, 0.85)), PolyElement(color=(:gray, 0.18), strokecolor=:gray)],
-            [PolyElement(color=hp_type_color(t)) for t in types]],
-        [["worst setting per trial", "best setting per trial"],
-            [_hp_type_label(t) for t in types]],
-        ["reading", "parameter type"];
+        [PolyElement(color=hp_type_color(t)) for t in types],
+        [_hp_type_label(t) for t in types];
         tellheight=false)
 
     if !isnothing(save_path)
@@ -422,7 +447,7 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     fig = Figure(size=figsize)
     ax = Axis(fig[2, 1];
         xlabel=_probe_xlabel(kind, first(sub.type)),
-        ylabel="RMSE change vs baseline [%]",
+        ylabel=_rmse_change_label(),
         xscale=(kind == "multiplicative" ? log10 : identity),
         ytickformat=_HP_PCT_TICKFORMAT,
         xgridstyle=:dash, ygridstyle=:dash)

@@ -424,7 +424,8 @@ function plot_hp_sensitivity(
     end
 
     # Add global y-label
-    Label(fig[1:n_rows, 0], "RMSE change vs baseline [%]", rotation=π / 2, fontsize=14)
+    Label(fig[1:n_rows, 0], rich(metric_symbol(:rmse), " change vs baseline [%]"),
+        rotation=π / 2, fontsize=14)
 
     if !isnothing(save_path)
         mkpath(dirname(save_path))
@@ -549,7 +550,7 @@ function plot_hp_param_sensitivity(df::DataFrame, parameter::AbstractString;
     fig = Figure(size=figsize)
     ax = Axis(fig[1, 1];
         xlabel=rich("multiplier on ", label),
-        ylabel="RMSE change vs baseline [%]",
+        ylabel=rich(metric_symbol(:rmse), " change vs baseline [%]"),
         xscale=log10,
         ytickformat=_HP_PCT_TICKFORMAT,
         xgridstyle=:dash,
@@ -796,8 +797,8 @@ function plot_max_relative_change(
 
     fig = Figure(size=(max(800, 40 * n), 500))
     ax = Axis(fig[1, 1];
-        title="Maximum relative RMSE change per parameter",
-        ylabel="Max RMSE change vs baseline [%]",
+        title=rich("Maximum relative ", metric_symbol(:rmse), " change per parameter"),
+        ylabel=rich("Max ", metric_symbol(:rmse), " change vs baseline [%]"),
         ytickformat=_HP_PCT_TICKFORMAT,
         xticks=(xs, [hp_param_label(p) for p in gdf.parameter]),
         xticklabelrotation=π / 3,

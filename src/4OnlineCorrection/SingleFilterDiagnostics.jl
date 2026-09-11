@@ -380,8 +380,11 @@ end
 
 """Pretty-print the sweep table."""
 function print_sweep(rows)
+    # metric_symbol_ascii, not metric_symbol: this is terminal output and there
+    # is no subscript ψ in Unicode, so the figures' form cannot be printed.
     @printf("%-14s %10s %10s %10s %12s %10s\n",
-        "mode", "factor", "RMSE pos", "RMSE yaw", "mean NEES", "in 95%")
+        "mode", "factor", metric_symbol_ascii(:rmse), metric_symbol_ascii(:rmse_yaw),
+        "mean NEES", "in 95%")
     for r in rows
         @printf("%-14s %10.1e %10.4f %10.4f %12.2f %9.1f%%\n",
             r.mode, r.factor, r.rmse_pos, r.rmse_yaw,

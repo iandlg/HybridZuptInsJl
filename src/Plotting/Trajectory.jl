@@ -173,7 +173,10 @@ function _draw_tracks!(
         push!(series, (traj, c, n))
 
         window_rmse = isnothing(gt_traj) ? nothing : _window_rmse(traj, gt_traj, win_start:n)
-        label = isnothing(window_rmse) ? key : @sprintf("%s - RMSE %.2f m", key, window_rmse)
+        # The number is split out of the format string: @sprintf cannot carry a
+        # subscript, so the metric symbol is composed around it instead.
+        label = isnothing(window_rmse) ? rich(key) :
+                rich(key, " - ", metric_symbol(:rmse), @sprintf(" %.2f m", window_rmse))
 
         entry = Any[LineElement(color=c, linewidth=line_width)]
         marker_stride > 0 &&
@@ -528,7 +531,8 @@ function plot_trajectory_panels(
         ax = Axis(fig[2, i];
             xlabel="X (m)",
             ylabel=i == 1 ? "Y (m)" : "",
-            title=isnothing(window_rmse) ? key : @sprintf("%s — RMSE %.2f m", key, window_rmse),
+            title=isnothing(window_rmse) ? rich(key) :
+                  rich(key, " — ", metric_symbol(:rmse), @sprintf(" %.2f m", window_rmse)),
             aspect=DataAspect(),
             xgridvisible=true)
         i == 1 || hideydecorations!(ax; grid=false)
@@ -667,8 +671,8 @@ function plot_position_rmse(
     fig = Figure(size=(800, 600))
     ax = Axis(fig[1, 1];
         xlabel="Time (s)",
-        ylabel="RMSE (m)",
-        title="Position RMSE over time",
+        ylabel=metric_label(:rmse),
+        title=metric_title(:rmse) * " over time",
         xgridvisible=true)
 
     # -- plot all trajectories, shifting time to start at 0 --
@@ -677,7 +681,8 @@ function plot_position_rmse(
         cum_rmse = rmse(traj, gt_traj)
         Δrmse = cum_rmse[end] - cum_rmse[1]
         t_shifted = traj.t[1:n] .- traj.t[1]
-        label = "$key, RMSE: $(round(cum_rmse[end], digits=3)), RMSE rate: $(@sprintf("%.2e", Δrmse/total_distance(gt_traj)))"
+        label = rich(key, ", ", metric_symbol(:rmse), ": $(round(cum_rmse[end], digits=3)), ",
+            metric_symbol(:rmse_rate), @sprintf(": %.2e", Δrmse / total_distance(gt_traj)))
         lines!(ax, t_shifted, cum_rmse, label=label)
     end
 

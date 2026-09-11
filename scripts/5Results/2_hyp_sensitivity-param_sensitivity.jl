@@ -295,6 +295,7 @@ end
 # data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
     HybridZuptInsJl.plot_probe_ranking(plot_df;
+        xlims=(-25.0, 70.0),
         save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"))
 end
 
