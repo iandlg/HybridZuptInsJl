@@ -384,16 +384,15 @@ function plot_probe_ranking(df::DataFrame;
 end
 
 """
-    plot_param_closeup(df, parameter; box_df=nothing, show_trials=true,
-                       save_path=nothing, figsize=(620, 440))
+    plot_param_closeup(df, parameter; box_df=nothing,
+                       save_path=nothing, figsize=(700, 460))
 
 One parameter, one figure, one conclusion -- the per-parameter extract of the
 `plot_probe_sensitivity` grid, sized for the write-up rather than for an
 appendix page.
 
-Across-trial median with its inter-quartile band, faint per-trial lines beneath
-it when `show_trials`, and a second axis on top carrying the parameter's
-*absolute* values: a reader needs to know that ×2.15 on the yaw length scale
+Across-trial median with its inter-quartile band, and a second axis on top
+carrying the parameter's *absolute* values: a reader needs to know that ×2.15 on the yaw length scale
 means 31.6, not only that it is ×2.15.
 
 Pass `box_df` (from [`box_exit_over_trials`](@ref)) for a normalisation
@@ -407,7 +406,6 @@ domain is the result.
 """
 function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     box_df::Union{DataFrame,Nothing}=nothing,
-    show_trials::Bool=true,
     save_path::Union{String,Nothing}=nothing,
     max_ticks::Int=5,
     figsize::Tuple{Int,Int}=(700, 460))
@@ -443,14 +441,6 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
         end
     end
 
-    if show_trials && hasproperty(sub, :trial_id)
-        for t in groupby(sub, :trial_id)
-            o = sortperm(t.probe)
-            lines!(ax, t.probe[o], 100 .* float.(t.relative_change[o]);
-                color=(color, 0.18), linewidth=1)
-        end
-    end
-
     hlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
     vlines!(ax, _probe_identity(kind); color=:gray, linestyle=:dot, linewidth=1)
     n_trials > 1 && band!(ax, probes, qlo, qhi; color=(color, 0.25))
@@ -458,11 +448,11 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     scatter!(ax, probes, med; color=color, markersize=9)
     ax.xticks = _probe_ticks(probes, kind; max_ticks=max_ticks)
 
-    # Y limits from the band, not from the per-trial lines. Same reasoning as
-    # plot_probe_ranking's x limits: on this sweep single trials reach +458%
-    # while the IQR tops out near +80%, so letting the data set the range
-    # flattens the median curve the figure exists to show. Trials outside the
-    # frame are clipped; the band still states how wide the spread is.
+    # Y limits from the band. Set explicitly rather than left to autoscale, so
+    # a panel cannot be rescaled by anything drawn outside the band -- which is
+    # what the per-trial lines did here: single trials reach +458% against an IQR
+    # topping out near +80%, and they flattened the median curve the figure
+    # exists to show.
     ylo = min(0.0, minimum(qlo), minimum(med))
     yhi = max(0.0, maximum(qhi), maximum(med))
     ypad = 0.12 * max(yhi - ylo, eps())
