@@ -57,7 +57,7 @@ test_labels = Dict(
     )
 )[data_key]
 # Choose Parameters file
-hsgp_p_key = 46
+hsgp_p_key = 47
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
@@ -72,12 +72,12 @@ if use_hand_tuned
         [5e-1, 2.0, 0.09],
         [5e-1, 2.0, 0.09],
         [5e-1, 2.0, 0.09],
-        [0.146, 18.0, 2.8]
+        [0.146, 30.0, 127.0]
     )
     params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
 end
 
-noise = HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
+noise = HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
 
 df_results = HybridZuptInsJl.multi_track_training_analysis(
     data_dir_path, estimators, train_labels, test_labels, params;

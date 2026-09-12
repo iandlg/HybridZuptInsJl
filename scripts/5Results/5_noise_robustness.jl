@@ -47,7 +47,7 @@ data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
 # of recomputing it, e.g.
 # results_csv = "noise_results_ANG2_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T09:12:33.123.csv"
 # `nothing` runs the sweep and writes a fresh CSV.
-results_csv = "noise_results_DCSC_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T12:50:51.024.csv"
+results_csv = nothing
 
 # 2. Align INS / GT trajectories for every trial
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
@@ -56,7 +56,7 @@ aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(
 
 ## 3. Load HSGP hyperparameters / Input feature type
 m = 200
-hsgp_p_key = 46
+hsgp_p_key = 47
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Define correction methods to compare

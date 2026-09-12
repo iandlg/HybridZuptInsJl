@@ -79,6 +79,7 @@ const HSGP_PARAM_PATHS = Dict{Int,String}(
     44 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T12:56:03.443.json",   # as 42, higher lower noise bound
     45 => "out/4OnlineCorrection/6_HypOpt/ANG2/HEADING-TWOD_STEP_YAW/ANG2_HEADING_TWOD_STEP_YAW_2026-08-19T16:42:30.821.json",   # hand-tuned from 44
     46 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-08-25T18:04:56.944.json",   # hand tuned from 5Results/5_noise_robustness-more_data.jl
+    47 => "out/4OnlineCorrection/6_HypOpt/DCSC/HEADING-TWOD_STEP_YAW/DCSC_HEADING_TWOD_STEP_YAW_2026-09-11T15:48:14.861.json",  # hand tuned from 5Results/5_noise_robustness-more_data.jl (i dont think this ones heading prediction collapses)
 )
 
 """
