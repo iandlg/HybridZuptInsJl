@@ -1,7 +1,7 @@
 abstract type AbstractTimeSeries end
 
 struct TimeSeries <: AbstractTimeSeries
-    t::Vector{Float64}   # strictly increasing timestamps (s)
+    t::Vector{Float64}   # strictly increasing timestamps [s]
 
     function TimeSeries(t)
         length(size(t)) == 1 || throw(ArgumentError("t must be 1-D"))
@@ -31,5 +31,5 @@ function is_compatible(series::AbstractTimeSeries...)
     length(series) >= 2 || throw(ArgumentError("need ≥ 2 series"))
     base = series[begin]
     return all(size(s.t) == size(base.t) && maximum(abs.(s.t .- base.t)) <= 1e-9
-               for s in series[begin+1:end])
+               for s in series[(begin+1):end])
 end

@@ -36,10 +36,10 @@ const SECTION = "5_NoiseRobustness/NoiseSweep"
 const DATA_SECTION = "$(SECTION)/data"
 
 # 1. Define datasets / trials to process
-data_key = "DCSC"
+data_key = "ANG2"
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
-    # "Angermann" => (data_dir(data_key), trial_ids(data_key)),
-    "DCSC" => (data_dir(data_key), trial_ids(data_key)),
+    "Angermann" => (data_dir(data_key), trial_ids(data_key)),
+    # "DCSC" => (data_dir(data_key), trial_ids(data_key)),
 )
 
 # Set this to the file name of a scores CSV under
@@ -130,21 +130,11 @@ else
 end
 
 ##
-const DATASET = data_key
+const DATASET = "Angermann"
 const BASE_ESTIMATOR = "ZUPT only"
 
 for metric in (:rmse, :rmse_yaw)
-    # (1) Absolute level: every estimator, per noise spec, boxed over trials.
-    results_figure() do
-        HybridZuptInsJl.plot_noise_sweep_boxplots(
-            results_df, DATASET;
-            metric=metric,
-            show_outliers=false,
-            save_path=stamped(SECTION, "noise_sweep_$(metric)"),
-        )
-    end
-
-    # (2) Same layout, paired: relative change vs Base on the same trial.
+    # paired relative change vs Base on the same trial.
     paired = HybridZuptInsJl.paired_estimator_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
     results_figure() do

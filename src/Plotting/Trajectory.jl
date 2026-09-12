@@ -430,7 +430,7 @@ function plot_trajectory_and_distance_error(
         heading_length=heading_length, marker_stride=marker_stride)
 
     ax_err = Axis(fig[1, 2];
-        xlabel="Time (s)",
+        xlabel="Time [s]",
         ylabel="Position error (m)",
         title="Absolute distance error",
         # Blank, not absent: it keeps the two panels' plot areas aligned under
@@ -455,7 +455,7 @@ function plot_trajectory_and_distance_error(
             # the reason it is worth showing on :full.
             marked = [i for i in idx if i <= length(gt_available) && gt_available[i]]
             if !isempty(marked)
-                scatter!(ax_err, traj.t[marked] .- t0, dist[marked .- (win_start - 1)];
+                scatter!(ax_err, traj.t[marked] .- t0, dist[marked .- (win_start-1)];
                     marker=:circle, color=:black, markersize=6,
                     strokewidth=1, strokecolor=:white)
             end
@@ -580,8 +580,9 @@ Six panels: the first `n_first` strides of the test segment on the top row and t
 `n_last` strides of the trial on the bottom row, one column per correction in `trajs`, with
 the ground truth dashed underneath in every panel and one shared legend in the third row.
 
-Panels are linked within a row but not across rows -- the two rows are different parts of
-the walk, so a common scale would say nothing.
+All six panels share one pair of x/y limits, fitted to the widest extent over every
+trajectory (and the ground truth) in both windows, so a divergence is the same size on the
+page wherever it appears.
 """
 function plot_trajectory_start_end_panels(
     trajs::AbstractDict{String,Trajectory},
@@ -599,22 +600,22 @@ function plot_trajectory_start_end_panels(
     start = clamp(test_start, 1, stop)
 
     windows = (
-        start:clamp(start + n_first - 1, start, stop),
-        clamp(stop - n_last + 1, start, stop):stop,
+        start:clamp(start+n_first-1, start, stop),
+        clamp(stop-n_last+1, start, stop):stop,
     )
     row_labels = ("First $n_first test strides", "Last $n_last strides")
     # Column identity is carried by the top row only; the bottom row sits under it.
     titles = (collect(keys(trajs)), fill("", length(trajs)))
 
     line_width = 1.2
-    fig = Figure(size=(400 * length(trajs), 620))
+    fig = Figure(size=(250 * length(trajs), 620))
 
+    axs = Axis[]
     for (row, window) in enumerate(windows)
-        Label(fig[row, 0], row_labels[row]; rotation=pi / 2, tellheight=false, font=:bold)
-        axs = Axis[]
+        # Label(fig[row, 0], row_labels[row]; rotation=pi / 2, tellheight=false, font=:bold)
         for (col, (key, traj)) in enumerate(trajs)
             ax = Axis(fig[row, col];
-                title=titles[row][col],
+                # title=titles[row][col],
                 xlabel="X (m)",
                 ylabel="Y (m)",
                 aspect=DataAspect(),
@@ -625,8 +626,9 @@ function plot_trajectory_start_end_panels(
                 color=method_color(key), linewidth=line_width)
             push!(axs, ax)
         end
-        linkaxes!(axs...)
     end
+    # One scale for all six panels: linkaxes! fits the union of every panel's data.
+    linkaxes!(axs...)
 
     Legend(fig[3, :],
         vcat([LineElement(color=:black, linestyle=:dash, linewidth=line_width)],
@@ -671,12 +673,12 @@ function plot_position_rmse(
         trajs = Dict("Estimation" => trajs)
     end
 
-    fig = Figure(size=(800, 600))
+    fig = Figure(size=(400, 300))
     ax = Axis(fig[1, 1];
-        xlabel="Time (s)",
+        xlabel="Time [s]",
         ylabel=metric_label(:rmse),
-        title=metric_title(:rmse) * " over time",
-        xgridvisible=true)
+        xgridvisible=true
+    )
 
     # -- plot all trajectories, shifting time to start at 0 --
     for (key, traj) in trajs
@@ -684,8 +686,7 @@ function plot_position_rmse(
         cum_rmse = rmse(traj, gt_traj)
         Δrmse = cum_rmse[end] - cum_rmse[1]
         t_shifted = traj.t[1:n] .- traj.t[1]
-        label = rich(key, ", ", metric_symbol(:rmse), ": $(round(cum_rmse[end], digits=3)), ",
-            metric_symbol(:rmse_rate), @sprintf(": %.2e", Δrmse / total_distance(gt_traj)))
+        label = key
         lines!(ax, t_shifted, cum_rmse, label=label)
     end
 
@@ -766,7 +767,7 @@ function plot_groundtruth_vs_inertial_orientations(
     fig = Figure(size=(1200, 400))
 
     # Create three axes in a row
-    axs = [Axis(fig[1, i]; title=labels[i], xlabel="Time (s)", ylabel="Degrees",
+    axs = [Axis(fig[1, i]; title=labels[i], xlabel="Time [s]", ylabel="Degrees",
         xgridvisible=true) for i in 1:3]
 
     # Storage for legend handles (one per estimated trajectory, using its first subplot colour)
@@ -831,7 +832,7 @@ function plot_groundtruth_vs_inertial_xyz(
     fig = Figure(size=(1200, 400))
 
     # Create three axes in a row
-    axs = [Axis(fig[1, i]; title=labels[i], xlabel="Time (s)", ylabel="Position (m)",
+    axs = [Axis(fig[1, i]; title=labels[i], xlabel="Time [s]", ylabel="Position (m)",
         xgridvisible=true) for i in 1:3]
 
     legend_handles = []
@@ -956,24 +957,25 @@ function plot_position_distance_error(
         trajs = Dict("Estimation" => trajs)
     end
 
-    fig = Figure(size=(800, 600))
+    fig = Figure(size=(400, 300))
     ax = Axis(fig[1, 1];
-        xlabel="Time (s)",
-        ylabel="Position error (m)",
-        title="Absolute Distance Error",
-        xgridvisible=true)
+        xlabel="Time [s]",
+        ylabel="Position error [m]",
+        xgridvisible=true
+    )
 
     for (key, traj) in trajs
         n = min(size(traj.pos, 2), size(gt_traj.pos, 2))
         # Horizontal distance error per sample (no cumulative sum)
         diff = traj.pos[1:2, 1:n] .- gt_traj.pos[1:2, 1:n]
         dist = sqrt.(sum(diff .^ 2, dims=1))[:]   # (n,)
+        t_shifted = traj.t[1:n] .- traj.t[1]
 
         # Use trajectory name if available, else the dictionary key
-        lines!(ax, traj.t[1:n], dist; linewidth=1.2, label=key)
+        lines!(ax, t_shifted, dist; linewidth=1.2, label=key)
     end
 
-    axislegend(ax; position=:rt)
+    axislegend(ax; position=:lt)
     return fig
 end
 function plot_position_distance_error(
@@ -994,7 +996,7 @@ function plot_position_distance_error(
 
     fig = Figure(size=(800, 600))
     ax = Axis(fig[1, 1];
-        xlabel="Time (s)",
+        xlabel="Time [s]",
         ylabel="Position error (m)",
         title="Absolute Distance Error",
         xgridvisible=true)
@@ -1038,13 +1040,13 @@ function plot_trajectory_xyz_euler(traj::Trajectory; figsize=(1200, 800))
 
     fig = Figure(size=figsize)
     # 2 rows, 3 columns
-    ax_pos_x = Axis(fig[1, 1]; xlabel="Time (s)", ylabel="X (m)", title="Position components")
-    ax_pos_y = Axis(fig[1, 2]; xlabel="Time (s)", ylabel="Y (m)")
-    ax_pos_z = Axis(fig[1, 3]; xlabel="Time (s)", ylabel="Z (m)")
+    ax_pos_x = Axis(fig[1, 1]; xlabel="Time [s]", ylabel="X (m)", title="Position components")
+    ax_pos_y = Axis(fig[1, 2]; xlabel="Time [s]", ylabel="Y (m)")
+    ax_pos_z = Axis(fig[1, 3]; xlabel="Time [s]", ylabel="Z (m)")
 
-    ax_roll = Axis(fig[2, 1]; xlabel="Time (s)", ylabel="Roll (deg)", title="Euler angles")
-    ax_pitch = Axis(fig[2, 2]; xlabel="Time (s)", ylabel="Pitch (deg)")
-    ax_yaw = Axis(fig[2, 3]; xlabel="Time (s)", ylabel="Yaw (deg)")
+    ax_roll = Axis(fig[2, 1]; xlabel="Time [s]", ylabel="Roll (deg)", title="Euler angles")
+    ax_pitch = Axis(fig[2, 2]; xlabel="Time [s]", ylabel="Pitch (deg)")
+    ax_yaw = Axis(fig[2, 3]; xlabel="Time [s]", ylabel="Yaw (deg)")
 
     # Plot positions
     lines!(ax_pos_x, t, pos[1, :]; color=:blue, linewidth=1.5)

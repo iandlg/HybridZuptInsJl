@@ -31,7 +31,7 @@ function plot_inertial_data(
     if ω !== nothing
         gyr = ω[:, start:stop]
         ax_gyr = Axis(fig[1, 1],
-            xlabel="Time (s)",
+            xlabel="Time [s]",
             ylabel="Angular rate (rad/s)",
             title="Angular Velocity",
             titlesize=24)
@@ -45,7 +45,7 @@ function plot_inertial_data(
     if α !== nothing
         acc = α[:, start:stop]
         ax_acc = Axis(fig[2, 1],
-            xlabel="Time (s)",
+            xlabel="Time [s]",
             ylabel="Acceleration (m/s²)",
             title="External Specific Force",
             titlesize=24)
