@@ -51,17 +51,10 @@ m = 200   # WAS 300 here and 200 in every other script, so the headline figure
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Correction methods to compare
-# WAS: "Static" => HybridZuptInsJl.StaticCorrectorV2(300)
-# StaticCorrectorV2 does not exist anywhere in src/ -- this cell could not run
-# as written, which is why the committed figure dates from 26 June while the
-# rest of the chapter is from August. Names also updated from the old
-# Default/Static/Split/Slam vocabulary to the one every other script uses, so
-# the same estimator is called the same thing in every figure.
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
     "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
     "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
-    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
@@ -129,19 +122,6 @@ for metric in (:rmse, :rmse_rate), show_outliers in (true, false)
     end
 end
 
-## Paired view at the operating point used by the rest of the chapter.
-# Same trials at every train_ratio, so per-trial differences are the honest
-# summary at n ≈ 16.
-# results_figure() do
-#     HybridZuptInsJl.plot_paired_relative_change(
-#         results_df;
-#         metric=:rmse,
-#         baseline="ZUPT only",
-#         train_ratio=0.5,
-#         label_trials=true,
-#         save_path=stamped(SECTION, "paired_vs_baseline_tr0.5"),
-#     )
-# end
 
 ## Paired view across the whole train_ratio sweep.
 # The cell above pins one operating point; this is the same paired contrast at
