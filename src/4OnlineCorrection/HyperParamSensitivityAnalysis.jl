@@ -633,7 +633,7 @@ function box_exit_points(box_df::DataFrame)::DataFrame
             sel = dir === :increasing ? sub.probe .>= unperturbed : sub.probe .<= unperturbed
             side = sort(sub[sel, :], :probe; rev=(dir === :decreasing))
             nrow(side) > 1 || continue
-            first_at(pred) = (i = findfirst(pred); isnothing(i) ? missing : side.probe[i])
+            first_at(pred) = (i=findfirst(pred); isnothing(i) ? missing : side.probe[i])
             push!(rows, (
                 parameter=first(sub.parameter),
                 type=first(sub.type),
@@ -658,8 +658,7 @@ Repeat [`vary_hsgp_parameters`](@ref) once per trial and stack the frames with a
 
 `make_evaluator(trial_id)` builds that trial's RMSE closure. Each trial is scored
 against **its own** baseline, so `relative_change` is a within-trial contrast and
-the design is paired -- the same construction
-[`plot_paired_relative_change`](@ref) relies on.
+the design is paired
 
 What the repetition buys is a reference *band*, not a noise floor. The pipeline
 is deterministic under a fixed seed, so the unperturbed point is exactly 0 in
@@ -707,7 +706,7 @@ skewed, see notes/009 section 6) distribution of the changes themselves.
 """
 function sign_test_p(k::Int, n::Int)::Float64
     n == 0 && return 1.0
-    tail = sum(binomial(n, i) for i in 0:min(k, n - k))
+    tail = sum(binomial(n, i) for i in 0:min(k, n-k))
     return min(1.0, 2 * tail / 2.0^n)
 end
 
@@ -732,7 +731,7 @@ reference the design does provide.
 All percentages, matching the plotting layer and `relative_change * 100`.
 """
 function probe_agreement(df::DataFrame)::DataFrame
-    work = df[df.parameter.!="baseline", :]
+    work = df[df.parameter .!= "baseline", :]
     isempty(work) && throw(ArgumentError("probe_agreement: no swept rows in frame"))
     work = copy(work)
     work.pct = 100 .* float.(work.relative_change)
@@ -743,7 +742,7 @@ function probe_agreement(df::DataFrame)::DataFrame
         by_probe = combine(groupby(sub, :probe), :pct => median => :med)
         span = maximum(by_probe.med) - minimum(by_probe.med)
 
-        moved = by_probe[abs.(by_probe.probe .- identity_probe).>1e-9, :]
+        moved = by_probe[abs.(by_probe.probe .- identity_probe) .> 1e-9, :]
         nrow(moved) == 0 && continue
         worst = moved.probe[argmax(abs.(moved.med))]
 
@@ -811,7 +810,7 @@ expected to say so rather than draw nothing.
 """
 function box_outside_spans(box_df::DataFrame, parameter::AbstractString;
     level::Real=0.5)::Vector{Tuple{Float64,Float64}}
-    sub = box_df[box_df.parameter.==parameter, :]
+    sub = box_df[box_df.parameter .== parameter, :]
     isempty(sub) && return Tuple{Float64,Float64}[]
 
     frac = combine(groupby(sub, :probe),
@@ -857,7 +856,7 @@ identity probe reproduces the baseline: a degenerate box on zero is the
 statement that the trained value was optimal in that trial.
 """
 function probe_extremes_by_trial(df::DataFrame)::DataFrame
-    work = df[df.parameter.!="baseline", :]
+    work = df[df.parameter .!= "baseline", :]
     isempty(work) && throw(ArgumentError("probe_extremes_by_trial: no swept rows in frame"))
     hasproperty(work, :trial_id) || throw(ArgumentError(
         "probe_extremes_by_trial: frame has no trial_id column; it needs a sweep_over_trials run"))

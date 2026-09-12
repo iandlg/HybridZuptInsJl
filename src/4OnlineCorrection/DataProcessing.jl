@@ -745,8 +745,7 @@ group — asking for 0.15 out of a 0.1-step sweep is a typo, not a request.
 - `value` — the estimator's metric,
 - `ref_value` — the reference estimator's metric on that same cell,
 - `delta = value - ref_value` — in the metric's own units,
-- `rel_change_pct = 100 (value - ref_value) / |ref_value|` — the quantity
-  `plot_paired_relative_change` and `plot_noise_paired_relative_change` display.
+- `rel_change_pct = 100 (value - ref_value) / |ref_value|` — the quantity `plot_noise_paired_relative_change` displays.
 
 Negative means the estimator beat the reference on that trial.
 """
