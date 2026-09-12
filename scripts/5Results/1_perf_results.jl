@@ -98,30 +98,6 @@ else
     @info "Loaded results table: $csv_path" nrow(results_df)
 end
 
-## 7. Plot
-# WAS: this cell re-read a hard-coded CSV path from June while stamping the
-# output filenames with the data_key/FRAME/FEATURE of whatever the compute cell
-# above had set -- so the figure legend could describe a different run than the
-# data plotted. It now plots whatever `results_df` holds: the sweep just computed,
-# or the CSV named by `results_csv` at the top of the script.
-#
-# Corrector order comes from the frame rather than from `estimators`, so a re-read CSV
-# keeps the order (and hence the colours) of the run that produced it, whether or not it
-# swept the same estimators as the cell above.
-corrector_names = unique(sort(results_df, :estimator_order).estimator)
-
-for metric in (:rmse, :rmse_rate), show_outliers in (true, false)
-    suffix = show_outliers ? "" : "_nooutliers"
-    results_figure() do
-        HybridZuptInsJl.plot_corrector_boxplots(
-            results_df, metric;
-            show_outliers=show_outliers,
-            corrector_names=corrector_names,
-            save_path=stamped(SECTION, "$(uppercase(string(metric)))$(suffix)"),
-        )
-    end
-end
-
 
 ## Paired view across the whole train_ratio sweep.
 # The cell above pins one operating point; this is the same paired contrast at
@@ -135,17 +111,15 @@ const BASE_ESTIMATOR = "ZUPT only"
 # From the frame, not `data_dict`, for the same reason as `corrector_names`.
 const DATASET = first(unique(results_df.dataset_name))
 
-for metric in (:rmse, :rmse_rate, :rmse_yaw)
+for metric in (:rmse, :rmse_yaw)
     paired = HybridZuptInsJl.paired_estimator_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR, train_ratios=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     results_figure() do
         HybridZuptInsJl.plot_train_ratio_paired_relative_change(
             paired, DATASET;
             metric=metric,
-            reference_label=BASE_ESTIMATOR,
             show_outliers=true,
             show_points=false,
-            show_subtitle=false,
             save_path=stamped(SECTION, "train_ratio_paired_$(metric)"),
         )
     end

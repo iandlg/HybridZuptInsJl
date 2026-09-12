@@ -20,7 +20,7 @@ data_dir_path = data_dir(data_key)
 # with the other scripts. Both are keyed by `data_key`: the test list used to be
 # hardcoded to [14] with the dataset-keyed dict below it discarded, so a DCSC run
 # silently tested on ANG2's trial 14.
-train_trial_ids = train_ids(data_key)
+train_trial_ids = trial_ids(data_key)  #train_ids(data_key) 
 test_trial_ids = test_ids(data_key)
 all_trial_ids = vcat(train_trial_ids, test_trial_ids)
 FRAME = HybridZuptInsJl.HEADING
@@ -58,7 +58,7 @@ outlier_removal_params = OrderedDict(
     "dims" => :output, # nothing or :input or :both
     "method" => "mahalanobis",
     "threshold" => 3.0,
-    "keep_fraction" => 0.847,
+    "keep_fraction" => 0.95,
 )
 
 # Quick look at the D² distribution the cut acts on, before it is applied.
@@ -203,8 +203,8 @@ hsgp_opt = HybridZuptInsJl.HsgpParameters(
 
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
-trial_id = 15
-train_ratio = 0.5
+trial_id = 14
+train_ratio = 0.3
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(

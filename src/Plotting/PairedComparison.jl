@@ -49,11 +49,9 @@ end
         dataset_name::AbstractString;
         value_col::Symbol=:rel_change_pct,
         metric::Symbol=:rmse,
-        reference_label::AbstractString="baseline",
         save_path::Union{String,Nothing}=nothing,
         show_outliers::Bool=true,
         show_points::Bool=false,
-        show_subtitle::Bool=true,
     )
 
 `plot_noise_paired_relative_change` with `train_ratio` on the x axis instead of the
@@ -83,11 +81,9 @@ function plot_train_ratio_paired_relative_change(
     dataset_name::AbstractString;
     value_col::Symbol=:rel_change_pct,
     metric::Symbol=:rmse,
-    reference_label::AbstractString="baseline",
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
-    show_subtitle::Bool=true,
 )
     check_metric(metric)
     value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
@@ -109,14 +105,9 @@ function plot_train_ratio_paired_relative_change(
     as_pct = value_col === :rel_change_pct
     fig = Figure(size=(900, 600))
     ax = Axis(fig[1, 1],
-        xlabel="Ground truth available online (train_ratio)",
+        xlabel="Ground truth available online [%]",
         ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
                rich("change in ", metric_label(metric)),
-        title="Per-trial change vs \"$reference_label\" — $dataset_name",
-        subtitle=(!show_subtitle ? "" :
-                  as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
-                  "estimator − $reference_label, per trial"
-        ),
         subtitlesize=10,
         xticklabelsize=14,
     )

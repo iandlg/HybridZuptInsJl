@@ -28,7 +28,7 @@ function plot_step_lengths(
     fig = Figure(size=(800, 600))
     ax = Axis(fig[1, 1];
         title="Length of steps",
-        xlabel="Time (s)",
+        xlabel="Time [s]",
         ylabel="Step length (m)",
         xgridvisible=true)
 
@@ -37,7 +37,7 @@ function plot_step_lengths(
         # Compute ground‑truth step lengths (dashed black line)
         gt_lengths = step_lengths(gt_traj, segs)
 
-        gt_times = gt_traj.t[segs[1:end-1]]   # time of each step start (or end? Python uses segs[:-1])
+        gt_times = gt_traj.t[segs[1:(end-1)]]   # time of each step start (or end? Python uses segs[:-1])
         lines!(ax, gt_times, gt_lengths;
             color=:black, linestyle=:dash, linewidth=1, label="Ground truth")
     end
@@ -45,7 +45,7 @@ function plot_step_lengths(
     # Plot each estimated trajectory
     for (i, traj) in enumerate(trajs)
         est_lengths = step_lengths(traj, segs)
-        est_times = traj.t[segs[1:end-1]]
+        est_times = traj.t[segs[1:(end-1)]]
         label = hasproperty(traj, :name) && !isnothing(traj.name) ? traj.name : "Trajectory $(i+1)"
         lines!(ax, est_times, est_lengths; linewidth=1, label=label)
     end

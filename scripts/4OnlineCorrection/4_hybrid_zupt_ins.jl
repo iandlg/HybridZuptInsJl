@@ -47,7 +47,7 @@ sigma_groundtruth = (
 posyaw_measurement_update=true
 
 trial_id = 14 # meta["trial_id"]
-train_ratio = 0.5
+train_ratio = 0.3
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -101,6 +101,15 @@ end
 cutoff = 1e9 # s
 mask = def_corr_traj.t .< cutoff
 
+# Print the number of strides during training and testing
+n_strides = length(def_corr_traj)
+n_train_strides = floor(Int, train_ratio * n_strides)
+n_test_strides = n_strides - n_train_strides
+
+@info "Number of strides used for training : $n_train_strides"
+@info "Training phase duration $(def_corr_traj.t[n_train_strides] - def_corr_traj.t[1])"
+@info "Number of strides during testing : $n_test_strides"
+@info "Training phase duration $(def_corr_traj.t[end] - def_corr_traj.t[n_train_strides])"
 
 
 trajs = OrderedDict(
@@ -111,14 +120,6 @@ trajs = OrderedDict(
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg][mask])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg][mask])
-
-# results_figure() == CairoMakie + theme_ggplot2(), the theme every saved results figure
-# uses. It has to be CairoMakie: saving SVG under GLMakie silently rasterises the figure.
-fig = results_figure() do
-    HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg][mask];
-        segment=:test, train_ratio=train_ratio, show_heading=false, heading_stride=1,
-        save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
-end
 
 # Zoom on where the corrections diverge: the first strides after the model takes over
 # (top row) and the end of the walk (bottom row), one column per correction, ground
@@ -131,14 +132,6 @@ fig_traj_panels = results_figure() do
         train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides,
         save_path=stamped(section, "trajectory2d_panels_$(data_key)_trial$(trial_id)"))
 end
-
-# Same test window as above, with the absolute distance error panel alongside it and a
-# single shared legend. Saved next to the map-only figure, under its own name.
-# fig_traj_err = results_figure() do
-#     HybridZuptInsJl.plot_trajectory_and_distance_error(trajs, gt_traj_aligned[step_seg][mask];
-#         segment=:test, train_ratio=train_ratio,
-#         save_path=stamped(section, "trajectory2d_disterr_$(data_key)_trial$(trial_id)"))
-# end
 
 # These two take no save_path, so the figure is saved here instead — still inside
 # results_figure(), so `save` is served by CairoMakie like every other results figure.
