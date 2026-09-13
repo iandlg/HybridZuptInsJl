@@ -20,6 +20,9 @@
 #     sequence, so the box there is order sensitivity in the fit alone. It should be
 #     near-degenerate; that is the check that the shuffling measures what it should.
 #
+# Each run writes its per-repeat rows to a CSV beside the figure; set `replot_csv` below to
+# one of those paths to redraw it without paying for the sweep again.
+#
 # The training-GT noise is NOT redrawn per repeat: a track's realisation is keyed on the
 # track id alone (`Xoshiro(1000*train_id)` in `multi_track_training_analysis`), so it is the
 # same in every repeat and for every estimator. That is what makes the last group a clean
@@ -91,6 +94,13 @@ if use_hand_tuned
     params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
 end
 
+# Set to the path of a CSV written by an earlier run to re-plot it and skip the sweep
+# entirely -- the whole point of writing one CSV per run. `nothing` runs the sweep over
+# every entry in `noise_specs` below. The path is taken as given (relative to the repo
+# root, or absolute); it is not resolved against the section directory.
+replot_csv = nothing
+# replot_csv = "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-13T15:59:57.326.csv"
+
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
@@ -114,7 +124,8 @@ function summarise_more_data(df::DataFrame, label::AbstractString)
     base = df[df.train_set .== "Base", :]
     steps = sort(unique(skipmissing(trained.train_set_order)))
 
-    @printf("\n=== %s : median %s over %d random orders ===\n", label, METRIC, N_REPEATS)
+    @printf("\n=== %s : median %s over %d random orders ===\n",
+        label, METRIC, length(unique(skipmissing(trained.seed))))
     print(rpad("test track", 22), rpad("estimator", 10), rpad("base", 9))
     println(join([rpad("n=$n", 9) for n in steps]))
     for test_id in sort(unique(trained.test_id), by=t -> first(trained[trained.test_id.==t, :test_order]))
@@ -141,7 +152,8 @@ function summarise_order_invariance(df::DataFrame, label::AbstractString)
     n_max = maximum(skipmissing(trained.train_set_order))
     fin = trained[trained.train_set_order.==n_max, :]
 
-    @printf("\n=== %s : final step, n=%d tracks, %d orders ===\n", label, n_max, N_REPEATS)
+    @printf("\n=== %s : final step, n=%d tracks, %d orders ===\n",
+        label, n_max, length(unique(skipmissing(fin.seed))))
     println(rpad("test track", 22), rpad("estimator", 10),
         rpad("min", 11), rpad("median", 11), rpad("max", 11), "rel spread")
     for test_id in sort(unique(fin.test_id), by=t -> first(fin[fin.test_id.==t, :test_order]))
@@ -159,34 +171,54 @@ function summarise_order_invariance(df::DataFrame, label::AbstractString)
     end
 end
 
-results = OrderedDict{String,DataFrame}()
-for (noise_label, noise) in noise_specs
-    @info "##### Noise spec $(noise_label): $(noise.tag) #####"
+if isnothing(replot_csv)
+    results = OrderedDict{String,DataFrame}()
+    for (noise_label, noise) in noise_specs
+        @info "##### Noise spec $(noise_label): $(noise.tag) #####"
 
-    df_results = HybridZuptInsJl.multi_track_training_analysis(
-        data_dir_path, estimators, train_labels, test_labels, params;
-        frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
-        noise_spec=noise,
-        order_seeds=SEEDS,
-        train_tr_ratio=1.0,
-        test_tr_ratio=0.1,
-    )
-    results[noise_label] = df_results
+        df_spec = HybridZuptInsJl.multi_track_training_analysis(
+            data_dir_path, estimators, train_labels, test_labels, params;
+            frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
+            noise_spec=noise,
+            order_seeds=SEEDS,
+            train_tr_ratio=1.0,
+            test_tr_ratio=0.1,
+        )
+        results[noise_label] = df_spec
 
+        results_figure() do
+            HybridZuptInsJl.plot_multi_track_training_quality(
+                df_spec;
+                metric=METRIC,
+                save_path=stamped(SECTION, "multi_track_training_$(noise_label)"),
+            )
+        end
+
+        # The per-repeat rows, beside the figure: a box of 5 points is worth being able to
+        # look at, the `train_set` column is the only record of which permutation each
+        # repeat drew, and `replot_csv` above turns this file back into the figure.
+        CSV.write(stamped(SECTION, "multi_track_training_$(noise_label)"; ext="csv"), df_spec)
+
+        summarise_more_data(df_spec, noise.tag)
+        summarise_order_invariance(df_spec, noise.tag)
+    end
+else
+    df_results = CSV.read(replot_csv, DataFrame)
+    @info "Re-plotting from $replot_csv" nrow(df_results)
+
+    # The figure takes the CSV's own stem rather than a fresh timestamp: it is not new
+    # evidence, it is the same run drawn again, and pairing the names is what lets you tell
+    # which table a figure came from. Re-plotting the same CSV overwrites its figure, which
+    # is what you want while iterating on the styling.
+    fig_path = results_path(SECTION, replace(basename(replot_csv), r"\.csv$" => ".pdf"))
     results_figure() do
         HybridZuptInsJl.plot_multi_track_training_quality(
-            df_results;
-            metric=METRIC,
-            save_path=stamped(SECTION, "multi_track_training_$(noise_label)"),
-        )
+            df_results; metric=METRIC, save_path=fig_path)
     end
+    @info "Wrote $fig_path"
 
-    # The per-repeat rows, beside the figure: a box of 5 points is worth being able to look
-    # at, and the `train_set` column is the only record of which permutation each repeat drew.
-    CSV.write(stamped(SECTION, "multi_track_training_$(noise_label)"; ext="csv"), df_results)
-
-    summarise_more_data(df_results, noise.tag)
-    summarise_order_invariance(df_results, noise.tag)
+    summarise_more_data(df_results, basename(replot_csv))
+    summarise_order_invariance(df_results, basename(replot_csv))
 end
 
 ## Optionally persist the hand-tuned hyperparameters.

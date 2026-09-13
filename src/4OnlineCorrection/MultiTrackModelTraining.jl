@@ -29,7 +29,10 @@ consequences worth keeping:
 Rows carry `seed` (which repeat), `train_set_order` (how many tracks had been accumulated)
 and `train_set`/`train_ids` (that repeat's ordered ids — the only record of the permutation
 it drew). Baseline rows (`train_set == "Base"`) are untrained, hence noise- and
-order-independent: they are computed once and carry `seed === missing`.
+order-independent: they are computed once and carry `seed === missing`. Their estimator
+name defaults to `"ZUPT only"` so it keys into `_METHOD_COLOR_INDICES`
+(`Plotting/OfflineCorrection.jl`) and matches the other Section 5 figures; rename it and
+the baseline silently drops to the fallback grey.
 """
 function multi_track_training_analysis(
     data_dir::AbstractString,
@@ -44,7 +47,7 @@ function multi_track_training_analysis(
     train_tr_ratio::Float64=1.0,
     noise_spec::Union{Nothing,NoiseSpec}=nothing,
     order_seeds::AbstractVector{Int}=[1],
-    base_estimator_name::AbstractString="ZUPT INS"
+    base_estimator_name::AbstractString="ZUPT only"
 )::DataFrame
 
     isempty(order_seeds) && throw(ArgumentError("order_seeds must not be empty"))

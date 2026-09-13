@@ -26,13 +26,13 @@ function _grouped_boxplot!(
     series = sort(unique(sub[:, series_col]), by=e -> series_order_map[e])
     n_groups, n_series = length(groups), length(series)
 
-    colors = Makie.wong_colors()
-    # Colour by `series_order_col`, not by position within THIS figure: the paired
-    # figure omits the baseline, and indexing by position would shift every
-    # remaining estimator onto the colour its neighbour had in the unpaired one.
-    # With the estimators declared Base, Static, HSGP the mapping is wong 1/2/3
-    # everywhere, and the paired figure simply has no wong-1 box.
-    series_color = Dict(ser => colors[mod1(series_order_map[ser], length(colors))] for ser in series)
+    # Colour by method NAME via `method_color`, not by position within THIS figure
+    # and not by `series_order_col` either: the paired figure omits the baseline and
+    # the multi-track figure never declares it as a series at all, so any positional
+    # scheme shifts every remaining estimator onto its neighbour's colour. Wong 1/2/3
+    # belong to ZUPT only / Static / HSGP by convention -- one table, in
+    # `_METHOD_COLOR_INDICES` (Plotting/OfflineCorrection.jl).
+    series_color = Dict(ser => method_color(ser) for ser in series)
 
     group_width = 0.8
     bar_width = n_series > 0 ? group_width / n_series : group_width
@@ -214,10 +214,10 @@ end
     plot_multi_track_training_quality(df; metric=:rmse_rate, save_path=nothing)
 
 One panel per test track: `metric` against the **number** of accumulated training tracks,
-estimators side by side, with the untrained baseline as a dashed line. Reading along the x
-axis answers the question the experiment exists for — whether more (noisy) training data
-buys back the performance the noise costs — and the baseline line is what "buys back" is
-measured against.
+estimators side by side, with the untrained baseline as a dashed line in its own method
+colour. Reading along the x axis answers the question the experiment exists for — whether
+more (noisy) training data buys back the performance the noise costs — and the baseline
+line is what "buys back" is measured against, so it is drawn first and leads the legend.
 
 Each box spans the repeats in `df`, i.e. the `seed` column of
 `multi_track_training_analysis`: one random accumulation order per seed. Up to the last
@@ -272,17 +272,22 @@ function plot_multi_track_training_quality(
         push!(axs, ax)
         col_i == 1 && push!(first_col_axs, ax)
 
+        # Baseline first, so it leads the legend: it is the reference every box is read
+        # against, not an afterthought. Named and coloured from the dataframe's own
+        # baseline rows rather than a literal here, so it follows
+        # `base_estimator_name` and keeps the method palette.
+        base_rows = base_df[base_df.test_id .== test_id, :]
+        if !isempty(base_rows)
+            hlines!(ax, [first(base_rows[:, metric])];
+                color=method_color(first(base_rows.estimator)),
+                linestyle=:dash, linewidth=3, label=first(base_rows.estimator))
+        end
+
         # Group by how many tracks have been accumulated, which is `train_set_order` and is
         # also its own display order.
         _grouped_boxplot!(ax, sub, metric;
             group_col=:train_set_order, group_order_col=:train_set_order,
             show_outliers=show_outliers, show_points=show_points)
-
-        base_rows = base_df[base_df.test_id .== test_id, :]
-        if !isempty(base_rows)
-            hlines!(ax, [first(base_rows[:, metric])];
-                color=:black, linestyle=:dash, linewidth=1, label="No correction")
-        end
 
         legend_ax = ax
     end
