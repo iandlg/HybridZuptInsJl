@@ -210,14 +210,34 @@ function plot_noise_paired_relative_change(
     return fig
 end
 
+"""
+    plot_multi_track_training_quality(df; metric=:rmse_rate, save_path=nothing)
+
+One panel per test track: `metric` against the **number** of accumulated training tracks,
+estimators side by side, with the untrained baseline as a dashed line. Reading along the x
+axis answers the question the experiment exists for — whether more (noisy) training data
+buys back the performance the noise costs — and the baseline line is what "buys back" is
+measured against.
+
+Each box spans the repeats in `df`, i.e. the `seed` column of
+`multi_track_training_analysis`: one random accumulation order per seed. Up to the last
+group a box also spans which *subset* of tracks a permutation happened to reach first; in
+the last group every repeat has trained on the same set, so the box there is order
+sensitivity alone and should be near-degenerate. At one seed a box is a single point.
+
+WAS: a bar chart of `first(...)`, one unreplicated number per cell annotated to two
+decimals, with the x axis labelled by the comma-separated track ids of one arbitrary
+accumulation order — a labelling that is not even well defined once the order is randomised
+per repeat.
+"""
 function plot_multi_track_training_quality(
     df::DataFrame;
     metric::Symbol=:rmse_rate,
-    save_path::Union{String,Nothing}=nothing
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=true,
 )
-    # ----- Input validation -----
     check_metric(metric)
-    metric_name = metric_label(metric)
 
     # ----- Determine test order (preserve input order) -----
     test_order_map = Dict{Int,Int}()
@@ -229,97 +249,42 @@ function plot_multi_track_training_quality(
     n_cols = min(3, n_tests)
     n_rows = ceil(Int, n_tests / n_cols)
 
-    # ----- Separate baseline and trained rows -----
     base_df = df[df.train_set .== "Base", :]          # baseline (no training)
     trained_df = df[df.train_set .!= "Base", :]       # all trained steps
 
-    # ----- Extract estimators and their order -----
-    est_order_map = Dict{String,Int}()
-    for row in eachrow(trained_df)
-        est_order_map[row.estimator] = row.estimator_order
-    end
-    estimators = sort(unique(trained_df.estimator), by=e -> est_order_map[e])
-    n_est = length(estimators)
-
-    # ----- Colour palette -----
-    colors = Makie.wong_colors()
-    baseline_color = colors[1]
-    est_colors = Dict(estimators[i] => colors[mod1(i+1, length(colors))] for i in 1:n_est)
-
-    # ----- Training step groups: order 0 = baseline, then 1,2,… -----
-    group_labels = Dict{Int,String}()
-    for row in eachrow(trained_df)
-        group_labels[row.train_set_order] = row.train_set
-    end
-    group_labels[0] = "Base"
-    all_orders = sort(collect(keys(group_labels)))
-
-    # ----- Create figure -----
     fig = Figure(size=(450 * n_cols, 450 * n_rows))
     axs = Axis[]
     first_col_axs = Axis[]
+    legend_ax = nothing
 
     for (idx, test_id) in enumerate(test_ids)
         row_i = (idx - 1) ÷ n_cols + 1
         col_i = (idx - 1) % n_cols + 1
 
-        test_sub = df[df.test_id .== test_id, :]
-        test_name = first(test_sub.test_name)
+        sub = trained_df[trained_df.test_id .== test_id, :]
+        isempty(sub) && continue
 
         ax = Axis(fig[row_i, col_i];
-            title="Tested on $test_name",
-            ylabel=metric_name,
+            title="Tested on $(first(sub.test_name))",
+            xlabel="Training tracks accumulated",
+            ylabel=metric_label(metric),
             xgridvisible=false)
         push!(axs, ax)
         col_i == 1 && push!(first_col_axs, ax)
 
-        # Position each group at integer x: baseline at 1, step 1 at 2, etc.
-        group_positions = Dict{Int,Float64}()
-        for (i, order) in enumerate(all_orders)
-            group_positions[order] = Float64(i + 1)
-        end
+        # Group by how many tracks have been accumulated, which is `train_set_order` and is
+        # also its own display order.
+        _grouped_boxplot!(ax, sub, metric;
+            group_col=:train_set_order, group_order_col=:train_set_order,
+            show_outliers=show_outliers, show_points=show_points)
 
-        # ----- Plot baseline (only for group 0) -----
         base_rows = base_df[base_df.test_id .== test_id, :]
         if !isempty(base_rows)
-            base_val = first(base_rows[:, metric])
-            base_pos = group_positions[0]
-            barplot!(ax, [base_pos], [base_val]; color=baseline_color, width=0.6)
-            if !isnan(base_val)
-                text!(ax, base_pos, base_val; text=string(round(base_val, digits=2)),
-                    align=(:center, :bottom), fontsize=9)
-            end
+            hlines!(ax, [first(base_rows[:, metric])];
+                color=:black, linestyle=:dash, linewidth=1, label="No correction")
         end
 
-        # ----- Plot each training step -----
-        for order in all_orders
-            order == 0 && continue
-            group_center = group_positions[order]
-            gdf = trained_df[(trained_df.test_id .== test_id) .& (trained_df.train_set_order .== order), :]
-            isempty(gdf) && continue
-
-            # Compute bar positions within the group
-            bar_width = n_est > 0 ? 0.8 / n_est : 0.8
-            offsets = ((1:n_est) .- (n_est + 1) / 2) .* bar_width
-
-            for (j, est) in enumerate(estimators)
-                edf = gdf[gdf.estimator .== est, :]
-                isempty(edf) && continue
-                val = first(edf[:, metric])
-                xpos = group_center + offsets[j]
-                barplot!(ax, [xpos], [val]; color=est_colors[est], width=bar_width * 0.9)
-                if !isnan(val)
-                    text!(ax, xpos, val; text=string(round(val, digits=2)),
-                        align=(:center, :bottom), fontsize=8)
-                end
-            end
-        end
-
-        # ----- Set x‑axis ticks -----
-        xticks_pos = [group_positions[order] for order in all_orders]
-        xticks_lab = [group_labels[order] for order in all_orders]
-        ax.xticks = (xticks_pos, xticks_lab)
-        ax.xticklabelrotation = π / 6
+        legend_ax = ax
     end
 
     # ----- Share one y scale across panels -----
@@ -335,13 +300,7 @@ function plot_multi_track_training_quality(
     end
 
     # ----- Legend -----
-    legend_elems = [PolyElement(color=baseline_color)]
-    legend_labels = ["Baseline"]
-    for est in estimators
-        push!(legend_elems, PolyElement(color=est_colors[est]))
-        push!(legend_labels, split(est, '.')[end])   # short name
-    end
-    Legend(fig[n_rows+1, 1:n_cols], legend_elems, legend_labels;
+    isnothing(legend_ax) || Legend(fig[n_rows+1, 1:n_cols], legend_ax;
         orientation=:horizontal, tellwidth=false)
 
     # ----- Save or return -----

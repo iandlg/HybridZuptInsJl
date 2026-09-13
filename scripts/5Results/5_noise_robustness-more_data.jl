@@ -1,32 +1,46 @@
 # Section 5b: does MORE (noisy) training data buy back robustness?
 #
-# Training tracks are accumulated incrementally and the frozen model is re-tested
-# after each addition.
+# The question: ground truth used for training is corrupted, which costs performance. Does
+# accumulating more of it recover that loss? Training tracks are added one at a time and the
+# frozen model is re-tested after each addition, against the no-correction ZUPT baseline
+# (dashed line in the figure). Noise is applied to the training tracks only; the test
+# tracks' GT stays clean.
 #
-# CAVEAT: the accumulation order below is one arbitrary permutation of the
-# training tracks, so the curve confounds "more data" with "which track came
-# next". Either randomise the order over repeats or state the order in the
-# caption. Noise is applied to the training tracks only; the test track's GT
-# window stays clean.
+# The accumulation order is now DRAWN, not chosen. WAS: tracks were fed in the declared
+# order of `train_labels`, one arbitrary permutation, so every point on the curve confounded
+# "more data" with "which track came next" -- and whichever permutation happened to be typed
+# at the top of this file decided what the figure said. Each of the SEEDS repeats now walks
+# its own random permutation and each box spans the repeats.
+#
+# Two things to keep straight when reading a box:
+#
+#   - up to the last group, a box spans both the order AND which subset of tracks that
+#     permutation reached first, which is part of the "more data" question;
+#   - in the LAST group every repeat has trained on the same set of tracks in a different
+#     sequence, so the box there is order sensitivity in the fit alone. It should be
+#     near-degenerate; that is the check that the shuffling measures what it should.
+#
+# The training-GT noise is NOT redrawn per repeat: a track's realisation is keyed on the
+# track id alone (`Xoshiro(1000*train_id)` in `multi_track_training_analysis`), so it is the
+# same in every repeat and for every estimator. That is what makes the last group a clean
+# order-only check -- and it also means this figure marginalises over order but carries a
+# single noise draw per track. See notes/005 and notes/006.
 
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("_common.jl")
-using OrderedCollections, DataFrames
+using OrderedCollections, DataFrames, Statistics, Printf
+import CSV
 
 data_key = "DCSC"
 data_dir_path = data_dir(data_key)
 
-# estimators = OrderedDict(
-#     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
-#     "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
-# )
 estimators = OrderedDict(
     "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
     "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
-    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
+# NOTE: the order of these entries no longer matters -- it defines the *set* of training
+# tracks, and each repeat draws its own permutation of it.
 train_labels = Dict(
     "ANG2" => OrderedDict(
         4 => "Walk_8",
@@ -77,26 +91,102 @@ if use_hand_tuned
     params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
 end
 
-noise = HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±5°)")
+# One repeat per seed, each a random accumulation order. Cost is
+# n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
+# 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
+N_REPEATS = 5
+SEEDS = collect(1:N_REPEATS)
 
-df_results = HybridZuptInsJl.multi_track_training_analysis(
-    data_dir_path, estimators, train_labels, test_labels, params;
-    frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
-    noise_spec=noise,
-    train_tr_ratio=1.0,
-    test_tr_ratio=0.1,
+noise_specs = OrderedDict(
+    "pos1.0_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
+        tag="Position & Heading Noise (1.m, ±10°)"),
+    "pos0.1_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
+        tag="Position & Heading Noise (0.1m, ±10°)"),
 )
 
-## Plot
-# WAS: called without save_path, so this script wrote no figure either.
 const SECTION = "5_NoiseRobustness/MoreData"
+const METRIC = :rmse
 
-results_figure() do
-    HybridZuptInsJl.plot_multi_track_training_quality(
-        df_results;
-        metric=:rmse,
-        save_path=stamped(SECTION, "multi_track_training"),
+"""Median metric at every training-set size, with the no-correction baseline beside it.
+This is the headline read: along a row is "more data", against `base` is "buys back"."""
+function summarise_more_data(df::DataFrame, label::AbstractString)
+    trained = df[df.train_set .!= "Base", :]
+    base = df[df.train_set .== "Base", :]
+    steps = sort(unique(skipmissing(trained.train_set_order)))
+
+    @printf("\n=== %s : median %s over %d random orders ===\n", label, METRIC, N_REPEATS)
+    print(rpad("test track", 22), rpad("estimator", 10), rpad("base", 9))
+    println(join([rpad("n=$n", 9) for n in steps]))
+    for test_id in sort(unique(trained.test_id), by=t -> first(trained[trained.test_id.==t, :test_order]))
+        tsub = trained[trained.test_id.==test_id, :]
+        bval = first(base[base.test_id.==test_id, METRIC])
+        for est in unique(tsub.estimator)
+            esub = tsub[tsub.estimator.==est, :]
+            meds = map(steps) do n
+                v = esub[esub.train_set_order.==n, METRIC]
+                isempty(v) ? NaN : median(v)
+            end
+            print(rpad(first(tsub.test_name), 22), rpad(est, 10), rpad(round(bval; digits=3), 9))
+            println(join([rpad(round(m; digits=3), 9) for m in meds]))
+        end
+    end
+end
+
+"""Final step only: every repeat has trained on the same set, so the spread here is the
+order sensitivity of the incremental fit. Static is exactly linear-Gaussian and should sit
+at roundoff; HSGP linearises its measurement noise about the current β (notes/006) and is
+expected small but nonzero."""
+function summarise_order_invariance(df::DataFrame, label::AbstractString)
+    trained = df[df.train_set .!= "Base", :]
+    n_max = maximum(skipmissing(trained.train_set_order))
+    fin = trained[trained.train_set_order.==n_max, :]
+
+    @printf("\n=== %s : final step, n=%d tracks, %d orders ===\n", label, n_max, N_REPEATS)
+    println(rpad("test track", 22), rpad("estimator", 10),
+        rpad("min", 11), rpad("median", 11), rpad("max", 11), "rel spread")
+    for test_id in sort(unique(fin.test_id), by=t -> first(fin[fin.test_id.==t, :test_order]))
+        tsub = fin[fin.test_id.==test_id, :]
+        for est in unique(tsub.estimator)
+            v = tsub[tsub.estimator.==est, METRIC]
+            isempty(v) && continue
+            med = median(v)
+            print(rpad(first(tsub.test_name), 22), rpad(est, 10),
+                rpad(round(minimum(v); sigdigits=5), 11),
+                rpad(round(med; sigdigits=5), 11),
+                rpad(round(maximum(v); sigdigits=5), 11))
+            @printf("%.2e  (%d draws)\n", (maximum(v) - minimum(v)) / med, length(v))
+        end
+    end
+end
+
+results = OrderedDict{String,DataFrame}()
+for (noise_label, noise) in noise_specs
+    @info "##### Noise spec $(noise_label): $(noise.tag) #####"
+
+    df_results = HybridZuptInsJl.multi_track_training_analysis(
+        data_dir_path, estimators, train_labels, test_labels, params;
+        frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
+        noise_spec=noise,
+        order_seeds=SEEDS,
+        train_tr_ratio=1.0,
+        test_tr_ratio=0.1,
     )
+    results[noise_label] = df_results
+
+    results_figure() do
+        HybridZuptInsJl.plot_multi_track_training_quality(
+            df_results;
+            metric=METRIC,
+            save_path=stamped(SECTION, "multi_track_training_$(noise_label)"),
+        )
+    end
+
+    # The per-repeat rows, beside the figure: a box of 5 points is worth being able to look
+    # at, and the `train_set` column is the only record of which permutation each repeat drew.
+    CSV.write(stamped(SECTION, "multi_track_training_$(noise_label)"; ext="csv"), df_results)
+
+    summarise_more_data(df_results, noise.tag)
+    summarise_order_invariance(df_results, noise.tag)
 end
 
 ## Optionally persist the hand-tuned hyperparameters.
