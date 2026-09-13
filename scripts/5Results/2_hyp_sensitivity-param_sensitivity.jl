@@ -48,7 +48,7 @@ data_dir_path = data_dir(data_key)
 # `trial_ids(data_key)` to sweep everything, knowing that.
 sweep_trial_ids = trial_ids(data_key)
 
-train_ratio = 0.5
+train_ratio = 0.4
 output_channel_idxs = [1, 2, 4]
 
 noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
@@ -64,9 +64,9 @@ sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 5 : 7
+n_steps = smoke_test ? 5 : 11
 log_range = (-1.0, 1.0)     # scale families: decades
-delta_range = (-2.0, 2.0)   # location families: units of sigma_x (mu_x) or z (c_x)
+delta_range = (-3.0, 3.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 
 # The box diagnostic is closed-form in (mu_x, sigma_x, c_x) and costs no filter
 # runs, so it is swept wider and finer than the RMSE sweep. That is what lets the
@@ -84,8 +84,10 @@ box_delta_range = (-12.0, 12.0)
 # Normalisation parameters additionally get domain-containment shading.
 focus_params = [
     HybridZuptInsJl.hp_param_name(:yaw, :length_scale),
-    HybridZuptInsJl.stat_param_name(:input_std, 2),
+    HybridZuptInsJl.stat_param_name(:input_std, 3),
     HybridZuptInsJl.stat_param_name(:input_center, 2),
+    HybridZuptInsJl.hp_param_name(:pos_1, :signal_variance),
+    HybridZuptInsJl.stat_param_name(:input_mean, 3),
 ]
 
 if smoke_test
@@ -136,7 +138,7 @@ mkpath(outdir)
 
 time = string(Dates.now())
 base_name = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
-
+##
 make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
     m=m, output_channel_idxs=output_channel_idxs,
@@ -241,7 +243,7 @@ println()
 ## ----- Plot ----------------------------------------------------------------
 # Set `replot_basename` to re-plot a previously saved sweep, or leave it
 # `nothing` to plot the sweep just computed above.
-replot_basename = nothing
+replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -295,8 +297,9 @@ end
 # data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
     HybridZuptInsJl.plot_probe_ranking(plot_df;
-        xlims=(-25.0, 70.0),
-        save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"))
+        xlims=(-35.0, 150.0),
+        save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"),
+        figsize=(900, 475))
 end
 
 # Close-ups, one figure per parameter, sized for the write-up. The ranking
@@ -315,6 +318,7 @@ for focus_param in focus_params
     results_figure() do
         HybridZuptInsJl.plot_param_closeup(plot_df, focus_param;
             box_df=plot_box,
-            save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"))
+            save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"),
+            _ylims=(-5.0, 100.0))
     end
 end

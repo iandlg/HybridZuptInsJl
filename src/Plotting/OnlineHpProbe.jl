@@ -31,7 +31,7 @@ RMSE against the unperturbed baseline. Composed once so the four axes cannot
 drift, and built from [`metric_symbol`](@ref) so renaming the metric is still a
 one-line edit in `MetricLabels.jl`.
 """
-_rmse_change_label() = rich(metric_symbol(:rmse), " change vs baseline [%]")
+_rmse_change_label() = rich(metric_symbol(:rmse), " relative change [%]")
 
 const _PROBE_MULT_XLABEL = "multiplier"
 const _PROBE_OFFSET_XLABEL = "offset"
@@ -69,7 +69,7 @@ function _probe_ticks(probes::AbstractVector{<:Real}, probe_kind::AbstractString
         end
         pos = pos[sort!(idx)]
     end
-    labels = map(p -> (r = round(p; sigdigits=3); isinteger(r) ? string(Int(r)) : string(r)), pos)
+    labels = map(p -> (r=round(p; sigdigits=3); isinteger(r) ? string(Int(r)) : string(r)), pos)
     return (pos, labels)
 end
 
@@ -144,7 +144,7 @@ function plot_probe_sensitivity(
     for row in 1:n_rows, col in 1:n_cols
         spec = grid.specs[row, col]
         isnothing(spec) && continue
-        sub = df[df.parameter.==spec.name, :]
+        sub = df[df.parameter .== spec.name, :]
         if isempty(sub)
             @warn "Missing data for $(spec.name)"
             continue
@@ -200,8 +200,8 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
 
     for (i, pname) in enumerate(params)
         row, col = fldmod1(i, n_cols)
-        bsub = sort(box_df[box_df.parameter.==pname, :], :probe)
-        rsub = df[df.parameter.==pname, :]
+        bsub = sort(box_df[box_df.parameter .== pname, :], :probe)
+        rsub = df[df.parameter .== pname, :]
         kind = first(bsub.probe_kind)
         scale = kind == "multiplicative" ? log10 : identity
         color = hp_param_color(pname)
@@ -234,7 +234,7 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
         # panels per row two labels collide with each other and with the curve,
         # and a data-space y for the text is meaningless when the panels' RMSE
         # ranges differ by an order of magnitude.
-        esub = exits[exits.parameter.==pname, :]
+        esub = exits[exits.parameter .== pname, :]
         crossings = [r.exit_probe for r in eachrow(esub) if !ismissing(r.exit_probe)]
         for x in crossings
             vlines!(ax, x; color=:firebrick, linestyle=:dash, linewidth=2)
@@ -264,49 +264,23 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
     return fig
 end
 
-const _BOX_FILL_ALPHA = 0.75
-
 """
-    _hbox!(ax, y, half_h, b; color, xlo, xhi)
+    _clip_marks!(ax, y, lo_val, hi_val; color, xlo, xhi)
 
-One horizontal box-and-whisker drawn from precomputed geometry `b` (a row of
-[`probe_extremes_summary`](@ref)), clipped to `[xlo, xhi]` with an arrowhead
-wherever a mark is cut off.
+Arrowheads at the frame wherever a row has a mark outside `[xlo, xhi]`.
 
-Drawn by hand rather than through `boxplot!` so the figure and the saved
-`_ranking.csv` cannot disagree: `boxplot!` would recompute the quartiles with its
-own convention, and this figure's numbers are meant to be quotable.
+The x limits are set from the box medians (see [`plot_probe_ranking`](@ref)), so
+whiskers and outliers routinely leave the frame — the input std rows carry a q75
+near +100 against a median of +41. Makie clips them silently; these say a mark was
+cut rather than letting the row look bounded.
 """
-function _hbox!(ax::Axis, y::Real, half_h::Real, b;
+function _clip_marks!(ax::Axis, y::Real, lo_val::Real, hi_val::Real;
     color, xlo::Real, xhi::Real)
 
-    cut(v) = clamp(v, xlo, xhi)
-
-    # Whisker, then box over it, then the median line on top.
-    lines!(ax, [cut(b.whisker_lo), cut(b.whisker_hi)], [y, y]; color=(color, 0.75), linewidth=1)
-
-    lo, hi = cut(b.q25), cut(b.q75)
-    if hi > lo
-        poly!(ax, Rect2f(lo, y - half_h, hi - lo, 2 * half_h);
-            color=(color, _BOX_FILL_ALPHA), strokecolor=color, strokewidth=1.2)
-    else
-        # A degenerate box -- every trial gave the same extreme. `yaw[2]`'s best
-        # case is exactly this: in all 11 trials the best setting *is* the
-        # trained one, so the box collapses onto zero. Drawn as a bar so it is
-        # visible rather than vanishing into the median line.
-        lines!(ax, [lo, lo], [y - half_h, y + half_h]; color=color, linewidth=2.5)
-    end
-    xlo <= b.med <= xhi &&
-        lines!(ax, [b.med, b.med], [y - half_h, y + half_h]; color=color, linewidth=2.5)
-
-    # Clip markers last, or a solid box paints over them -- which is exactly the
-    # case that most needs marking, since a box wide enough to leave the frame
-    # has a whisker leaving it too. Marks the outermost mark that was cut on each
-    # side, whichever it was.
-    for (side, mk) in ((:lo, :ltriangle), (:hi, :rtriangle))
-        v = side === :lo ? min(b.whisker_lo, b.q25) : max(b.whisker_hi, b.q75)
-        isapprox(v, cut(v); rtol=1e-9) && continue
-        scatter!(ax, [cut(v)], [y]; color=color, marker=mk, markersize=11,
+    for (v, mk) in ((lo_val, :ltriangle), (hi_val, :rtriangle))
+        cut = clamp(v, xlo, xhi)
+        isapprox(v, cut; rtol=1e-9) && continue
+        scatter!(ax, [cut], [y]; color=color, marker=mk, markersize=11,
             strokecolor=:white, strokewidth=0.5)
     end
     return nothing
@@ -343,13 +317,25 @@ std rows carry a q75 near +100 while every median fits inside -6% to +41%, so
 letting the boxes set the scale reintroduces exactly the compression this figure
 was rebuilt to remove. Anything past the frame is clipped and marked with an
 arrowhead, and `_ranking.csv` carries the untruncated numbers.
+
+The boxes are Makie's `boxplot!`, the same mark the paired-comparison figures use
+(`_grouped_boxplot!`), so this figure reads in the chapter's usual visual language.
+It hands `boxplot!` the per-trial values from [`probe_extremes_by_trial`](@ref) and
+lets it reduce them, which cannot disagree with the saved CSV: Makie takes its
+quartiles from `Statistics.quantile` and its whiskers from Tukey's 1.5 x IQR rule,
+exactly the conventions [`probe_extremes_summary`](@ref) writes out. The two would
+part company only below four trials, where the summary falls back to min/median/max.
+`probe_extremes_summary` is still called here, for the row order, the median-based
+limits and the clip marks.
 """
 function plot_probe_ranking(df::DataFrame;
     xlims::Union{Nothing,Tuple{Float64,Float64}}=nothing,
     save_path::Union{String,Nothing}=nothing,
-    figsize::Tuple{Int,Int}=(940, 560))
+    show_outliers::Bool=true,
+    figsize::Tuple{Int,Int}=(750, 600))
 
     g = probe_extremes_summary(df)          # sorted by gap, descending
+    ext = probe_extremes_by_trial(df)       # the per-trial values the boxes reduce
     params = unique(g.parameter)
     n = length(params)
 
@@ -369,20 +355,34 @@ function plot_probe_ranking(df::DataFrame;
         xlabel=_rmse_change_label(),
         xtickformat=_HP_PCT_TICKFORMAT,
         yticks=(1:n, [hp_param_label(params[ypos(i)]) for i in 1:n]),
-        title="Sensitivity ranking: best and worst setting found per trial",
-        xgridstyle=:dash, ygridvisible=false)
+        ygridvisible=false)
     vlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
 
+    # One row per parameter, so the boxes can be as tall as the paired figures' are
+    # wide without colliding.
+    box_width = 0.44
     for (i, pname) in enumerate(params)
-        y = ypos(i)
+        y = float(ypos(i))
         c = hp_param_color(pname)
-        sub = g[g.parameter.==pname, :]
-        # Both on one row: they cannot overlap, so the zero line does the work
-        # that a vertical offset and two fill alphas used to.
-        for side in ("best", "worst")
-            _hbox!(ax, y, 0.22, only(eachrow(sub[sub.side.==side, :]));
-                color=c, xlo=xlo, xhi=xhi)
+        sub = ext[ext.parameter .== pname, :]
+        # Both sides on one row: `best <= 0 <= worst` holds per trial by
+        # construction, so they cannot overlap and the zero line does the work that
+        # a vertical offset and two fill alphas used to.
+        for side in (:best, :worst)
+            vals = Float64.(sub[!, side])
+            boxplot!(ax, fill(y, length(vals)), vals;
+                orientation=:horizontal, width=box_width, color=c,
+                show_outliers=show_outliers)
         end
+        # The outermost mark actually drawn on this row, which is what the clip
+        # arrows are about: the raw extreme when outliers are shown, the whisker
+        # otherwise. Leftmost can only come from `best` and rightmost from `worst`.
+        srow(side) = only(eachrow(g[(g.parameter .== pname) .& (g.side .== side), :]))
+        lo_drawn = show_outliers ? minimum(sub.best) :
+                   min(srow("best").whisker_lo, srow("best").q25)
+        hi_drawn = show_outliers ? maximum(sub.worst) :
+                   max(srow("worst").whisker_hi, srow("worst").q75)
+        _clip_marks!(ax, y, lo_drawn, hi_drawn; color=c, xlo=xlo, xhi=xhi)
     end
     xlims!(ax, xlo, xhi)
     # A row of headroom above the top parameter for the two axis annotations.
@@ -433,24 +433,25 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     box_df::Union{DataFrame,Nothing}=nothing,
     save_path::Union{String,Nothing}=nothing,
     max_ticks::Int=5,
-    figsize::Tuple{Int,Int}=(700, 460))
+    figsize::Tuple{Int,Int}=(400, 300),
+    _ylims::Union{Nothing,Tuple{Float64,Float64}}=nothing
+)
 
-    sub = df[df.parameter.==parameter, :]
+    sub = df[df.parameter .== parameter, :]
     isempty(sub) && throw(ArgumentError(
         "plot_param_closeup: \"$parameter\" is not in the frame. Available: " *
-        join(sort(unique(df.parameter[df.parameter.!="baseline"])), ", ")))
+        join(sort(unique(df.parameter[df.parameter .!= "baseline"])), ", ")))
 
     kind = first(sub.probe_kind)
     color = hp_param_color(parameter)
     probes, med, qlo, qhi, n_trials = _probe_summary(sub)
 
     fig = Figure(size=figsize)
-    ax = Axis(fig[2, 1];
+    ax = Axis(fig[1, 1];
         xlabel=_probe_xlabel(kind, first(sub.type)),
         ylabel=_rmse_change_label(),
         xscale=(kind == "multiplicative" ? log10 : identity),
-        ytickformat=_HP_PCT_TICKFORMAT,
-        xgridstyle=:dash, ygridstyle=:dash)
+        ytickformat=_HP_PCT_TICKFORMAT)
 
     # Out-of-box shading goes down first, under everything else.
     shaded = Tuple{Float64,Float64}[]
@@ -466,8 +467,8 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
         end
     end
 
-    hlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
-    vlines!(ax, _probe_identity(kind); color=:gray, linestyle=:dot, linewidth=1)
+    # hlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
+    # vlines!(ax, _probe_identity(kind); color=:gray, linestyle=:dot, linewidth=1)
     n_trials > 1 && band!(ax, probes, qlo, qhi; color=(color, 0.25))
     lines!(ax, probes, med; color=color, linewidth=2.5)
     scatter!(ax, probes, med; color=color, markersize=9)
@@ -478,16 +479,20 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     # what the per-trial lines did here: single trials reach +458% against an IQR
     # topping out near +80%, and they flattened the median curve the figure
     # exists to show.
-    ylo = min(0.0, minimum(qlo), minimum(med))
-    yhi = max(0.0, maximum(qhi), maximum(med))
-    ypad = 0.12 * max(yhi - ylo, eps())
-    ylims!(ax, ylo - ypad, yhi + ypad)
+    if isnothing(_ylims)
+        ylo = min(0.0, minimum(qlo), minimum(med))
+        yhi = max(0.0, maximum(qhi), maximum(med))
+        ypad = 0.12 * max(yhi - ylo, eps())
+        ylims!(ax, ylo - ypad, yhi + ypad)
+    else
+        ylims!(ax, _ylims[1], _ylims[2])
+    end
 
     # Absolute parameter values on a linked top axis. `tested_value` already
     # holds them, so the mapping needs no base value or probe unit.
     abs_at = Dict(round(r.probe; digits=9) => r.tested_value for r in eachrow(sub))
     tickpos = _probe_ticks(probes, kind; max_ticks=max_ticks)[1]
-    ax_top = Axis(fig[2, 1];
+    ax_top = Axis(fig[1, 1];
         xscale=(kind == "multiplicative" ? log10 : identity),
         xaxisposition=:top, xgridvisible=false, ygridvisible=false,
         xticks=(tickpos, [string(round(abs_at[round(t; digits=9)]; sigdigits=3))
@@ -497,29 +502,6 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     hideydecorations!(ax_top)
     linkxaxes!(ax, ax_top)
 
-    # Caption line: what the reader needs to size the claim.
-    ag = probe_agreement(df)
-    a = ag[ag.parameter.==parameter, :]
-    bits = String["baseline $(round(first(sub.base_value); sigdigits=4))"]
-    n_trials > 1 && push!(bits, "$n_trials trials, median and IQR")
-    if nrow(a) == 1
-        star = a.p_value[1] < 0.05 ? ", p = $(round(a.p_value[1]; sigdigits=2))" : ""
-        push!(bits, "$(a.n_agree[1])/$(a.n_trials[1]) agree at the largest effect$star")
-    end
-    if !isnothing(box_df) && parameter in box_df.parameter
-        push!(bits, isempty(shaded) ?
-                    "features stay inside ±LL over the whole probed range" :
-                    "shaded: features outside ±LL")
-    end
-    # `tellwidth=false` on both: otherwise the caption -- which is long, and
-    # longer still for a normalisation parameter carrying the containment note --
-    # sets the column width, pushing the axis out of the frame until the negative
-    # y-tick labels are clipped and the caption itself is truncated.
-    Label(fig[1, 1], hp_param_label(parameter);
-        fontsize=15, font=:bold, halign=:left, tellwidth=false)
-    Label(fig[3, 1], join(bits, "  ·  ");
-        fontsize=9, color=(:black, 0.65), halign=:left, tellwidth=false)
-    rowgap!(fig.layout, 1, 2)
 
     if !isnothing(save_path)
         mkpath(dirname(save_path))
