@@ -98,7 +98,7 @@ end
 # entirely -- the whole point of writing one CSV per run. `nothing` runs the sweep over
 # every entry in `noise_specs` below. The path is taken as given (relative to the repo
 # root, or absolute); it is not resolved against the section directory.
-replot_csv = nothing
+replot_csv = "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-13T15:59:57.326.csv"
 # replot_csv = "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-13T15:59:57.326.csv"
 
 # One repeat per seed, each a random accumulation order. Cost is
@@ -128,13 +128,13 @@ function summarise_more_data(df::DataFrame, label::AbstractString)
         label, METRIC, length(unique(skipmissing(trained.seed))))
     print(rpad("test track", 22), rpad("estimator", 10), rpad("base", 9))
     println(join([rpad("n=$n", 9) for n in steps]))
-    for test_id in sort(unique(trained.test_id), by=t -> first(trained[trained.test_id.==t, :test_order]))
-        tsub = trained[trained.test_id.==test_id, :]
-        bval = first(base[base.test_id.==test_id, METRIC])
+    for test_id in sort(unique(trained.test_id), by=t -> first(trained[trained.test_id .== t, :test_order]))
+        tsub = trained[trained.test_id .== test_id, :]
+        bval = first(base[base.test_id .== test_id, METRIC])
         for est in unique(tsub.estimator)
-            esub = tsub[tsub.estimator.==est, :]
+            esub = tsub[tsub.estimator .== est, :]
             meds = map(steps) do n
-                v = esub[esub.train_set_order.==n, METRIC]
+                v = esub[esub.train_set_order .== n, METRIC]
                 isempty(v) ? NaN : median(v)
             end
             print(rpad(first(tsub.test_name), 22), rpad(est, 10), rpad(round(bval; digits=3), 9))
@@ -150,16 +150,16 @@ expected small but nonzero."""
 function summarise_order_invariance(df::DataFrame, label::AbstractString)
     trained = df[df.train_set .!= "Base", :]
     n_max = maximum(skipmissing(trained.train_set_order))
-    fin = trained[trained.train_set_order.==n_max, :]
+    fin = trained[trained.train_set_order .== n_max, :]
 
     @printf("\n=== %s : final step, n=%d tracks, %d orders ===\n",
         label, n_max, length(unique(skipmissing(fin.seed))))
     println(rpad("test track", 22), rpad("estimator", 10),
         rpad("min", 11), rpad("median", 11), rpad("max", 11), "rel spread")
-    for test_id in sort(unique(fin.test_id), by=t -> first(fin[fin.test_id.==t, :test_order]))
-        tsub = fin[fin.test_id.==test_id, :]
+    for test_id in sort(unique(fin.test_id), by=t -> first(fin[fin.test_id .== t, :test_order]))
+        tsub = fin[fin.test_id .== test_id, :]
         for est in unique(tsub.estimator)
-            v = tsub[tsub.estimator.==est, METRIC]
+            v = tsub[tsub.estimator .== est, METRIC]
             isempty(v) && continue
             med = median(v)
             print(rpad(first(tsub.test_name), 22), rpad(est, 10),

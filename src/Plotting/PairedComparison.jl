@@ -172,11 +172,9 @@ function plot_dataset_paired_relative_change(
     paired::DataFrame;
     value_col::Symbol=:rel_change_pct,
     metric::Symbol=:rmse,
-    reference_label::AbstractString="baseline",
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
-    show_subtitle::Bool=true,
 )
     check_metric(metric)
     value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
@@ -198,11 +196,6 @@ function plot_dataset_paired_relative_change(
         xlabel="Dataset",
         ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
                rich("change in ", metric_label(metric)),
-        title="Per-trial change vs \"$reference_label\"",
-        subtitle=(!show_subtitle ? "" :
-                  as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
-                  "estimator − $reference_label, per trial"),
-        subtitlesize=10,
         xticklabelsize=14,
     )
     as_pct && (ax.ytickformat = vs -> [string(round(v; digits=1), "%") for v in vs])

@@ -51,15 +51,6 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
 # read for a claim; the boxplot is the distributional summary.
 const SECTION = "2_HypSensitivity/DatasetComparison"
 
-results_figure() do
-    HybridZuptInsJl.boxplot_dataset_comparison(
-        results_df;
-        metric=:rmse_rate,
-        train_ratio=0.5,
-        save_path=stamped(SECTION, "dataset_comparison"),
-    )
-end
-
 # Same trials go through every estimator, so the design is paired. Box the
 # per-trial difference against the uncorrected baseline rather than reading two
 # independent-looking boxes side by side.
@@ -70,10 +61,21 @@ results_figure() do
     HybridZuptInsJl.plot_dataset_paired_relative_change(
         paired;
         metric=:rmse,
-        reference_label="ZUPT only",
         show_points=false,
         show_outliers=true,
-        show_subtitle=false,
+        save_path=stamped(SECTION, "dataset_comparison_paired"),
+    )
+end
+
+paired = HybridZuptInsJl.paired_estimator_contrast(
+    results_df; metric=:rmse_yaw, reference_estimator="ZUPT only")
+
+results_figure() do
+    HybridZuptInsJl.plot_dataset_paired_relative_change(
+        paired;
+        metric=:rmse_yaw,
+        show_points=false,
+        show_outliers=true,
         save_path=stamped(SECTION, "dataset_comparison_paired"),
     )
 end
