@@ -131,13 +131,14 @@ Plot a heatmap of the correlation matrix with colorbar and annotated values.
 function plot_correlation_heatmap(corr_mat::Matrix{Float64},
     input_labels::Vector{String},
     output_labels::Vector{String};
+    figsize::Tuple{Int,Int}=(600, 500),
     title::String="Input-Output Correlation Heatmap")
 
     n_in, n_out = size(corr_mat)   # rows: input features, cols: outputs
     @assert length(input_labels) == n_in
     @assert length(output_labels) == n_out
 
-    fig = Figure(size=(600, 500))
+    fig = Figure(size=figsize)
     ax = Axis(fig[1, 1],
         xaxisposition=:top,            # input labels at the top
         yaxisposition=:left,           # output labels at the left
@@ -145,26 +146,32 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
         yticks=(1:n_out, output_labels),
         xticklabelrotation=0,          # no rotation
         yreversed=true,                # outputs top-to-bottom, matching their order
-        title=title,
+        # title=title,
         xlabel="Input features",
         ylabel="Output corrections",
         xgridvisible=false,
         ygridvisible=false)
 
-    # z matrix: rows = outputs (y-axis), columns = inputs (x-axis)
-    hm = heatmap!(ax, 1:n_in, 1:n_out, (corr_mat) .^ 2)
+    # z matrix: rows = outputs (y-axis), columns = inputs (x-axis).
+    # Signed correlation on a diverging map centred at 0, so sign is readable and
+    # the zero point is the neutral colour rather than an arbitrary midpoint.
+    hm = heatmap!(ax, 1:n_in, 1:n_out, corr_mat; colormap=:berlin, colorrange=(-1, 1))
 
     # Add text annotations
     for i in 1:n_in, j in 1:n_out
-        val = corr_mat[i, j]^2
-        if val >= 0.1
-            text!(ax, i, j, text="$(round(val, digits=2))";
-                color=:black,
-                align=(:center, :center))
-        end
+        val = corr_mat[i, j]
+        # if abs(val) >= 0.1
+        text!(ax, i, j, text="$(round(val, digits=2))";
+            color=:white,
+            align=(:center, :center))
+        # end
     end
-    # Horizontal colorbar below the heatmap
-    Colorbar(fig[2, 1], hm, label="R²", vertical=false)
+    # Horizontal colorbar below the heatmap. `spinewidth=0` is what drops its black frame --
+    # Colorbar ignores the `*spinevisible` attributes it advertises (Makie 0.24).
+    Colorbar(fig[2, 1], hm, label="Correlation", vertical=false, spinewidth=0)
+
+    # The cells tile the whole axis, so the spines only draw a black border on top of them.
+    hidespines!(ax)
 
     return fig
 end
@@ -176,7 +183,7 @@ Plot the canonical correlations as a bar chart.
 """
 function plot_canonical_correlations(canonical_corrs::Vector{Float64}, n_components::Int; title::String="Canonical Correlations")
     fig = Figure(size=(600, 400))
-    ax = Axis(fig[1, 1], xlabel="Canonical Variate", ylabel="Canonical Correlation", title=title)
+    ax = Axis(fig[1, 1], xlabel="Canonical Variate", ylabel="Canonical Correlation")
     bar_positions = 1:n_components
     bars = barplot!(ax, bar_positions, canonical_corrs[1:n_components], color=:steelblue)
     # Add value labels on top of bars

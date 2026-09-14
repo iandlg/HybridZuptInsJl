@@ -108,8 +108,8 @@ function plot_regression_results(
                     is_compatible(gt_trim, pred_trim) ||
                         throw(ArgumentError(
                             "Series '$method_name' is not compatible with ground truth " *
-                            "(different lengths or timestamps differ > 1e-9). " *
-                            "Truncate first or resample."))
+                                "(different lengths or timestamps differ > 1e-9). " *
+                                "Truncate first or resample."))
                     for (plot_idx, row) in enumerate(rows)
                         rmse[plot_idx] = sqrt(mean(
                             (pred_trim.data[row, :] .- gt_trim.data[row, :]) .^ 2))
@@ -495,6 +495,11 @@ const _REGRESSION_PANELS = [
 const _REGRESSION_TARGET_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
 
 """
+Heading is the one channel of `_REGRESSION_PANELS` carrying large isolated spikes, so it is
+"""
+const _REGRESSION_HEADING_CHANNEL = 4
+
+"""
 Wong index per series: yellow for the static corrector, green for the HSGP one. Distinct
 from `_METHOD_COLOR_INDICES` (which colours whole *trajectories*) because this figure has
 no ZUPT-only series and gives grey to the target instead.
@@ -515,24 +520,29 @@ its ±1σ band, and one shared legend below the panels instead of one per axis.
 Target is grey, `"Static"` wong yellow and `"HSGP"` wong green; any other series name falls
 back to [`method_color`](@ref). Per-panel RMSE against the target goes in the panel title,
 which is where it has to live once there is a single legend.
+
+Each panel is scaled to the plotted lines -- target and predictions, plus 10% padding --
+rather than to the ±1σ bands around them; the heading panel uses their central 98% instead,
+cropping its outlier spikes.
 """
 function plot_regression_panels(
     pred_data::AbstractDict{String,CorrectionIO},
     true_data::CorrectionIO;
     show_std::Bool=true,
-    save_path::Union{String,Nothing}=nothing
+    save_path::Union{String,Nothing}=nothing,
+    figsize::Tuple{Int,Int}=(600, 500)
 )
     size(true_data.data, 1) == 4 ||
         throw(ArgumentError("expected a 4-row correction vector, got $(size(true_data.data, 1))"))
 
-    fig = Figure(size=(900, 800))
+    fig = Figure(size=figsize)
     axes = Axis[]
 
     for (idx, (ch, name, ylabel)) in enumerate(_REGRESSION_PANELS)
         last_panel = idx == length(_REGRESSION_PANELS)
 
         ax = Axis(fig[idx, 1];
-            title=name,
+            # title=name,
             ylabel=ylabel,
             xlabel=last_panel ? "Time [s]" : "",
             xgridvisible=true,
@@ -549,6 +559,15 @@ function plot_regression_panels(
                 (show_std && !isnothing(pred.data_std)) ? pred.data_std[ch, :] : nothing;
                 color=_regression_color(series), label=series)
         end
+
+        # The heading channel spikes where a stride's yaw estimate breaks down; its window
+        # comes from a central quantile so those outliers don't flatten the rest.
+        vals = vcat(true_data.data[ch, :], (io.data[ch, :] for io in values(pred_data))...)
+        lo, hi = quantile(vals, 0.01), quantile(vals, 1 - 0.01)
+
+
+        pad = 0.3 * max(hi - lo, eps())
+        ylims!(ax, lo - pad, hi + pad)
     end
 
     linkxaxes!(axes...)

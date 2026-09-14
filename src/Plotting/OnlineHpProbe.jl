@@ -440,7 +440,7 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     sub = df[df.parameter .== parameter, :]
     isempty(sub) && throw(ArgumentError(
         "plot_param_closeup: \"$parameter\" is not in the frame. Available: " *
-        join(sort(unique(df.parameter[df.parameter .!= "baseline"])), ", ")))
+            join(sort(unique(df.parameter[df.parameter .!= "baseline"])), ", ")))
 
     kind = first(sub.probe_kind)
     color = hp_param_color(parameter)
@@ -467,8 +467,6 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
         end
     end
 
-    # hlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
-    # vlines!(ax, _probe_identity(kind); color=:gray, linestyle=:dot, linewidth=1)
     n_trials > 1 && band!(ax, probes, qlo, qhi; color=(color, 0.25))
     lines!(ax, probes, med; color=color, linewidth=2.5)
     scatter!(ax, probes, med; color=color, markersize=9)

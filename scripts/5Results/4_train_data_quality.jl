@@ -29,15 +29,15 @@ estimators = OrderedDict(
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 train_labels = OrderedDict(
-    6 => "CWRectangle_long",
-    3 => "CCWRectangle_long_A",
-    4 => "FigureEight_long",
-    5 => "S_shape_long",
+    6 => "CW Rectangle Long",
+    3 => "CCW Rectangle Long",
+    4 => "Figure Eight Long",
+    5 => "S Shape Long",
 )
 test_labels = OrderedDict(
-    1 => "CWRectangle_short",
-    14 => "CCWRectangle_long_B",
-    2 => "FigureEight_short",
+    1 => "CW Rectangle Short",
+    14 => "CCW Rectangle Short",
+    2 => "Figure Eight Short",
 )
 # Choose Parameters file
 hsgp_p_key = 42

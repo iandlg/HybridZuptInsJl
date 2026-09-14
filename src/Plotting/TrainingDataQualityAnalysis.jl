@@ -38,6 +38,10 @@ function plot_train_data_quality(
     est_color = Dict(estimators[i] => colors[mod1(i + 1, length(colors))] for i in 1:n_est)
     baseline_color = colors[1]
 
+    # One scale for every panel: with free scales the panel holding the worst cell
+    # rescales to absorb it, so bars are not comparable across panels.
+    ymax = 1.12 * maximum(df[:, metric])
+
     fig = Figure(size=(450 * n_cols, 450 * n_rows))
 
     for (idx, test_id) in enumerate(test_ids)
@@ -64,6 +68,7 @@ function plot_train_data_quality(
             title="Tested on $test_name",
             ylabel=metric_name,
             xgridvisible=false)
+        ylims!(ax, 0, ymax)
 
         group_width = 0.8
         bar_width = n_est > 0 ? group_width / n_est : group_width
@@ -73,7 +78,7 @@ function plot_train_data_quality(
 
         if !isnan(baseline_val)
             barplot!(ax, [1.0], [baseline_val]; color=baseline_color, width=0.6)
-            text!(ax, 1.0, baseline_val; text="$(round(baseline_val, digits=2))",
+            text!(ax, 1.0, baseline_val; text=@sprintf("%.2f", baseline_val),
                 align=(:center, :bottom), fontsize=9)
         end
 
@@ -89,7 +94,7 @@ function plot_train_data_quality(
                 xpos = group_center + offsets[j]
 
                 barplot!(ax, [xpos], [val]; color=est_color[est], width=bar_width * 0.9)
-                text!(ax, xpos, val; text="$(round(val, digits=2))",
+                text!(ax, xpos, val; text=@sprintf("%.2f", val),
                     align=(:center, :bottom), fontsize=8)
             end
 
@@ -99,6 +104,14 @@ function plot_train_data_quality(
 
         ax.xticks = (xticks_pos, xticks_lab)
         ax.xticklabelrotation = π / 6
+        # Panels share one scale, so only the leftmost carries the y label and ticks.
+        # Set the three properties directly rather than via hideydecorations!, which
+        # takes the horizontal gridlines with it.
+        if col_i != 1
+            ax.ylabelvisible = false
+            ax.yticklabelsvisible = false
+            ax.yticksvisible = false
+        end
     end
 
     legend_elems = [PolyElement(color=baseline_color)]

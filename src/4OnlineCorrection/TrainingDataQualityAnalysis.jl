@@ -31,7 +31,7 @@ function training_data_quality_analysis(
     feature_type::FeatureType=THREED_STEP,
     test_tr_ratio::Float64=0.1,
     train_tr_ratio::Float64=1.0,
-    base_estimator::Tuple{<:AbstractString,<:Any}=("ZUPT INS", BaseEstimator),
+    base_estimator::Tuple{<:AbstractString,<:Any}=("ZUPT only", BaseEstimator),
 )::DataFrame
 
     results = DataFrame(
