@@ -13,7 +13,7 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("_common.jl")
-using OrderedCollections, DataFrames
+using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
 
 const SECTION = "5_NoiseRobustness/MoreData"
@@ -28,13 +28,35 @@ TEST_ID = 2
 # spec a table came from. Paths are taken as given (relative to the repo root, or
 # absolute), like `replot_csv` in the sibling script.
 panel_csvs = OrderedDict{String,String}(
-    "No Noise" =>
-        "out/Results/5_NoiseRobustness/MoreData/multi_track_training_no_noise_2026-09-15T10:08:24.321.csv",
-    "Position & Heading Noise (0.1m, ±10°)" =>
-        "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos0.1_att10_2026-09-13T17:13:06.292.csv",
-    "Position & Heading Noise (1.0m, ±10°)" =>
-        "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-13T17:02:53.743.csv",
+    "No Noise" => "out/Results/5_NoiseRobustness/MoreData/multi_track_training_no_noise_2026-09-15T11:10:37.055.csv",
+    "Position & Heading Noise (0.1m, ±10°)" => "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos0.1_att10_2026-09-15T11:29:30.728.csv",
+    "Position & Heading Noise (1.0m, ±10°)" => "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-15T11:48:25.205.csv",
 )
+
+"""Relative standard deviation (std/mean) of the metric at the final accumulation step,
+one row per panel. Every repeat has trained on the same set of tracks there, in a
+different sequence, so what is left is order sensitivity alone (notes/006)."""
+function summarise_order_rsd(df::DataFrame, test_id::Int)
+    sub = df[(df.test_id .== test_id) .& (df.train_set .!= "Base"), :]
+    isempty(sub) && error("no trained rows for test_id $test_id; have $(sort(unique(df.test_id)))")
+
+    @printf("\n=== %s : final step RSD over accumulation orders ===\n", first(sub.test_name))
+    println(rpad("noise spec", 40), rpad("estimator", 10), rpad("n", 4),
+        rpad("mean", 11), rpad("std", 13), "rsd")
+    for tag in unique(sort(sub, :noise_spec_order).noise_spec_tag)
+        psub = sub[sub.noise_spec_tag .== tag, :]
+        n_max = maximum(skipmissing(psub.train_set_order))
+        fin = psub[psub.train_set_order .== n_max, :]
+        for est in unique(fin.estimator)
+            v = fin[fin.estimator .== est, METRIC]
+            length(v) < 2 && continue
+            mu, sd = mean(v), std(v)
+            print(rpad(tag, 40), rpad(est, 10), rpad(n_max, 4),
+                rpad(round(mu; sigdigits=5), 11), rpad(round(sd; sigdigits=4), 13))
+            @printf("%.2e  (%d draws)\n", sd / mu, length(v))
+        end
+    end
+end
 
 # `noise_spec_tag`/`noise_spec_order` are the group/order column pair the plotting code
 # facets on everywhere else in this section; they are added here because the sweep that
@@ -56,3 +78,5 @@ results_figure() do
         save_path=stamped(SECTION, "multi_track_training_noise_panels_$(test_name)"),
     )
 end
+
+summarise_order_rsd(df, TEST_ID)

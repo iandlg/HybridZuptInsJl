@@ -68,8 +68,8 @@ test_labels = Dict(
         15 => "Walk_Patrick_mixed",
     ),
     "DCSC" => OrderedDict(
-        1 => "CWRectangle_short",
-        14 => "CCWRectangle_long_B",
+        # 1 => "CWRectangle_short",
+        # 14 => "CCWRectangle_long_B",
         2 => "FigureEight_short",
     )
 )[data_key]
@@ -104,15 +104,15 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 5
+N_REPEATS = 15
 SEEDS = collect(1:N_REPEATS)
 
 noise_specs = OrderedDict(
     "no_noise" => HybridZuptInsJl.NoiseSpec(; tag="No Noise"),
-    # "pos0.1_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
-    #     tag="Position & Heading Noise (0.1m, ±10°)"),
-    # "pos1.0_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
-    #     tag="Position & Heading Noise (1.m, ±10°)"),
+    "pos0.1_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
+        tag="Position & Heading Noise (0.1m, ±10°)"),
+    "pos1.0_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
+        tag="Position & Heading Noise (1.m, ±10°)"),
 )
 
 const SECTION = "5_NoiseRobustness/MoreData"

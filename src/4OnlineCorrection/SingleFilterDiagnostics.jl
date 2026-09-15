@@ -2,7 +2,9 @@
 Consistency diagnostics for the ZUPT-aided INS + HSGP correction filter.
 
 Provides:
-  * `StepDiagnostics`  – per-step record filled inside the filter loop
+  * `StepDiagnostics`  – per-step record filled inside the V1 filter loop
+  * `CorrectorDiagnostics` – per-footfall record of a V2 corrector's own state and Σ,
+    with `corrector_nees_series` / `pos_cov_trace` reading it
   * `nees_series`      – post-hoc NEES per state block, with chi-square bounds
   * `autocorr`         – innovation whiteness test with significance bands
   * `noise_state_correlation` – direct test of the Kalman independence assumption
@@ -101,6 +103,100 @@ function record_step!(diagnostics::StepDiagnostics;
     push!(diagnostics.trace_P_post, tr(P_post))
     return diagnostics
 end
+
+# =====================================================================
+# Per-footfall record, decoupled corrector (V2)
+# =====================================================================
+
+"""
+Per-footfall record of an `AbstractEstimator`'s own state and covariance, filled
+by `hybrid_zupt_aided_insv2` when it is handed one.
+
+The V2 correctors keep `Σ` as a *single* 6×6 matrix over `[pos(1:3); att(4:6)]`
+and overwrite it every footfall, so after a run only the final value survives.
+Anything that wants the series -- NEES, the covariance trace -- has to be
+recorded while the filter runs, which is what this is for.
+
+`k` is the IMU sample index of the footfall, so every series indexes the same
+axis as the V1 diagnostics and the `split_k` divider in the plots.
+"""
+Base.@kwdef struct CorrectorDiagnostics
+    k::Vector{Int} = Int[]
+    t::Vector{Float64} = Float64[]
+    pos::Vector{Vector{Float64}} = Vector{Float64}[]
+    quat::Vector{Vector{Float64}} = Vector{Float64}[]
+    Σ::Vector{Matrix{Float64}} = Matrix{Float64}[]
+end
+
+Base.length(d::CorrectorDiagnostics) = length(d.k)
+
+"""
+    record_corrector!(d, c; k, t)
+
+Snapshot the corrector at one footfall. Call it *after* `relinearize!`, so the
+record is the posterior -- state and `Σ` after whichever update that footfall
+took (mocap in the train half, GP in the test half).
+
+`Σ` is copied rather than aliased: the next `dynamic_update!` writes the same
+matrix in place.
+"""
+function record_corrector!(d::CorrectorDiagnostics, c::AbstractEstimator; k::Int, t::Float64)
+    push!(d.k, k)
+    push!(d.t, t)
+    push!(d.pos, collect(c.pos[:, c.i]))
+    push!(d.quat, collect(c.quat[:, c.i]))
+    push!(d.Σ, Matrix(c.Σ[1:6, 1:6]))
+    return d
+end
+
+"""
+    corrector_nees_series(d, gt_traj; att_convention, include_vel)
+
+NEES of a decoupled corrector against ground truth, per footfall. An adapter
+onto [`nees_series`](@ref) rather than a second implementation of it: the 6×6
+`[pos; att]` covariance is embedded into the 9-state layout that function
+expects (position 1:3, attitude 7:9, velocity block left at zero and never
+read), and ground truth is subsampled to the footfall samples with `gt_traj[d.k]`.
+
+The returned `k` is relabelled to the IMU sample indices, so the result drops
+straight into `plot_nees_comparison` alongside a `split_k` divider.
+
+`att_convention` defaults to `:left` here, NOT to `nees_series`'s `:right`:
+`relinearize!` on the decoupled correctors applies `quat_exp(δθ) * q`, a left
+perturbation, so the attitude error matching their `Σ[4:6,4:6]` is
+`logmap(R_gt * R_est')`. Position NEES is unaffected either way.
+"""
+function corrector_nees_series(d::CorrectorDiagnostics, gt_traj;
+    att_convention::Symbol=:left, include_vel::Bool=false)
+
+    n = length(d)
+    n == 0 && error("No footfalls recorded; pass `diagnostics=` to hybrid_zupt_aided_insv2.")
+
+    x = zeros(9, n)
+    P = zeros(9, 9, n)
+    quat = zeros(4, n)
+    for i in 1:n
+        x[1:3, i] = d.pos[i]
+        quat[:, i] = d.quat[i]
+        P[1:3, 1:3, i] = d.Σ[i][1:3, 1:3]
+        P[7:9, 7:9, i] = d.Σ[i][4:6, 4:6]
+    end
+
+    nees = nees_series(x, P, quat, gt_traj[d.k];
+        ks=1:n, att_convention=att_convention, include_vel=include_vel)
+    return (; nees..., k=copy(d.k))
+end
+
+"""
+    pos_cov_trace(d)
+
+`tr(Σ[1:3,1:3])` per footfall -- the position uncertainty the corrector reports,
+and the matrix `corrector_nees_series` scores its position error against. Read
+the two together: a trace that falls while NEES rises is a shrink the estimator
+has not earned.
+"""
+pos_cov_trace(d::CorrectorDiagnostics) =
+    (k=copy(d.k), trace=[tr(S[1:3, 1:3]) for S in d.Σ])
 
 # =====================================================================
 # 1. NEES  (state consistency)

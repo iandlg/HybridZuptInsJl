@@ -9,7 +9,12 @@ function hybrid_zupt_aided_insv2(
     ref_frame::ReferenceFrame=HEADING,
     feature_type::FeatureType=THREED_STEP,
     init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing,
-    posyaw_measurement_update::Bool=true
+    posyaw_measurement_update::Bool=true,
+    # Opt-in per-footfall record of the corrector's own state and Σ. `nothing`
+    # (the default) reproduces the previous behaviour exactly; the return tuple
+    # is unchanged either way, which is what keeps the ~19 existing call sites
+    # working. See `CorrectorDiagnostics` in SingleFilterDiagnostics.jl.
+    diagnostics::Optional{CorrectorDiagnostics}=nothing
 )
     is_compatible(inertial, gt_traj) ||
         throw(ArgumentError("TimeSeries need to be aligned."))
@@ -240,6 +245,12 @@ function hybrid_zupt_aided_insv2(
 
         end
         relinearize!(corrector)
+
+        # Recorded after relinearize!, so this is the posterior: the state and Σ
+        # left by whichever update this footfall took -- mocap in the train
+        # half, the GP correction in the test half.
+        isnothing(diagnostics) || record_corrector!(diagnostics, corrector;
+            k=curr_step, t=inertial.t[curr_step])
     end
 
     return zupt, step_seg, get_trajectory(corrector), io_data, get_model(corrector)
