@@ -43,7 +43,7 @@ train_ratio = 0.3
 
 # Only the yaw channel is corrected, matching section 3 -- that is the setting in
 # which HSGP and static came out level.
-output_channels = [:yaw]
+output_channels = [:pos_1, :pos_2, :yaw]
 
 ## 3. Length scales to compare
 # Index 2 of a channel's hyperparameter vector is the length scale
@@ -176,8 +176,9 @@ results_figure() do
     HybridZuptInsJl.plot_regression_comparison(predictions, target;
         channel=4, segment=:full, train_ratio=train_ratio,
         colors=series_colors, labels=series_labels,
-        linestyles=series_styles, linewidths=series_widths, clip_quantile=1.1,
-        time_window=(400.0, 440.0),
+        linestyles=series_styles, linewidths=series_widths, clip_quantile=0.95,
+        # time_window=(400.0, 440.0),
+        figsize=(900, 300),
         dataset=data_key, trial_id=trial_id, show_std=false,
         save_path=stamped(SECTION, "yaw_length_scale_$(data_key)$(trial_id)_zoom"))
 end
