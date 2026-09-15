@@ -167,11 +167,13 @@ function plot_noise_paired_relative_change(
     dataset_name::AbstractString;
     value_col::Symbol=:rel_change_pct,
     metric::Symbol=:rmse_rate,
-    reference_label::AbstractString="baseline",
+    _ylims::Union{Tuple{Float64,Float64}}=nothing,
+    # reference_label::AbstractString="baseline",
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
-    show_subtitle::Bool=true,
+    # show_subtitle::Bool=true,
+    figsize::Tuple{Int,Int}=(900, 600)
 )
     check_metric(metric)
     value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
@@ -181,17 +183,17 @@ function plot_noise_paired_relative_change(
     isempty(sub) && error("No rows found for dataset_name = $dataset_name")
 
     as_pct = value_col === :rel_change_pct
-    fig = Figure(size=(900, 600))
+    fig = Figure(size=figsize)
     ax = Axis(fig[1, 1],
-        xlabel="Noise specification",
         # Kept short on purpose: spelling the formula out here overflows the axis
         # once `reference_label` is a real estimator name. The subtitle carries it.
         ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
                rich("change in ", metric_label(metric)),
-        title="Paired per-trial change vs \"$reference_label\" — $dataset_name",
-        subtitle=!show_subtitle ? "" :
-                 as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
-                 "estimator − $reference_label, per trial",
+        # title="Paired per-trial change vs \"$reference_label\" — $dataset_name",
+        # subtitle=(!show_subtitle ? "" :
+        #           as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
+        #           "estimator − $reference_label, per trial"
+        # ),
         subtitlesize=10,
         xticklabelsize=14,
         xticklabelrotation=π / 6,
@@ -204,6 +206,9 @@ function plot_noise_paired_relative_change(
 
     if !isempty(labeled)
         Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
+    end
+    if !isnothing(_ylims)
+        ylims!(ax, _ylims[1], _ylims[2])
     end
 
     isnothing(save_path) || save(save_path, fig)
@@ -309,6 +314,112 @@ function plot_multi_track_training_quality(
         orientation=:horizontal, tellwidth=false)
 
     # ----- Save or return -----
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+"""
+    plot_multi_track_training_noise_panels(df, test_id; metric=:rmse, save_path=nothing)
+
+One panel per noise specification, all showing the **same** test track: `metric` against
+the number of accumulated training tracks, estimators side by side, with the untrained
+baseline as a dashed line in its own method colour. This is
+[`plot_multi_track_training_quality`](@ref) faceted the other way round — that figure
+holds the noise spec fixed and varies the test track, this one holds the test track fixed
+and varies the noise, which is the comparison the experiment exists for: how the same
+recovery curve changes as the training ground truth gets worse.
+
+`df` is several `multi_track_training_analysis` frames stacked, each carrying the
+`noise_spec_tag` / `noise_spec_order` columns that say which panel it is and where the
+panel goes. The sweep does not produce those columns — one run is one noise spec — so the
+caller adds them when it loads the per-spec tables.
+
+The baseline is the same number in every panel (training noise cannot touch a test track
+whose GT stays clean), which is the cross-check that the panels really are one test track.
+
+The y axis is linked and linear across panels, as in the sibling figure: the panels span
+a factor of ~20 in `metric`, so the clean panel reads nearly flat against the noisy ones
+— that compression is the cost of the noise and is the thing being shown.
+"""
+function plot_multi_track_training_noise_panels(
+    df::DataFrame,
+    test_id::Integer;
+    metric::Symbol=:rmse,
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=true,
+)
+    check_metric(metric)
+    _require_cols(df, [:noise_spec_tag, :noise_spec_order], "plot_multi_track_training_noise_panels")
+
+    sub_all = df[df.test_id .== test_id, :]
+    if isempty(sub_all)
+        available = join(["$(r.test_id) ($(r.test_name))" for r in eachrow(unique(df, :test_id))], ", ")
+        throw(ArgumentError("plot_multi_track_training_noise_panels: no rows with \
+                             test_id = $test_id. Available: $available"))
+    end
+    test_name = first(sub_all.test_name)
+
+    # ----- Determine panel order (the order the caller declared the specs in) -----
+    spec_order_map = Dict{Any,Int}()
+    for row in eachrow(sub_all)
+        spec_order_map[row.noise_spec_tag] = row.noise_spec_order
+    end
+    specs = sort(unique(sub_all.noise_spec_tag), by=s -> spec_order_map[s])
+    n_panels = length(specs)
+
+    base_df = sub_all[sub_all.train_set .== "Base", :]          # baseline (no training)
+    trained_df = sub_all[sub_all.train_set .!= "Base", :]       # all trained steps
+
+    fig = Figure(size=(450 * n_panels, 450))
+    axs = Axis[]
+    legend_ax = nothing
+
+    for (idx, spec) in enumerate(specs)
+        sub = trained_df[trained_df.noise_spec_tag .== spec, :]
+        isempty(sub) && continue
+
+        ax = Axis(fig[1, idx];
+            title=string(spec),
+            xlabel="Training tracks accumulated",
+            ylabel=metric_label(metric),
+            yscale=log10,
+            xgridvisible=false)
+        push!(axs, ax)
+
+        # Baseline first, so it leads the legend, named and coloured from the dataframe's
+        # own baseline rows rather than a literal here -- same reasoning as the sibling
+        # figure. It is drawn per panel even though it is one number: it is what each
+        # panel's boxes are read against.
+        base_rows = base_df[base_df.noise_spec_tag .== spec, :]
+        if !isempty(base_rows)
+            hlines!(ax, [first(base_rows[:, metric])];
+                color=method_color(first(base_rows.estimator)),
+                linestyle=:dash, linewidth=3, label=first(base_rows.estimator))
+        end
+
+        _grouped_boxplot!(ax, sub, metric;
+            group_col=:train_set_order, group_order_col=:train_set_order,
+            show_outliers=show_outliers, show_points=show_points)
+
+        legend_ax = ax
+    end
+
+    # ----- Share one y scale across panels -----
+    # Same metric on the same test track, so a panel that autoscaled on its own would draw
+    # its boxes at the same height as a panel whose errors are an order of magnitude
+    # larger -- which is exactly the difference this figure is about.
+    if length(axs) > 1
+        linkyaxes!(axs...)
+        for ax in axs[2:end]
+            hideydecorations!(ax; grid=false)
+        end
+    end
+
+    Label(fig[0, 1:n_panels], "Tested on $(test_name)"; fontsize=17, font=:bold)
+    isnothing(legend_ax) || Legend(fig[2, 1:n_panels], legend_ax;
+        orientation=:horizontal, tellwidth=false)
+
     isnothing(save_path) || save(save_path, fig)
     return fig
 end
