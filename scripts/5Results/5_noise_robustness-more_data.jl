@@ -98,7 +98,7 @@ end
 # entirely -- the whole point of writing one CSV per run. `nothing` runs the sweep over
 # every entry in `noise_specs` below. The path is taken as given (relative to the repo
 # root, or absolute); it is not resolved against the section directory.
-replot_csv = "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-13T15:59:57.326.csv"
+replot_csv = nothing
 # replot_csv = "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-13T15:59:57.326.csv"
 
 # One repeat per seed, each a random accumulation order. Cost is
@@ -108,10 +108,11 @@ N_REPEATS = 5
 SEEDS = collect(1:N_REPEATS)
 
 noise_specs = OrderedDict(
-    "pos1.0_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
-        tag="Position & Heading Noise (1.m, ±10°)"),
-    "pos0.1_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
-        tag="Position & Heading Noise (0.1m, ±10°)"),
+    "no_noise" => HybridZuptInsJl.NoiseSpec(; tag="No Noise"),
+    # "pos0.1_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
+    #     tag="Position & Heading Noise (0.1m, ±10°)"),
+    # "pos1.0_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
+    #     tag="Position & Heading Noise (1.m, ±10°)"),
 )
 
 const SECTION = "5_NoiseRobustness/MoreData"

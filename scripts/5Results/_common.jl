@@ -121,6 +121,15 @@ function results_path(section::AbstractString, filename::AbstractString)::String
 end
 
 """
+    file_stem(path) -> String
+
+File name of `path` without its directory or extension. Use it to name a figure
+after the results table it was plotted from, so a figure re-plotted from an old
+table is identified by that table rather than by the moment it was re-drawn.
+"""
+file_stem(path::AbstractString)::String = first(splitext(basename(path)))
+
+"""
     stamped(section, name; ext="svg") -> String
 
 Timestamped output path. The timestamp goes *last* so `ls` sorts by experiment

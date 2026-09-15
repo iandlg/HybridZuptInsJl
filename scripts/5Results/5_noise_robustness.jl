@@ -21,7 +21,8 @@
 # what makes figure 2 a paired comparison.
 #
 # Set `results_csv` below to re-plot a finished sweep from its scores CSV instead
-# of paying for it again.
+# of paying for it again. The figures are then named after that CSV's stem, so a
+# re-plot stays traceable to the sweep it came from.
 
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
@@ -42,12 +43,10 @@ data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
     # "DCSC" => (data_dir(data_key), trial_ids(data_key)),
 )
 
-# Set this to the file name of a scores CSV under
-# out/Results/5_NoiseRobustness/NoiseSweep/data/ to re-plot a finished sweep instead
-# of recomputing it, e.g.
-# results_csv = "noise_results_ANG2_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T09:12:33.123.csv"
-# `nothing` runs the sweep and writes a fresh CSV.
-results_csv = nothing
+# noise_results_ANG2_HEADING_TWOD_STEP_YAW_5draws_2026-09-12T12:31:55.563.csv
+# noise_results_DCSC_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T16:55:33.086.csv
+
+results_csv = "noise_results_DCSC_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T16:55:33.086.csv"
 
 # 2. Align INS / GT trajectories for every trial
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
@@ -103,6 +102,11 @@ score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_rat
     :estimator, :estimator_order, :noise_spec_tag, :noise_spec_order, :seed,
     :rmse, :rmse_rate, :rmse_yaw]
 
+# Stem shared by the scores table and every figure drawn from it. On a re-plot it
+# is recovered from the CSV's own name, so the figures carry the identifier of the
+# sweep they came from instead of a fresh timestamp that says nothing about it.
+const CSV_PREFIX = "noise_results"
+
 if isnothing(results_csv)
     results_df = HybridZuptInsJl.run_online_correction_sweep(
         aligned,
@@ -116,34 +120,43 @@ if isnothing(results_csv)
         seeds=SEEDS,
         keep_artifacts=false,
     )
-    # The draw count is in the name because a 1-draw and a 10-draw file are different
+    # The draw count is in the stem because a 1-draw and a 10-draw file are different
     # artifacts: at one seed the spread is trial-to-trial only, and that is precisely
     # the distinction this script exists to make.
-    csv_path = stamped(DATA_SECTION,
-        "noise_results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws"; ext="csv")
+    run_stem = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
+    csv_path = results_path(DATA_SECTION, "$(CSV_PREFIX)_$(run_stem).csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path" nrow(results_df)
 else
     csv_path = results_path(DATA_SECTION, results_csv)
     results_df = CSV.read(csv_path, DataFrame)
+    run_stem = chopprefix(file_stem(csv_path), "$(CSV_PREFIX)_")
     @info "Loaded results table: $csv_path" nrow(results_df)
 end
 
 ##
-const DATASET = "Angermann"
+const DATASET = results_df[1, :dataset_name]
 const BASE_ESTIMATOR = "ZUPT only"
 
-for metric in (:rmse, :rmse_yaw)
+# Which of the swept noise specs reach the figure. Indexed into `noise_specs` so
+# the tags cannot drift from the specs that were actually run;
+# `eachindex(noise_specs)` is all of them.
+spec_indexes = [1, 6, 7, 8] # eachindex(noise_specs)
+plot_specs = noise_specs[spec_indexes]
+
+for metric in (:rmse,)
     # paired relative change vs Base on the same trial.
     paired = HybridZuptInsJl.paired_estimator_contrast(
-        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
+        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR,
+        noise_spec_tags=[spec.tag for spec in plot_specs])
     results_figure() do
         HybridZuptInsJl.plot_noise_paired_relative_change(
             paired, DATASET;
             metric=metric,
-            reference_label=BASE_ESTIMATOR,
-            show_outliers=false,
-            save_path=stamped(SECTION, "noise_paired_$(metric)"),
+            show_outliers=true,
+            _ylims=(-99.0, 300.0),
+            figsize=(550, 500),
+            save_path=results_path(SECTION, "noise_paired_$(metric)_$(run_stem).pdf"),
         )
     end
 end

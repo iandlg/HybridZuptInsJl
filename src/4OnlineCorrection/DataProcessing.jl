@@ -724,7 +724,7 @@ end
 
 """
     paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="ZUPT only",
-                              train_ratios=nothing) -> DataFrame
+                              train_ratios=nothing, noise_spec_tags=nothing) -> DataFrame
 
 Per-trial change in `metric` relative to `reference_estimator`, for every noise spec.
 
@@ -740,6 +740,11 @@ every pair is still formed within one train_ratio, so dropping ratios cannot cha
 the pairs that survive. A ratio that is not in `df` is an error rather than an empty
 group — asking for 0.15 out of a 0.1-step sweep is a typo, not a request.
 
+`noise_spec_tags` does the same for the noise axis, keeping only those specs by
+their `tag`, e.g. to plot the clean reference and the two position-only levels out
+of an eight-spec sweep. Same rules: a filter on rows, not on the pairing, and a tag
+that is not in `df` is an error rather than an empty group.
+
 # Returns
 `DataFrame` with the trial keys plus `estimator`, `noise_spec_tag`, `seed`, and:
 - `value` — the estimator's metric,
@@ -754,6 +759,7 @@ function paired_estimator_contrast(
     metric::Symbol=:rmse_rate,
     reference_estimator::AbstractString="ZUPT only",
     train_ratios::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    noise_spec_tags::Union{Nothing,AbstractVector{<:AbstractString}}=nothing,
 )::DataFrame
     _require_cols(df, vcat(_TRIAL_KEYS, [:estimator, :estimator_order, :noise_spec_tag,
             :noise_spec_order, :seed, metric]), "paired_estimator_contrast")
@@ -764,6 +770,14 @@ function paired_estimator_contrast(
             "paired_estimator_contrast: train_ratio(s) $(absent) are not in the frame. \
              Available: $(sort(unique(df.train_ratio)))"))
         df = df[in.(df.train_ratio, Ref(train_ratios)), :]
+    end
+
+    if !isnothing(noise_spec_tags)
+        absent = setdiff(noise_spec_tags, unique(df.noise_spec_tag))
+        isempty(absent) || throw(ArgumentError(
+            "paired_estimator_contrast: noise spec tag(s) $(absent) are not in the frame. \
+             Available: $(join(unique(df.noise_spec_tag), ", "))"))
+        df = df[in.(df.noise_spec_tag, Ref(noise_spec_tags)), :]
     end
 
     key_cols = vcat(_TRIAL_KEYS, [:noise_spec_tag, :noise_spec_order, :seed])
