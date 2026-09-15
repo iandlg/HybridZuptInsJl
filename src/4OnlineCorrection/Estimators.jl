@@ -185,6 +185,107 @@ function learned_measurement_update!(c::AbstractEstimator;
     error("learned_measurement_update! not implemented for $(typeof(c))")
 end
 
+"""
+    predict_stride_error(c; feature_type, feature, Σ_feature, include_noise)
+
+The corrector's prediction of the stride error `gt_stride − ins_stride`, in the
+4-channel `[Δp_1, Δp_2, Δp_3, Δθ3]` local-frame convention, with its full 4×4
+covariance. Nothing on the estimator is written, and channels outside
+`correction_mask` come back zero.
+
+Split out of `learned_measurement_update!` so its two consumers share one copy of
+the prediction: `hybrid_zupt_aided_insv2`, which applies it to the absolute
+state, and `hybrid_zupt_aided_insv3`, which applies it to the stride.
+
+`include_noise` adds the GP observation-noise hyperparameter σ_n², i.e. returns
+Var[y] rather than Var[f]. V3 needs it, because there the returned covariance
+*becomes* the propagated stride covariance and so has to cover the stride error
+itself rather than just the mean function. It defaults to the estimator's own
+`pred_includes_noise`, which keeps V2 bit-identical.
+
+`feature` is normalised in place. Returns `nothing` for an estimator with no
+learned model, which is how V3 falls back to plain propagation for
+`BaseEstimator`.
+"""
+function predict_stride_error(c::AbstractEstimator;
+    kwargs...)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    return nothing
+end
+
+"""
+    correct_stride(; q_prev, Δp, Δq, Σpq, pred, Σ_pred, R_aug_wl, mask)
+
+Apply a stride-error prediction to the stride itself, returning the
+`(Δp, Δq, Σpq)` triple `dynamic_update!` takes. notes/013 §1.4-1.6.
+
+The covariance goes out to the world frame and back: `Σpq` is what
+`dynamic_update!` sandwiches in `G`, so the corrected covariance has to be handed
+back in those same coordinates for the propagation to add exactly
+`Σ_inc,corr^w`. `G` is block-orthogonal, so the round trip is exact and
+`dynamic_update!` needs no change — which is also what keeps V2 bit-identical.
+
+On the corrected channels the GP's predictive covariance *replaces* the INS
+stride covariance rather than being fused with it: the GP is trained on
+`p(Δs_gt − Δs_ins | z)` with `z` a function of the realised `Δs_ins`, so
+conditioned on that stride it already is the posterior. The cross blocks that get
+zeroed — corrected↔uncorrected channels, and position/yaw↔roll/pitch — are zeroed
+for positive-definiteness, not conservatism: a replaced block much smaller than
+the one it replaced breaks the Schur condition against cross terms kept from the
+old one, and the result reaches `cholesky!` with nothing in the test half to
+clean up after it.
+"""
+function correct_stride(;
+    q_prev::AbstractVector{Float64},
+    Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64},
+    pred::AbstractVector{Float64}, Σ_pred::AbstractMatrix{Float64},
+    R_aug_wl::AbstractMatrix{Float64}, mask::Vector{Int}
+)::Tuple{AbstractVector{Float64},AbstractVector{Float64},AbstractMatrix{Float64}}
+
+    idx4 = [1, 2, 3, 6]             # [Δp^w; δθ^w_z] within the 6-dof increment
+    idx_rp = [4, 5]                 # world roll/pitch, which the GP says nothing about
+    unmask = setdiff(1:4, mask)
+
+    R_prev = quat_to_matrix(q_prev)
+    q_raw = quat_multiply(q_prev, Δq)
+
+    # World-frame increment: exactly what `dynamic_update!` adds to F Σ F'.
+    G = zeros(Float64, 6, 6)
+    G[1:3, 1:3] = R_prev
+    G[4:6, 4:6] = quat_to_matrix(q_raw)
+    Σ_inc = G * Σpq * G'
+
+    Δp_w = R_prev * Δp
+    Δθ3 = wrap_pi(matrix_to_euler(quat_to_matrix(q_raw))[3] - matrix_to_euler(R_prev)[3])
+
+    # Into the local frame, swap in the GP's covariance, back out again.
+    A = R_aug_wl'
+    Σ_l = A * Σ_inc[idx4, idx4] * A'
+    Σ_l[mask, mask] = Σ_pred[mask, mask]
+    Σ_l[mask, unmask] .= 0.0
+    Σ_l[unmask, mask] .= 0.0
+
+    s_w = R_aug_wl * (A * [Δp_w; Δθ3] + pred)
+    Σ_inc[idx4, idx4] = R_aug_wl * Σ_l * R_aug_wl'
+    Σ_inc[idx4, idx_rp] .= 0.0
+    Σ_inc[idx_rp, idx4] .= 0.0
+    Σ_inc = (Σ_inc + Σ_inc') / 2
+
+    # The yaw correction is a world-frame (left) rotation on the endpoint, the
+    # same convention as `relinearize!` and the `[0,0,1]` measurement row.
+    q_corr = quat_multiply(quat_exp([0.0, 0.0, wrap_pi(s_w[4] - Δθ3)]), q_raw)
+    G[4:6, 4:6] = quat_to_matrix(q_corr)
+
+    # `normalize_quat` is load-bearing, not hygiene. `conj(q) ⊗ (… ⊗ q ⊗ …)`
+    # restores the endpoint only for a unit `q`; off by ‖q‖², it feeds back into
+    # the next stride's own `q_prev`, so the norm is *cubed* every footfall. At
+    # double precision that reaches Inf in about 35 strides — measured, and the
+    # reason the first V3 run went NaN mid-test. The corrector never
+    # renormalises its quaternion, so it has to be done here.
+    Δq_corr = normalize_quat(quat_multiply(quat_conjugate(q_prev), q_corr))
+
+    return R_prev' * s_w[1:3], Δq_corr, G' * Σ_inc * G
+end
+
 function relinearize!(c::AbstractEstimator; kwarg...)
     error("relinearize! not implemented for $(typeof(c))")
 end
@@ -676,6 +777,14 @@ function posyaw_measurement_update!(c::DecoupledStaticEstimator; curr_pos::Abstr
     )
 end
 
+function predict_stride_error(c::DecoupledStaticEstimator;
+    kwargs...)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
+    pred_full, Σ_pred_full = zeros(Float64, 4), zeros(Float64, 4, 4)
+    pred_full[c.correction_mask] = c.stride_bias
+    Σ_pred_full[c.correction_mask, c.correction_mask] = c.Σ_bias
+    return pred_full, Σ_pred_full
+end
+
 function learned_measurement_update!(c::DecoupledStaticEstimator;
     R_aug_wl, kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
 
@@ -930,10 +1039,11 @@ function posyaw_measurement_update!(c::DecoupledHsgpEstimator; curr_pos::Abstrac
     )
 end
 
-function learned_measurement_update!(c::DecoupledHsgpEstimator;
+function predict_stride_error(c::DecoupledHsgpEstimator;
     feature_type::FeatureType,
-    feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
-    kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
+    feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64},
+    include_noise::Bool=c.pred_includes_noise,
+    kwargs...)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
 
     p = c.p
     mask = c.correction_mask
@@ -957,16 +1067,34 @@ function learned_measurement_update!(c::DecoupledHsgpEstimator;
     pred_masked = c.Φ * c.β
     Σ_pred_masked = c.Φ * c.Σβ * c.Φ' + c.∂y∂z * Σ_feature * c.∂y∂z'   # Predictive + input uncertainty
 
-    # Optionally report Var[y] instead of Var[f] by adding the GP observation
-    # noise. σ_n is a hyperparameter of the *normalised* output, so it must be
-    # added here, before the denormalisation below. Off by default.
-    if c.pred_includes_noise
+    # Report Var[y] instead of Var[f] by adding the GP observation noise. σ_n is
+    # a hyperparameter of the *normalised* output, so it must be added here,
+    # before the denormalisation below.
+    if include_noise
         Σ_pred_masked += Diagonal(c.σ_n .^ 2)
     end
 
     # Denormalise (masked channels only)
     pred_masked = pred_masked .* c.params.output_stats[2][mask] .+ c.params.output_stats[1][mask]
     Σ_pred_masked = Diagonal(c.params.output_stats[2][mask]) * Σ_pred_masked * Diagonal(c.params.output_stats[2][mask])
+
+    # Output 4 channel convention
+    pred_full, Σ_pred_full = zeros(Float64, 4), zeros(Float64, 4, 4)
+    pred_full[mask] = pred_masked
+    Σ_pred_full[mask, mask] = Σ_pred_masked
+    return pred_full, Σ_pred_full
+end
+
+function learned_measurement_update!(c::DecoupledHsgpEstimator;
+    feature_type::FeatureType,
+    feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64}, R_aug_wl::AbstractMatrix{Float64},
+    kwargs...)::NTuple{4,Optional{AbstractVector{Float64}}}
+
+    p = c.p
+    mask = c.correction_mask
+
+    pred_full, Σ_pred_full = predict_stride_error(c;
+        feature_type=feature_type, feature=feature, Σ_feature=Σ_feature)
 
     # Update measurement matrix H_update
     c.H[1:p, 1:6, c.i] .= 0.0
@@ -978,16 +1106,11 @@ function learned_measurement_update!(c::DecoupledHsgpEstimator;
 
     measurement_update!(
         view(c.δx, 1:6, c.i), c.Σ,
-        pred_masked,
+        pred_full[mask],
         c.H[1:p, 1:6, c.i],
-        Σ_pred_masked,
+        Σ_pred_full[mask, mask],
         c.ws_state
     )
-
-    # Output 4 channel convention
-    pred_full, Σ_pred_full = zeros(4), zeros(4, 4)
-    pred_full[mask] = pred_masked
-    Σ_pred_full[mask, mask] = Σ_pred_masked
 
     return pred_full, diag(Σ_pred_full), nothing, nothing
 end
@@ -995,7 +1118,7 @@ end
 function relinearize!(c::DecoupledHsgpEstimator)
     c.pos[:, c.i] += c.δx[1:3, c.i]
     c.quat[:, c.i] = quat_multiply(quat_exp(c.δx[4:6, c.i]), c.quat[:, c.i])
-    # c.δx[:, c.i] .= 0.0
+    c.δx[:, c.i] .= 0.0
 end
 
 function get_model(c::DecoupledHsgpEstimator)::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}
