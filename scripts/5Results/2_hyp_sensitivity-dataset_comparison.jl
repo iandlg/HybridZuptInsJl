@@ -24,20 +24,20 @@ hsgp_p_key = 42
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Correction methods to compare
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name, and picks the correctors below (CORRECTORS).
+filter_tag = "V3"
+
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
-    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "Static" => CORRECTORS[filter_tag].static,
     # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
-    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "HSGP" => CORRECTORS[filter_tag].hsgp,
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
 train_ratios = [0.5]
-
-# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
-# every output file name.
-filter_tag = "V3"
 
 ## 5. Run the sweep
 results_df = HybridZuptInsJl.run_online_correction_sweep(

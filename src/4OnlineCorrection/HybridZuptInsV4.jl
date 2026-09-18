@@ -65,11 +65,25 @@ function hybrid_zupt_aided_insv4(
     x[:, 1] = x_init
     quat[:, 1] = matrix_to_quat(euler_to_matrix(x_init[7:9]))
 
+    # With mocap at the start, the corrector starts on it. Otherwise the offset
+    # between `x_init` (a whole-walk alignment) and the mocap pose at k=1 --
+    # 0.045 rad of yaw on ANG2 13, 26σ of the initial yaw prior -- is first
+    # observed after one stride, and the flat prior on β absorbs it as bias.
+    Σ_gt = Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+    pos_init, quat_init = x_init[1:3], quat[:, 1]
+    Σpq_init = P[[1:3; 7:9], [1:3; 7:9], 1]
+    if gt_available[1] && posyaw_measurement_update
+        pos_init = gt_traj.pos[:, 1]
+        δψ = wrap_pi(matrix_to_euler(gt_traj.R_nb[:, :, 1])[3] - x_init[9])
+        quat_init = quat_multiply(quat_exp([0.0, 0.0, δψ]), quat[:, 1])
+        Σpq_init[[1, 2, 3, 6], [1, 2, 3, 6]] = Σ_gt
+    end
+
     initialize_corrector!(corrector;
         t=inertial.t[1],
-        pos_init=x_init[1:3],
-        quat_init=quat[:, 1],
-        Σpq_init=P[[1:3; 7:9], [1:3; 7:9], 1],
+        pos_init=pos_init,
+        quat_init=quat_init,
+        Σpq_init=Σpq_init,
         init_model=init_model
     )
 
@@ -80,7 +94,6 @@ function hybrid_zupt_aided_insv4(
 
     @info " ##### Processing $name #####"
     has_params = hasfield(typeof(corrector), :params)
-    Σ_gt = Diagonal(sigma_groundtruth_array(simdata) .^ 2)
 
     io_data = Dict{String,CorrectionIO}(
         "input" => CorrectionIO(FEATURE_DIMS[feature_type], true),
@@ -206,7 +219,8 @@ function hybrid_zupt_aided_insv4(
 
         predicted = propagate_stride!(corrector;
             t=inertial.t[curr_step], Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride,
-            R_bh=R_bh, feature_type=feature_type, feature=feature)
+            R_bh=R_bh, ins_stride=ins_stride, ref_frame=ref_frame,
+            feature_type=feature_type, feature=feature)
 
         if gt_available[curr_step] && posyaw_measurement_update
             if !isnothing(predicted) && gt_available[prev_step]

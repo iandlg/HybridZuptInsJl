@@ -139,12 +139,13 @@ function initialize_corrector!(c::AbstractJointStrideEstimator;
 end
 
 """
-    propagate_stride!(c; t, Δp, Δq, Σpq, R_bh, feature_type, feature) -> (y, Σ_y)
+    propagate_stride!(c; t, Δp, Δq, Σpq, R_bh, ins_stride, ref_frame, feature_type, feature) -> (y, Σ_y)
 
 One stride of the corrector's dynamics. `Δp`, `Δq`, `Σpq` are the raw INS
 increment as `dynamic_update!` takes it (`Δp` in the INS body frame at the
-previous footfall, `Σpq` over `[ε_p^{b_i}; ε_q^{b_{i+1}}]`). `R_bh` maps the
-stride's local (heading or body) frame into that body frame. Returns the
+previous footfall, `Σpq` over `[ε_p^{b_i}; ε_q^{b_{i+1}}]`), `ins_stride` the
+same stride in its local frame, and `R_bh` maps that local frame into the INS
+body frame. Returns the
 applied correction in the 4-channel convention and its predictive covariance
 (`ΦΣββΦ' + σ_y²`), or `nothing` for a corrector without a stride model.
 
@@ -157,8 +158,9 @@ function propagate_stride!(c::AbstractEstimator; t::Float64, Δp::AbstractVector
 end
 
 function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
-    Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64},
-    R_bh::AbstractMatrix{Float64}, feature_type::FeatureType, feature::AbstractVector{Float64})
+    Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, R_bh::AbstractMatrix{Float64},
+    ins_stride::AbstractVector{Float64}, ref_frame::ReferenceFrame,
+    feature_type::FeatureType, feature::AbstractVector{Float64}, kwargs...)
 
     mask, p = c.correction_mask, c.p
     y₀, Φ = stride_model(c, feature_type, feature)
@@ -172,22 +174,29 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     end
     e₃ = [0.0, 0.0, 1.0]
 
-    # Nominal propagation (derivation §3).
+    # Nominal propagation. The INS's local stride is placed by the corrector's
+    # own local frame (its heading, for HEADING), so the corrector's roll/pitch
+    # -- which only mocap position ever constrains -- cannot bend the stride or
+    # its yaw increment away from the INS stride the target was built from.
     R = quat_to_matrix(c.quat[:, c.i])
-    ψ_c = (s_ψ*y)[1]
-    Rz = quat_to_matrix(quat_exp([0.0, 0.0, ψ_c]))
-    B_p = R * R_bh * S_p                    # ∂p⁺/∂y in world
-    Δp_w = R * Δp + B_p * y
+    A_wl = stride_local(ref_frame; R_wb=R, ΔpΔθ3=zeros(4))[3][1:3, 1:3]
+    B_p = A_wl * S_p                        # ∂p⁺/∂y in world
+    Δp_w = A_wl * ins_stride[1:3] + B_p * y
+
+    q_raw = quat_multiply(c.quat[:, c.i], Δq)
+    Δψ_raw = matrix_to_euler(quat_to_matrix(q_raw))[3] - matrix_to_euler(R)[3]
+    δψ = wrap_pi(ins_stride[4] + (s_ψ*y)[1] - Δψ_raw)
 
     c.i += 1
     c.t[c.i] = t
     c.pos[:, c.i] = c.pos[:, c.i-1] + Δp_w
-    c.quat[:, c.i] = normalize_quat(quat_multiply(quat_exp([0.0, 0.0, ψ_c]),
-        quat_multiply(c.quat[:, c.i-1], Δq)))
+    c.quat[:, c.i] = normalize_quat(quat_multiply(quat_exp([0.0, 0.0, δψ]), q_raw))
     R⁺ = quat_to_matrix(c.quat[:, c.i])
 
-    # Error-state Jacobians (derivation §6): F = [A Bβ; 0 I].
-    A = [I -skew(Δp_w); zeros(3, 3) Rz]
+    # Error-state Jacobians: F = [A Bβ; 0 I]. Only the placement frame's
+    # attitude moves the stride: heading alone for HEADING.
+    Pθ = ref_frame == HEADING ? e₃ * e₃' : Matrix{Float64}(I, 3, 3)
+    A = [I -skew(Δp_w)*Pθ; zeros(3, 3) quat_to_matrix(quat_exp([0.0, 0.0, δψ]))]
     B_y = [B_p; e₃ * s_ψ]                   # 6×p, ∂[p⁺; θ⁺]/∂y
     Bβ = B_y * Φ
 
@@ -196,8 +205,9 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     Σxβ = T[:, 7:end]
     Σxx = T[:, 1:6] * A' + Σxβ * Bβ'
 
-    # Odometry noise, then the stride residual the model does not explain.
-    G = [R zeros(3, 3); zeros(3, 3) R⁺]
+    # Odometry noise (ε_p from the INS body frame through the local frame),
+    # then the stride residual the model does not explain.
+    G = [A_wl*R_bh' zeros(3, 3); zeros(3, 3) R⁺]
     Σxx += G * Σpq * G' + B_y * Diagonal(c.σ_y .^ 2) * B_y'
 
     c.Σ[1:6, 1:6] = (Σxx + Σxx') / 2

@@ -39,7 +39,7 @@ const SECTION = "1_Performance"
 results_csv = nothing
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
-# every output file name.
+# every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V3"
 
 # 2. Align INS / GT trajectories once per trial.
@@ -57,8 +57,8 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 ## 4. Correction methods to compare
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
-    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "Static" => CORRECTORS[filter_tag].static,
+    "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]

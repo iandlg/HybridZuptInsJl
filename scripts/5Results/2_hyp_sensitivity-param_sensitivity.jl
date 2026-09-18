@@ -52,7 +52,7 @@ train_ratio = 0.4
 output_channel_idxs = [1, 2, 4]
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
-# every output file name.
+# every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V3"
 
 noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
@@ -146,7 +146,7 @@ base_name = "$(filter_tag)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
 make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
     m=m, output_channel_idxs=output_channel_idxs,
-    hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator,
+    hsgp_estimator_factory=CORRECTORS[filter_tag].hsgp,
     noise_spec=noise_spec,
     pred_includes_noise=pred_includes_noise,
     correction_filter=CORRECTION_FILTERS[filter_tag],

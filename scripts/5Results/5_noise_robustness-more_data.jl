@@ -38,9 +38,13 @@ import CSV
 data_key = "DCSC"
 data_dir_path = data_dir(data_key)
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name, and picks the correctors below (CORRECTORS).
+filter_tag = "V3"
+
 estimators = OrderedDict(
-    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "Static" => CORRECTORS[filter_tag].static,
+    "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
 # NOTE: the order of these entries no longer matters -- it defines the *set* of training
 # tracks, and each repeat draws its own permutation of it.
@@ -76,10 +80,6 @@ test_labels = Dict(
 # Choose Parameters file
 hsgp_p_key = 47
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-
-# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
-# every output file name.
-filter_tag = "V3"
 
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 

@@ -22,10 +22,14 @@ data_dir_path = data_dir(data_key)
 #     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
 #     "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
 # )
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name, and picks the correctors below (CORRECTORS).
+filter_tag = "V3"
+
 estimators = OrderedDict(
-    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
+    "Static" => CORRECTORS[filter_tag].static,
     # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
-    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "HSGP" => CORRECTORS[filter_tag].hsgp,
     # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 train_labels = OrderedDict(
@@ -42,10 +46,6 @@ test_labels = OrderedDict(
 # Choose Parameters file
 hsgp_p_key = 42
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-
-# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
-# every output file name.
-filter_tag = "V3"
 
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 ## Run sweep
