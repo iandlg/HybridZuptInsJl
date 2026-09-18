@@ -1,25 +1,20 @@
 """
-    hybrid_zupt_aided_insv3(inertial, simdata, gt_traj, corrector; ...)
+    hybrid_zupt_aided_insv3_insframe(inertial, simdata, gt_traj, corrector; ...)
 
-`hybrid_zupt_aided_insv2` with the GP correction moved from the absolute state
-onto the stride. Same signature, same return tuple, same `io_data` keys, same
-`CorrectorDiagnostics` hook, so every existing consumer works on either.
+`hybrid_zupt_aided_insv3` with the INS stride built from the inner ZUPT-INS's own
+attitude and position instead of from the corrector's. Same signature, same
+return tuple.
 
-V2 applies the GP's prediction as a Kalman measurement on the corrector's
-*absolute* error state, which shrinks the absolute `Σ` at every test-phase
-footfall. The GP predicts a stride *increment* error, so that shrink credits the
-filter with absolute information it never received; notes/003 §3.8 names the
-type error and notes/013 has the replacement. Here the per-footfall block is
-reordered: the raw stride is built first, the GP corrects the stride and the
-stride covariance, and the corrected stride then propagates the absolute state.
-No measurement update touches `Σ` in the test half, so between mocap footfalls
-`Σ` is monotone non-decreasing, as dead reckoning requires.
-
-The ground-truth branches are deliberately unchanged from V2: mocap *is*
-exogenous absolute information, and 002 Result 3 measured that its shrink is
-earned.
+In V3 the stride that feeds the target, the feature and the correction is
+`stride_local(R_c,prev; [R_c,prev Δp^b; yaw(q̂⊗Δq) − yaw(q̂)])`, i.e. it is
+expressed in the *corrector's* local frame, which moves with every correction
+the corrector has taken. Here it is `stride_local(R_ins,prev; [Δp_ins^w; Δψ_ins])`,
+so the GP's input and target are functions of the INS and the ground truth only
+and cannot depend on what the corrector did before. The corrector's orientation
+enters exactly once, in `correct_stride`, where the corrected local stride is
+rotated back out to the world with the corrector's `R_aug_wl`. notes/014 §T3.
 """
-function hybrid_zupt_aided_insv3(
+function hybrid_zupt_aided_insv3_insframe(
     inertial::InertialData,
     simdata::InsConfig,
     gt_traj::Trajectory,
@@ -189,15 +184,20 @@ function hybrid_zupt_aided_insv3(
         q_raw = quat_multiply(q_prev, Δq_stride)
         R_prev = quat_to_matrix(q_prev)
 
-        # Compute stride error and estimated stride
-        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl = stride_error(ref_frame;
-            R_wb=(R_prev, quat_to_matrix(q_raw)),
-            Δp=R_prev * Δp_stride,
+        # Stride error and stride in the inner INS's own local frame: the target
+        # and the feature never see the corrector's state.
+        stride_err, Σ_err, ins_stride, Σ_ins_stride, _ = stride_error(ref_frame;
+            R_wb=(quat_to_matrix(quat[:, prev_step]), quat_to_matrix(quat[:, curr_step])),
+            Δp=x[1:3, curr_step] - x[1:3, prev_step],
             Σ_ΔpΔθ3=ΔP[[1:3; 9], [1:3; 9]],
             R_wb_gt=(gt_traj.R_nb[:, :, prev_step], gt_traj.R_nb[:, :, curr_step]),
             Δp_gt=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step],
             Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
         )
+
+        # The corrector's local→world map, used only to put the corrected stride
+        # back into the world.
+        R_aug_wl = stride_local(ref_frame; R_wb=R_prev, ΔpΔθ3=zeros(4))[3]
 
         # Compute feature
         feature, Σ_feature = compute_feature(feature_type;

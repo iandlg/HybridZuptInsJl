@@ -137,7 +137,6 @@ over ZUPT frames (roll/pitch) and a calibration window (yaw).
   (positions and velocities unchanged).
 - `R_opt`: The optimal 3×3 rotation matrix that maps the INS body frame to the GT body frame.
 """
-
 function transform_orientation(ins_traj::Trajectory, gt_traj::Trajectory,
     zupt::BitVector, initial_value::Vector{Float64},
     calib_idxs::Vector{Int})

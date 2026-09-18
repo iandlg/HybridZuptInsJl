@@ -46,7 +46,15 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
-trial_id = 14 # meta["trial_id"]
+# Filter used for the Static/HSGP corrections. F1 = stride-level correction with the
+# target and feature in the inner INS's own frame (notes/014); swap back to
+# `HybridZuptInsJl.hybrid_zupt_aided_insv2` to see the V2 baseline. "ZUPT only"
+# always runs through V2 (it has no learned model, so the filter choice is moot).
+# Regression plots use the HSGP run's own target: under F1 it is built in the INS
+# frame, which is not the V2 corrector-frame target the "Base" run records.
+corr_filter = HybridZuptInsJl.hybrid_zupt_aided_insv3_insframe
+
+trial_id = 15 # meta["trial_id"]
 train_ratio = 0.3
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
@@ -81,12 +89,12 @@ zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
 decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
 decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
@@ -149,7 +157,7 @@ end
 GLMakie.activate!()
 
 # fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
+fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])
 
 # The three channels the corrections actually estimate (Δz is left alone), on one stacked
 # figure: target grey, Static wong yellow, HSGP wong green, a single shared legend. Keys
@@ -160,7 +168,7 @@ fig_regr_panels = results_figure() do
             "Static" => io_data["Decoupled Static"]["prediction"],
             "HSGP" => io_data["Decoupled HSGP"]["prediction"],
         ),
-        io_data["Base"]["target"];
+        io_data["Decoupled HSGP"]["target"];
         save_path=stamped(regression_section, "regression_panels_$(data_key)_trial$(trial_id)"))
 end
 GLMakie.activate!()
@@ -200,12 +208,12 @@ zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
 decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=decoup_stat_model, posyaw_measurement_update=posyaw_measurement_update)
 
 decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)
 
@@ -243,4 +251,4 @@ fig_rmse_hybrid = results_figure() do
 end
 # results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
 GLMakie.activate!()
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
+fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])

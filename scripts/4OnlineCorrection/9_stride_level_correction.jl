@@ -82,7 +82,7 @@ let
             Σ_pred[mask, mask] = Σ_l[mask, mask]
 
             Δp_c, Δq_c, Σ_c = HybridZuptInsJl.correct_stride(;
-                q_prev=q_prev, Δp=Δp, Δq=Δq, Σpq=Σpq,
+                q_prev=q_prev, Δp=Δp, Δq=Δq, Σpq=Σpq, s_l=s_l,
                 pred=zeros(4), Σ_pred=Σ_pred, R_aug_wl=R_aug_wl, mask=mask)
 
             @assert norm(Δp_c - Δp) < 1e-12 "$frame/$mask: Δp off by $(norm(Δp_c - Δp))"

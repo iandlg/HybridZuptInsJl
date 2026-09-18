@@ -213,10 +213,18 @@ function predict_stride_error(c::AbstractEstimator;
 end
 
 """
-    correct_stride(; q_prev, Δp, Δq, Σpq, pred, Σ_pred, R_aug_wl, mask)
+    correct_stride(; q_prev, Δp, Δq, Σpq, s_l, pred, Σ_pred, R_aug_wl, mask)
 
 Apply a stride-error prediction to the stride itself, returning the
 `(Δp, Δq, Σpq)` triple `dynamic_update!` takes. notes/013 §1.4-1.6.
+
+`s_l` is the local-frame stride the prediction corrects -- the same `ins_stride`
+the target and the feature were built from -- and `R_aug_wl` is the corrector's
+local→world map it is rotated back out with. When `s_l` was built from the
+corrector's own attitude this is the notes/013 path exactly; when it was built
+from the inner INS's attitude (notes/014), the corrected stride is the INS
+stride placed in the world by the corrector's heading. `Δp`, `Δq` are still the
+raw increments: they fix `q_raw`, whose yaw the correction is measured against.
 
 The covariance goes out to the world frame and back: `Σpq` is what
 `dynamic_update!` sandwiches in `G`, so the corrected covariance has to be handed
@@ -237,6 +245,7 @@ clean up after it.
 function correct_stride(;
     q_prev::AbstractVector{Float64},
     Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64},
+    s_l::AbstractVector{Float64},
     pred::AbstractVector{Float64}, Σ_pred::AbstractMatrix{Float64},
     R_aug_wl::AbstractMatrix{Float64}, mask::Vector{Int}
 )::Tuple{AbstractVector{Float64},AbstractVector{Float64},AbstractMatrix{Float64}}
@@ -254,7 +263,6 @@ function correct_stride(;
     G[4:6, 4:6] = quat_to_matrix(q_raw)
     Σ_inc = G * Σpq * G'
 
-    Δp_w = R_prev * Δp
     Δθ3 = wrap_pi(matrix_to_euler(quat_to_matrix(q_raw))[3] - matrix_to_euler(R_prev)[3])
 
     # Into the local frame, swap in the GP's covariance, back out again.
@@ -264,7 +272,7 @@ function correct_stride(;
     Σ_l[mask, unmask] .= 0.0
     Σ_l[unmask, mask] .= 0.0
 
-    s_w = R_aug_wl * (A * [Δp_w; Δθ3] + pred)
+    s_w = R_aug_wl * (s_l + pred)
     Σ_inc[idx4, idx4] = R_aug_wl * Σ_l * R_aug_wl'
     Σ_inc[idx4, idx_rp] .= 0.0
     Σ_inc[idx_rp, idx4] .= 0.0
