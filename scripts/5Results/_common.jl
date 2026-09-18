@@ -115,6 +115,20 @@ never share a name.
 const CORRECTION_FILTERS = Dict{String,Function}(
     "V2" => HybridZuptInsJl.hybrid_zupt_aided_insv2,
     "V3" => HybridZuptInsJl.hybrid_zupt_aided_insv3,
+    "V4" => HybridZuptInsJl.hybrid_zupt_aided_insv4,
+)
+
+"""
+The correctors each filter runs, keyed by the same tag as `CORRECTION_FILTERS`.
+V4 carries the stride model in the corrector's own state (notes/015), so it
+needs its own joint correctors; V2 and V3 share the decoupled ones. Scripts
+build their estimator tables from `CORRECTORS[filter_tag]` so a tag switch
+changes both at once.
+"""
+const CORRECTORS = Dict{String,NamedTuple{(:static, :hsgp),Tuple{Type,Type}}}(
+    "V2" => (static=HybridZuptInsJl.DecoupledStaticEstimator, hsgp=HybridZuptInsJl.DecoupledHsgpEstimator),
+    "V3" => (static=HybridZuptInsJl.DecoupledStaticEstimator, hsgp=HybridZuptInsJl.DecoupledHsgpEstimator),
+    "V4" => (static=HybridZuptInsJl.JointStrideStaticEstimator, hsgp=HybridZuptInsJl.JointStrideHsgpEstimator),
 )
 
 # ---------------------------------------------------------------------------
