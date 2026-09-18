@@ -126,7 +126,10 @@ function make_rmse_evaluator(
     hsgp_estimator_factory::Type=JointHsgpEstimator,
     noise_spec::NoiseSpec=NoiseSpec(),
     pred_includes_noise::Bool=false,
-    eval_test_half_only::Bool=true
+    eval_test_half_only::Bool=true,
+    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
+    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
+    correction_filter::Function=hybrid_zupt_aided_insv2,
 )::Function
     p = length(output_channel_idxs)
     @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
@@ -172,7 +175,7 @@ function make_rmse_evaluator(
         hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params,
             corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs],
             pred_includes_noise=pred_includes_noise)
-        _, step_seg, slamHsgp_corr_traj, _ = hybrid_zupt_aided_insv2(
+        _, step_seg, slamHsgp_corr_traj, _ = correction_filter(
             inertial_updated, sim_config_updated, gt_noisy, hsgp_estimator;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)
 

@@ -15,8 +15,8 @@
 ###   - lag-1 autocorrelation of y₄ (≈ −0.5 → differenced jitter, telescopes),
 ###   - corr(ŷ₄, y₄) on the test half (does the input-dependent part carry skill),
 ###   - V3 Static vs V3 HSGP (a constant bias vs the GP).
-### It also measures, per footfall, how far the V3 stride/target is from the one
-### built in the INS's own frame (notes/014 T3, the size of fix F1), and the
+### It also measures, per footfall, how far V2's corrector-frame stride/target is
+### from V3's INS-frame one (notes/014 T3), and the
 ### |yaw(R') + ψ| error of `stride_heading` (T4).
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
@@ -36,11 +36,10 @@ runs = OrderedDict{String,Tuple{Function,Type}}(
     "V2 HSGP" => (HybridZuptInsJl.hybrid_zupt_aided_insv2, HybridZuptInsJl.DecoupledHsgpEstimator),
     "V3 HSGP" => (HybridZuptInsJl.hybrid_zupt_aided_insv3, HybridZuptInsJl.DecoupledHsgpEstimator),
     "V3 Static" => (HybridZuptInsJl.hybrid_zupt_aided_insv3, HybridZuptInsJl.DecoupledStaticEstimator),
-    "V3-F1 HSGP" => (HybridZuptInsJl.hybrid_zupt_aided_insv3_insframe, HybridZuptInsJl.DecoupledHsgpEstimator),
 )
-# Target and feature of this run depend on the INS and GT only, so it is the
-# reference the others' strides are compared against (T3).
-const REF_RUN = "V3-F1 HSGP"
+# V3 builds its target and feature from the INS and GT only, so it is the
+# reference the others' strides are compared against (notes/014 T3).
+const REF_RUN = "V3 HSGP"
 
 "Per-footfall ŷ₄, zero where the footfall took no prediction (train half)."
 function footfall_prediction(io)
@@ -144,7 +143,7 @@ for (data_key, hsgp_key) in DATASET_HSGP_KEYS
             CairoMakie.axislegend(ax1; position=:lt)
 
             ax2 = CairoMakie.Axis(fig[2, 1]; xlabel="IMU sample k", ylabel="e_ψ = ψ_gt − ψ [rad]")
-            for name in ("ZUPT only", "V2 HSGP", "V3 HSGP", "V3 Static", "V3-F1 HSGP")
+            for name in ("ZUPT only", "V2 HSGP", "V3 HSGP", "V3 Static")
                 CairoMakie.lines!(ax2, sums[name].k, sums[name].e; label=name)
             end
             CairoMakie.axislegend(ax2; position=:lt)

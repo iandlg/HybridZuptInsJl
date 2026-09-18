@@ -35,6 +35,10 @@ estimators = OrderedDict(
 output_channels = [:pos_1, :pos_2, :yaw]
 train_ratios = [0.5]
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name.
+filter_tag = "V3"
+
 ## 5. Run the sweep
 results_df = HybridZuptInsJl.run_online_correction_sweep(
     aligned,
@@ -43,7 +47,8 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
     hsgp_p,
     train_ratios,
     estimators,
-    output_channels,
+    output_channels;
+    correction_filter=CORRECTION_FILTERS[filter_tag],
 )
 
 ## 6. Plot
@@ -63,7 +68,7 @@ results_figure() do
         metric=:rmse,
         show_points=false,
         show_outliers=true,
-        save_path=stamped(SECTION, "dataset_comparison_paired"),
+        save_path=stamped(SECTION, "dataset_comparison_paired_$(filter_tag)"),
     )
 end
 
@@ -76,6 +81,6 @@ results_figure() do
         metric=:rmse_yaw,
         show_points=false,
         show_outliers=true,
-        save_path=stamped(SECTION, "dataset_comparison_paired"),
+        save_path=stamped(SECTION, "dataset_comparison_paired_$(filter_tag)"),
     )
 end

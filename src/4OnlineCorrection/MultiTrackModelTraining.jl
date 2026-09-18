@@ -47,7 +47,10 @@ function multi_track_training_analysis(
     train_tr_ratio::Float64=1.0,
     noise_spec::Union{Nothing,NoiseSpec}=nothing,
     order_seeds::AbstractVector{Int}=[1],
-    base_estimator_name::AbstractString="ZUPT only"
+    base_estimator_name::AbstractString="ZUPT only",
+    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
+    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
+    correction_filter::Function=hybrid_zupt_aided_insv2,
 )::DataFrame
 
     isempty(order_seeds) && throw(ArgumentError("order_seeds must not be empty"))
@@ -174,7 +177,7 @@ function multi_track_training_analysis(
                 # Train on this track, continuing from previous model
                 try
                     estimator_train = estimator_factory(300; params=params, corrected_channels=corrected_channels)
-                    _, _, _, _, init_model = hybrid_zupt_aided_insv2(
+                    _, _, _, _, init_model = correction_filter(
                         inertial_train, sim_config_train, gt_for_training, estimator_train;
                         x_init=x_init_train,
                         gt_available=gt_available_train,
@@ -204,7 +207,7 @@ function multi_track_training_analysis(
 
                     try
                         estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels)
-                        _, step_seg, corr_traj, _, _ = hybrid_zupt_aided_insv2(
+                        _, step_seg, corr_traj, _, _ = correction_filter(
                             inertial_test, sim_config_test, gt_traj_test, estimator_test;
                             x_init=x_init_test,
                             gt_available=gt_available_test,

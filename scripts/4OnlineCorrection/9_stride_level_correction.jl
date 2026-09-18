@@ -96,7 +96,9 @@ let
 
         # The check above passes for any orthogonal R_aug_wl, right frame or
         # not. This one does not: it pins the frame to the one the GP was
-        # trained in, via the stride `compute_feature` actually sees.
+        # trained in, via the stride `compute_feature` actually sees. V3 builds
+        # that stride from the INS attitude (notes/014); here the corrector and
+        # the INS share `q_prev`, so the two frames coincide.
         @assert norm(HybridZuptInsJl.stride_local(frame;
             R_wb=R_prev, ΔpΔθ3=[R_prev * Δp; Δθ3])[1] - s_l) < 1e-12 "$frame: stride mismatch"
     end

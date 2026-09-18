@@ -34,9 +34,13 @@ const SECTION = "1_Performance"
 
 # Set this to the file name of a scores CSV under out/Results/1_Performance/ to re-plot a
 # finished sweep instead of recomputing it, e.g.
-results_csv = "results_ANG2_HEADING_TWOD_STEP_YAW_2026-09-04T16:54:43.420.csv"
+# results_csv = "results_ANG2_HEADING_TWOD_STEP_YAW_2026-09-04T16:54:43.420.csv"   # V2
 # `nothing` runs the sweep and writes a fresh CSV.
-# results_csv = nothing
+results_csv = nothing
+
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name.
+filter_tag = "V3"
 
 # 2. Align INS / GT trajectories once per trial.
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
@@ -58,7 +62,7 @@ estimators = OrderedDict(
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
-train_ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] #  0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+train_ratios = [0.3, 0.5, 0.6] #  0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
 
 ## 5/6. Run the sweep and save the scores, or read a finished run back
 # Only the scalar columns are written: the sweep also carries the raw zupt/step_seg/
@@ -81,8 +85,9 @@ if isnothing(results_csv)
         estimators,
         output_channels;
         estimator_alloc=300,
+        correction_filter=CORRECTION_FILTERS[filter_tag],
     )
-    csv_path = stamped(SECTION, "results_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
+    csv_path = stamped(SECTION, "results_$(filter_tag)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path"
 else
@@ -113,14 +118,15 @@ const DATASET = first(unique(results_df.dataset_name))
 
 for metric in (:rmse, :rmse_yaw)
     paired = HybridZuptInsJl.paired_estimator_contrast(
-        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR, train_ratios=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        results_df; metric=metric, reference_estimator=BASE_ESTIMATOR,
+        train_ratios=sort(unique(results_df.train_ratio)))
     results_figure() do
         HybridZuptInsJl.plot_train_ratio_paired_relative_change(
             paired, DATASET;
             metric=metric,
             show_outliers=true,
             show_points=false,
-            save_path=stamped(SECTION, "train_ratio_paired_$(metric)"),
+            save_path=stamped(SECTION, "train_ratio_paired_$(metric)_$(filter_tag)"),
         )
     end
 end

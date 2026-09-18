@@ -43,24 +43,29 @@ test_labels = OrderedDict(
 hsgp_p_key = 42
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name.
+filter_tag = "V3"
+
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 ## Run sweep
 df = HybridZuptInsJl.training_data_quality_analysis(
     data_dir_path, estimators, train_labels, test_labels, params;
     frame=FRAME, feature_type=FEATURE_TYPE,
-    corrected_channels=output_channels)
+    corrected_channels=output_channels,
+    correction_filter=CORRECTION_FILTERS[filter_tag])
 ##
 const SECTION = "4_TrainDataQuality"
 
 results_figure() do
     HybridZuptInsJl.plot_train_data_quality(df; metric=:rmse,
-        save_path=stamped(SECTION, "train_data_quality"))
+        save_path=stamped(SECTION, "train_data_quality_$(filter_tag)"))
 end
 
 ## Persist the numbers next to the figure.
 # WAS: CSV.write("train_test_variability.csv", df) -- no `import CSV` in this
 # script (so it only worked if a previous REPL cell had loaded it), and it wrote
 # into the repository root rather than out/.
-CSV.write(stamped(SECTION, "train_data_quality"; ext="csv"),
+CSV.write(stamped(SECTION, "train_data_quality_$(filter_tag)"; ext="csv"),
     select(df, Not(intersect(names(df), ["corr_traj", "io_data", "model", "zupt", "step_seg"])));
     transform=(col, val) -> something(val, missing))

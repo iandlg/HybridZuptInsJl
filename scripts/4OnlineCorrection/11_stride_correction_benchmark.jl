@@ -30,21 +30,18 @@ pos_ch = [:pos_1, :pos_2]
 
 V2 = HybridZuptInsJl.hybrid_zupt_aided_insv2
 V3 = HybridZuptInsJl.hybrid_zupt_aided_insv3
-V3F1 = HybridZuptInsJl.hybrid_zupt_aided_insv3_insframe
 Hsgp = HybridZuptInsJl.DecoupledHsgpEstimator
+Static = HybridZuptInsJl.DecoupledStaticEstimator
 
+# V3 is the INS-frame stride formulation (F1 in notes/014). The corrector-frame
+# version it replaced is gone; its numbers are recorded in notes/014 §4.
 variants = OrderedDict{String,Tuple{Function,Type,Vector{Symbol}}}(
     "ZUPT only" => (V2, HybridZuptInsJl.BaseEstimator, all_ch),
     "V2 HSGP" => (V2, Hsgp, all_ch),
+    "V2 Static" => (V2, Static, all_ch),
     "V3 HSGP" => (V3, Hsgp, all_ch),
-    "V3 Static" => (V3, HybridZuptInsJl.DecoupledStaticEstimator, all_ch),
-    "V3-F1 HSGP" => (V3F1, Hsgp, all_ch),
+    "V3 Static" => (V3, Static, all_ch),
     "V3 HSGP no-yaw" => (V3, Hsgp, pos_ch),
-    "V3-F1 HSGP no-yaw" => (V3F1, Hsgp, pos_ch),
-    # 10_yaw_prediction_diagnosis: the GP's input-dependent yaw part has no test
-    # skill and on DCSC the HSGP yaw prediction is ~0, while a constant bias
-    # tracks the drift. So: F1 targets with a constant-bias corrector.
-    "V3-F1 Static" => (V3F1, HybridZuptInsJl.DecoupledStaticEstimator, all_ch),
 )
 
 if isnothing(results_csv)

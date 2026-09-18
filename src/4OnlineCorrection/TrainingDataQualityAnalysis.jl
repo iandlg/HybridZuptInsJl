@@ -32,6 +32,9 @@ function training_data_quality_analysis(
     test_tr_ratio::Float64=0.1,
     train_tr_ratio::Float64=1.0,
     base_estimator::Tuple{<:AbstractString,<:Any}=("ZUPT only", BaseEstimator),
+    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
+    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
+    correction_filter::Function=hybrid_zupt_aided_insv2,
 )::DataFrame
 
     results = DataFrame(
@@ -118,7 +121,7 @@ function training_data_quality_analysis(
                 gt_available_train = [n <= n_train_cutoff for n in 1:N_train]
 
                 estimator_train = estimator_factory(300; params=params, corrected_channels=corrected_channels)
-                _, _, _, _, init_model = hybrid_zupt_aided_insv2(
+                _, _, _, _, init_model = correction_filter(
                     inertial_train, sim_config_train, gt_traj_train, estimator_train;
                     x_init=x_init_train, gt_available=gt_available_train,
                     ref_frame=frame, feature_type=feature_type
@@ -137,7 +140,7 @@ function training_data_quality_analysis(
 
                 try
                     estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels)
-                    _, step_seg, corr_traj, _, _ = hybrid_zupt_aided_insv2(
+                    _, step_seg, corr_traj, _, _ = correction_filter(
                         inertial_updated, sim_config_updated, gt_traj_aligned, estimator_test;
                         x_init=x_init, gt_available=gt_available_test,
                         ref_frame=frame, feature_type=feature_type,

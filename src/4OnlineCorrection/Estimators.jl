@@ -221,9 +221,9 @@ Apply a stride-error prediction to the stride itself, returning the
 `s_l` is the local-frame stride the prediction corrects -- the same `ins_stride`
 the target and the feature were built from -- and `R_aug_wl` is the corrector's
 local→world map it is rotated back out with. When `s_l` was built from the
-corrector's own attitude this is the notes/013 path exactly; when it was built
-from the inner INS's attitude (notes/014), the corrected stride is the INS
-stride placed in the world by the corrector's heading. `Δp`, `Δq` are still the
+corrector's own attitude this is the notes/013 path exactly; V3 builds it from
+the inner INS's attitude (notes/014), so the corrected stride is the INS stride
+placed in the world by the corrector's heading. `Δp`, `Δq` are still the
 raw increments: they fix `q_raw`, whose yaw the correction is measured against.
 
 The covariance goes out to the world frame and back: `Σpq` is what

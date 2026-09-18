@@ -513,7 +513,7 @@ is_noiseless(spec::NoiseSpec)::Bool =
 
 For every `(dataset_name, trial_id)` pair in `aligned` (as produced by
 `collect_aligned_trajectories`), every `train_ratio` in `train_ratios`, and every
-estimator type in `estimators`, run `hybrid_zupt_aided_insv2` and record the raw
+estimator type in `estimators`, run `correction_filter` (default `hybrid_zupt_aided_insv2`) and record the raw
 outputs together with the resulting horizontal RMSE / RMSE-rate.
 
 # Arguments
@@ -578,6 +578,9 @@ function run_online_correction_sweep(
     noise_specs::AbstractVector{NoiseSpec}=[NoiseSpec()], # Default noise is none at all
     seeds::AbstractVector{Int}=[123],
     keep_artifacts::Bool=true,
+    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
+    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
+    correction_filter::Function=hybrid_zupt_aided_insv2,
     # pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
     # pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
     # att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
@@ -655,7 +658,7 @@ function run_online_correction_sweep(
                                     corrected_channels=output_channels,
                                 )
 
-                                zupt, step_seg, corr_traj, io_data, model = hybrid_zupt_aided_insv2(
+                                zupt, step_seg, corr_traj, io_data, model = correction_filter(
                                     res.inertial_updated,
                                     res.sim_config_updated,
                                     gt_traj_noisy,

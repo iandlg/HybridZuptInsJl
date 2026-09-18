@@ -46,13 +46,13 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
-# Filter used for the Static/HSGP corrections. F1 = stride-level correction with the
-# target and feature in the inner INS's own frame (notes/014); swap back to
+# Filter used for the Static/HSGP corrections. V3 = stride-level correction with the
+# target and feature in the inner INS's own frame (notes/013, 014); swap back to
 # `HybridZuptInsJl.hybrid_zupt_aided_insv2` to see the V2 baseline. "ZUPT only"
 # always runs through V2 (it has no learned model, so the filter choice is moot).
-# Regression plots use the HSGP run's own target: under F1 it is built in the INS
+# Regression plots use the HSGP run's own target: under V3 it is built in the INS
 # frame, which is not the V2 corrector-frame target the "Base" run records.
-corr_filter = HybridZuptInsJl.hybrid_zupt_aided_insv3_insframe
+corr_filter = HybridZuptInsJl.hybrid_zupt_aided_insv3
 
 trial_id = 15 # meta["trial_id"]
 train_ratio = 0.3

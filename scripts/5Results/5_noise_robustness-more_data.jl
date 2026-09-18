@@ -77,6 +77,10 @@ test_labels = Dict(
 hsgp_p_key = 47
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name.
+filter_tag = "V3"
+
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 
 # Hand-tuned override of the loaded hyperparameters. Set `use_hand_tuned=false`
@@ -184,6 +188,7 @@ if isnothing(replot_csv)
             order_seeds=SEEDS,
             train_tr_ratio=1.0,
             test_tr_ratio=0.1,
+            correction_filter=CORRECTION_FILTERS[filter_tag],
         )
         results[noise_label] = df_spec
 
@@ -191,14 +196,14 @@ if isnothing(replot_csv)
             HybridZuptInsJl.plot_multi_track_training_quality(
                 df_spec;
                 metric=METRIC,
-                save_path=stamped(SECTION, "multi_track_training_$(noise_label)"),
+                save_path=stamped(SECTION, "multi_track_training_$(filter_tag)_$(noise_label)"),
             )
         end
 
         # The per-repeat rows, beside the figure: a box of 5 points is worth being able to
         # look at, the `train_set` column is the only record of which permutation each
         # repeat drew, and `replot_csv` above turns this file back into the figure.
-        CSV.write(stamped(SECTION, "multi_track_training_$(noise_label)"; ext="csv"), df_spec)
+        CSV.write(stamped(SECTION, "multi_track_training_$(filter_tag)_$(noise_label)"; ext="csv"), df_spec)
 
         summarise_more_data(df_spec, noise.tag)
         summarise_order_invariance(df_spec, noise.tag)

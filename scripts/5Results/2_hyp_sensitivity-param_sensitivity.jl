@@ -51,6 +51,10 @@ sweep_trial_ids = trial_ids(data_key)
 train_ratio = 0.4
 output_channel_idxs = [1, 2, 4]
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name.
+filter_tag = "V3"
+
 noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
 
 # `pred_includes_noise` controls whether the GP `noise` hyperparameter reaches
@@ -64,7 +68,7 @@ sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 5 : 11
+n_steps = smoke_test ? 5 : 7
 log_range = (-1.0, 1.0)     # scale families: decades
 delta_range = (-3.0, 3.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 
@@ -137,7 +141,7 @@ outdir = joinpath("out/Results", SECTION, "data")
 mkpath(outdir)
 
 time = string(Dates.now())
-base_name = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
+base_name = "$(filter_tag)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
 ##
 make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
@@ -145,6 +149,7 @@ make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator,
     noise_spec=noise_spec,
     pred_includes_noise=pred_includes_noise,
+    correction_filter=CORRECTION_FILTERS[filter_tag],
 )
 
 df = HybridZuptInsJl.sweep_over_trials(
@@ -222,6 +227,7 @@ metadata = Dict(
     "noise_spec_tag" => noise_spec.tag,
     "pred_includes_noise" => pred_includes_noise,
     "hsgp_p_key" => hsgp_p_key,
+    "correction_filter" => filter_tag,
     "base_parameters_metadata" => meta
 )
 
@@ -243,7 +249,8 @@ println()
 ## ----- Plot ----------------------------------------------------------------
 # Set `replot_basename` to re-plot a previously saved sweep, or leave it
 # `nothing` to plot the sweep just computed above.
-replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"
+# replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"   # V2
+replot_basename = nothing
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically

@@ -101,6 +101,23 @@ function load_hsgp_params(key::Int; m::Int=200)
 end
 
 # ---------------------------------------------------------------------------
+# Correction filters
+# ---------------------------------------------------------------------------
+
+"""
+The online-correction filters, keyed by the tag scripts put in their output file
+names. V2 applies the GP prediction as a measurement on the absolute state; V3
+corrects the stride and propagates it (notes/013, stride built in the INS frame
+per notes/014). A script picks one with `filter_tag` and passes
+`CORRECTION_FILTERS[filter_tag]` as `correction_filter=`, so figures from the two
+never share a name.
+"""
+const CORRECTION_FILTERS = Dict{String,Function}(
+    "V2" => HybridZuptInsJl.hybrid_zupt_aided_insv2,
+    "V3" => HybridZuptInsJl.hybrid_zupt_aided_insv3,
+)
+
+# ---------------------------------------------------------------------------
 # Output paths
 # ---------------------------------------------------------------------------
 
