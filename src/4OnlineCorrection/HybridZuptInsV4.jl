@@ -223,8 +223,11 @@ function hybrid_zupt_aided_insv4(
             feature_type=feature_type, feature=feature)
 
         if gt_available[curr_step] && posyaw_measurement_update
-            if !isnothing(predicted) && gt_available[prev_step]
-                append_io!(io_data["residual"], inertial.t[prev_step], stride_err - predicted[1])
+            # The pseudo-stride from k=1 is not a stride: skip it.
+            if gt_available[prev_step] && prev_step != 1
+                observe_stride_error!(corrector, stride_err)
+                isnothing(predicted) ||
+                    append_io!(io_data["residual"], inertial.t[prev_step], stride_err - predicted[1])
             end
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],

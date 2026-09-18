@@ -19,27 +19,60 @@ abstract type AbstractJointStrideEstimator <: AbstractEstimator end
 _channel_mask(corrected_channels::Vector{Symbol})::Vector{Int} =
     [idx for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw]) if sym in corrected_channels]
 
-# GP likelihood noise on all four channels, denormalised: the stride residual
-# the model does not explain. Uncorrected channels have it too.
-_residual_std(params::HsgpParameters)::Vector{Float64} =
-    [getfield(params.hp, Symbol(_OUTPUT_NAMES[j]))[1] * params.output_stats[2][j] for j in 1:4]
-
 """
-Lag-1 autocorrelation of the yaw stride residual: −0.35 (ANG2) and −0.30 (DCSC)
-median over trials, against ≈0 or positive for position. So most of the yaw
-residual is footfall jitter, `y₄ = f + (j_{i+1} − j_i) + w`, which telescopes,
-and the GP's `σ_n²` splits as `σ_j² = −ρσ_n²` on each mocap yaw fix and
-`σ_w² = (1+2ρ)σ_n²` per stride. Taking all of `σ_n²` as process noise instead
-pins the corrector to one jittered footfall and grows its yaw covariance as a
-random walk the error does not follow.
-"""
-const YAW_RESIDUAL_LAG1 = -0.33
+The stride residual the model does not explain, per channel of the 4-channel
+convention (corrected or not), as
 
-function _residual_split(params::HsgpParameters)
-    σ = _residual_std(params)
-    σ_jψ = sqrt(-YAW_RESIDUAL_LAG1) * σ[4]
-    σ[4] *= sqrt(1 + 2YAW_RESIDUAL_LAG1)
-    return σ, σ_jψ
+    r_i = w_i + (j_{i+1} − j_i)
+
+a per-stride process noise `w` (σ_w²) and a per-footfall jitter `j` (σ_j²) that
+telescopes: whatever puts the mocap footfall pose off the INS footfall pose,
+including mocap noise. `j` is noise on each mocap fix, not on the stride, so it
+does not accumulate. Its moments `γ₀ = σ_w² + 2σ_j²`, `γ₁ = −σ_j²` are estimated
+online from the stride errors of the ground-truth half, around their running
+mean, with the GP noise hyperparameter as a prior worth `n₀` strides: `γ₀ = σ_n²`,
+and `γ₁ = ρ₀σ_n²` with the lag-1 autocorrelation measured across trials (yaw
+−0.35 ANG2 / −0.30 DCSC; position ≈0 or positive, so 0).
+
+The hyperparameter alone is not enough: key 42's σ_n is about twice the DCSC
+residual, and under mocap noise the jitter is the mocap noise, which nothing
+else tells the filter.
+"""
+mutable struct StrideNoise
+    γ₀_prior::Vector{Float64}
+    γ₁_prior::Vector{Float64}
+    n::Int
+    S₁::Vector{Float64}
+    S₂::Vector{Float64}
+    S₁₂::Vector{Float64}
+    last::Vector{Float64}
+end
+
+const NOISE_PRIOR_LAG1 = [0.0, 0.0, 0.0, -0.33]
+const NOISE_PRIOR_STRIDES = 10
+
+function StrideNoise(params::HsgpParameters)
+    σ_n² = [(getfield(params.hp, Symbol(_OUTPUT_NAMES[j]))[1] * params.output_stats[2][j])^2 for j in 1:4]
+    return StrideNoise(σ_n², NOISE_PRIOR_LAG1 .* σ_n², 0, zeros(4), zeros(4), zeros(4), zeros(4))
+end
+
+function update!(ν::StrideNoise, r::AbstractVector{Float64})
+    ν.n > 0 && (ν.S₁₂ .+= ν.last .* r)
+    ν.n += 1
+    ν.S₁ .+= r
+    ν.S₂ .+= r .^ 2
+    ν.last .= r
+    return ν
+end
+
+"`(σ_w, σ_j)` per channel."
+function noise_split(ν::StrideNoise)
+    n₀, n = NOISE_PRIOR_STRIDES, ν.n
+    μ = n > 0 ? ν.S₁ ./ n : zeros(4)
+    γ₀ = (n₀ .* ν.γ₀_prior .+ (n > 0 ? ν.S₂ .- n .* μ .^ 2 : 0.0)) ./ (n₀ + n)
+    γ₁ = (n₀ .* ν.γ₁_prior .+ (n > 1 ? ν.S₁₂ .- (n - 1) .* μ .^ 2 : 0.0)) ./ (n₀ + max(n - 1, 0))
+    σ_j² = clamp.(-γ₁, 0.0, γ₀ ./ 2)
+    return sqrt.(max.(γ₀ .- 2σ_j², 0.0)), sqrt.(σ_j²)
 end
 
 mutable struct JointStrideStaticEstimator <: AbstractJointStrideEstimator
@@ -50,8 +83,7 @@ mutable struct JointStrideStaticEstimator <: AbstractJointStrideEstimator
     Σ::Matrix{Float64}
     i::Int
     β::Vector{Float64}          # per-channel stride bias, physical units
-    σ_y::Vector{Float64}        # per-stride process noise, all 4 channels
-    σ_jψ::Float64               # footfall yaw jitter, on the mocap yaw
+    noise::StrideNoise
     params::HsgpParameters
     correction_mask::Vector{Int}
     p::Int
@@ -62,7 +94,7 @@ function JointStrideStaticEstimator(N::Int; params::HsgpParameters,
     mask = _channel_mask(corrected_channels)
     p = length(mask)
     return JointStrideStaticEstimator(zeros(N), zeros(3, N), zeros(4, N),
-        zeros(6 + p), zeros(6 + p, 6 + p), 1, zeros(p), _residual_split(params)...,
+        zeros(6 + p), zeros(6 + p, 6 + p), 1, zeros(p), StrideNoise(params),
         params, mask, p)
 end
 
@@ -74,8 +106,7 @@ mutable struct JointStrideHsgpEstimator <: AbstractJointStrideEstimator
     Σ::Matrix{Float64}
     i::Int
     β::Vector{Float64}          # HSGP weights, normalised output, channel-major
-    σ_y::Vector{Float64}        # per-stride process noise, all 4 channels
-    σ_jψ::Float64               # footfall yaw jitter, on the mocap yaw
+    noise::StrideNoise
     params::HsgpParameters
     per_dim_eigvals::Matrix{Float64}
     correction_mask::Vector{Int}
@@ -88,7 +119,7 @@ function JointStrideHsgpEstimator(N::Int; params::HsgpParameters,
     p = length(mask)
     nβ = p * params.m
     return JointStrideHsgpEstimator(zeros(N), zeros(3, N), zeros(4, N),
-        zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), _residual_split(params)...,
+        zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), StrideNoise(params),
         params, calc_eigenvalues(params.LL, params.m, params.d), mask, p)
 end
 
@@ -167,7 +198,7 @@ previous footfall, `Σpq` over `[ε_p^{b_i}; ε_q^{b_{i+1}}]`), `ins_stride` the
 same stride in its local frame, and `R_bh` maps that local frame into the INS
 body frame. Returns the
 applied correction in the 4-channel convention and its predictive covariance
-(`ΦΣββΦ' + σ_y²`), or `nothing` for a corrector without a stride model.
+(`ΦΣββΦ' + σ_w²`), or `nothing` for a corrector without a stride model.
 
 For a plain `AbstractEstimator` this is the uncorrected `dynamic_update!`.
 """
@@ -229,7 +260,8 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     # Odometry noise (ε_p from the INS body frame through the local frame),
     # then the stride residual the model does not explain.
     G = [A_wl*R_bh' zeros(3, 3); zeros(3, 3) R⁺]
-    Σxx += G * Σpq * G' + B_all * Diagonal(c.σ_y .^ 2) * B_all'
+    σ_w, _ = noise_split(c.noise)
+    Σxx += G * Σpq * G' + B_all * Diagonal(σ_w .^ 2) * B_all'
 
     c.Σ[1:6, 1:6] = (Σxx + Σxx') / 2
     c.Σ[1:6, 7:end] = Σxβ
@@ -238,9 +270,19 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
 
     y_full, Σy_full = zeros(4), zeros(4, 4)
     y_full[mask] = y
-    Σy_full[mask, mask] = Φ * c.Σ[7:end, 7:end] * Φ' + Diagonal(c.σ_y[mask] .^ 2)
+    Σy_full[mask, mask] = Φ * c.Σ[7:end, 7:end] * Φ' + Diagonal(σ_w[mask] .^ 2)
     return y_full, Σy_full
 end
+
+"""
+    observe_stride_error!(c, stride_err)
+
+Feed one ground-truth stride error (both ends under mocap) to the corrector's
+noise estimate. A no-op for correctors without one.
+"""
+observe_stride_error!(c::AbstractEstimator, stride_err::AbstractVector{Float64}) = nothing
+observe_stride_error!(c::AbstractJointStrideEstimator, stride_err::AbstractVector{Float64}) =
+    update!(c.noise, stride_err)
 
 function posyaw_measurement_update!(c::AbstractJointStrideEstimator;
     curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
@@ -250,7 +292,11 @@ function posyaw_measurement_update!(c::AbstractJointStrideEstimator;
     # H touches only [δp; δθ_z], so H Σ is four rows of Σ.
     rows = [1, 2, 3, 6]
     HΣ = c.Σ[rows, :]
-    S = Symmetric(HΣ[:, rows] + Σy + Diagonal([0.0, 0.0, 0.0, c.σ_jψ^2]))
+    # Footfall jitter on the fix; horizontal taken isotropic, since the
+    # position channels are in the stride's local frame.
+    _, σ_j = noise_split(c.noise)
+    σ_h² = (σ_j[1]^2 + σ_j[2]^2) / 2
+    S = Symmetric(HΣ[:, rows] + Σy + Diagonal([σ_h², σ_h², σ_j[3]^2, σ_j[4]^2]))
     K = HΣ' / S
     c.δx .+= K * (r - c.δx[rows])
     c.Σ .-= K * HΣ
