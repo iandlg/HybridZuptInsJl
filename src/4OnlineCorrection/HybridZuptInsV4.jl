@@ -29,7 +29,7 @@ function hybrid_zupt_aided_insv4(
     gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),
     ref_frame::ReferenceFrame=HEADING,
     feature_type::FeatureType=THREED_STEP,
-    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing,
+    init_model::Optional{Tuple}=nothing,
     posyaw_measurement_update::Bool=true,
     diagnostics::Optional{CorrectorDiagnostics}=nothing
 )

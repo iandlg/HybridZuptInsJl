@@ -41,6 +41,7 @@ else tells the filter.
 mutable struct StrideNoise
     γ₀_prior::Vector{Float64}
     γ₁_prior::Vector{Float64}
+    n₀::Int                     # prior weight, in strides
     n::Int
     S₁::Vector{Float64}
     S₂::Vector{Float64}
@@ -49,11 +50,23 @@ mutable struct StrideNoise
 end
 
 const NOISE_PRIOR_LAG1 = [0.0, 0.0, 0.0, -0.33]
-const NOISE_PRIOR_STRIDES = 10
+const NOISE_PRIOR_STRIDES = 3
 
 function StrideNoise(params::HsgpParameters)
     σ_n² = [(getfield(params.hp, Symbol(_OUTPUT_NAMES[j]))[1] * params.output_stats[2][j])^2 for j in 1:4]
-    return StrideNoise(σ_n², NOISE_PRIOR_LAG1 .* σ_n², 0, zeros(4), zeros(4), zeros(4), zeros(4))
+    return StrideNoise(σ_n², NOISE_PRIOR_LAG1 .* σ_n², NOISE_PRIOR_STRIDES, 0, zeros(4), zeros(4), zeros(4), zeros(4))
+end
+
+"""
+    carry_over(ν) -> StrideNoise
+
+The estimate so far as the prior of the next track, weighted by every stride
+behind it. The running mean restarts, so a bias that differs between tracks
+does not inflate the next track's noise.
+"""
+function carry_over(ν::StrideNoise)::StrideNoise
+    γ₀, γ₁ = _moments(ν)
+    return StrideNoise(γ₀, γ₁, ν.n₀ + ν.n, 0, zeros(4), zeros(4), zeros(4), zeros(4))
 end
 
 function update!(ν::StrideNoise, r::AbstractVector{Float64})
@@ -65,12 +78,17 @@ function update!(ν::StrideNoise, r::AbstractVector{Float64})
     return ν
 end
 
-"`(σ_w, σ_j)` per channel."
-function noise_split(ν::StrideNoise)
-    n₀, n = NOISE_PRIOR_STRIDES, ν.n
+function _moments(ν::StrideNoise)
+    n₀, n = ν.n₀, ν.n
     μ = n > 0 ? ν.S₁ ./ n : zeros(4)
     γ₀ = (n₀ .* ν.γ₀_prior .+ (n > 0 ? ν.S₂ .- n .* μ .^ 2 : 0.0)) ./ (n₀ + n)
     γ₁ = (n₀ .* ν.γ₁_prior .+ (n > 1 ? ν.S₁₂ .- (n - 1) .* μ .^ 2 : 0.0)) ./ (n₀ + max(n - 1, 0))
+    return γ₀, γ₁
+end
+
+"`(σ_w, σ_j)` per channel."
+function noise_split(ν::StrideNoise)
+    γ₀, γ₁ = _moments(ν)
     σ_j² = clamp.(-γ₁, 0.0, γ₀ ./ 2)
     return sqrt.(max.(γ₀ .- 2σ_j², 0.0)), sqrt.(σ_j²)
 end
@@ -178,7 +196,7 @@ end
 function initialize_corrector!(c::AbstractJointStrideEstimator;
     t::Float64, pos_init::AbstractVector{Float64}, quat_init::AbstractVector{Float64},
     Σpq_init::AbstractMatrix{Float64},
-    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing, kwargs...)
+    init_model::Optional{Tuple}=nothing, kwargs...)
     c.i = 1
     c.t[1] = t
     c.pos[:, 1] = pos_init
@@ -187,6 +205,7 @@ function initialize_corrector!(c::AbstractJointStrideEstimator;
     c.Σ .= 0.0
     c.Σ[1:6, 1:6] = Σpq_init
     _init_prior!(c, init_model)
+    isnothing(init_model) || length(init_model) < 3 || (c.noise = carry_over(init_model[3]))
 end
 
 """
@@ -310,14 +329,16 @@ function relinearize!(c::AbstractJointStrideEstimator)
     c.δx .= 0.0
 end
 
-function get_model(c::JointStrideStaticEstimator)::Tuple{Vector{Float64},Matrix{Float64}}
+# The model is `(β, Σβ, noise)`: the stride noise is a property of the sensor
+# and the gait, like β, and a track with little mocap cannot re-estimate it.
+function get_model(c::JointStrideStaticEstimator)::Tuple{Vector{Float64},Matrix{Float64},StrideNoise}
     β, Σβ = zeros(4), zeros(4, 4)
     β[c.correction_mask] = c.β
     Σβ[c.correction_mask, c.correction_mask] = c.Σ[7:end, 7:end]
-    return β, Σβ
+    return β, Σβ, c.noise
 end
 
-function get_model(c::JointStrideHsgpEstimator)::Tuple{Vector{Float64},Matrix{Float64}}
+function get_model(c::JointStrideHsgpEstimator)::Tuple{Vector{Float64},Matrix{Float64},StrideNoise}
     m, mask = c.params.m, c.correction_mask
     rng(j) = ((j-1)*m+1):(j*m)
     β, Σβ = zeros(4m), zeros(4m, 4m)
@@ -327,5 +348,5 @@ function get_model(c::JointStrideHsgpEstimator)::Tuple{Vector{Float64},Matrix{Fl
             Σβ[_full_range(o1, m), _full_range(o2, m)] = c.Σ[6 .+ rng(j1), 6 .+ rng(j2)]
         end
     end
-    return β, Σβ
+    return β, Σβ, c.noise
 end
