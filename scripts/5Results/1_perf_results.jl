@@ -40,7 +40,7 @@ results_csv = nothing
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
-filter_tag = "V3"
+filter_tag = "V4"
 
 # 2. Align INS / GT trajectories once per trial.
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the

@@ -8,6 +8,7 @@ include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("_common.jl")
 using OrderedCollections, DataFrames
+import CSV
 
 # 1. Datasets / trials
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
@@ -26,7 +27,7 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 ## 4. Correction methods to compare
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
-filter_tag = "V3"
+filter_tag = "V4"
 
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
@@ -56,6 +57,11 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
 # read for a claim; the boxplot is the distributional summary.
 const SECTION = "2_HypSensitivity/DatasetComparison"
 
+score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_ratio_order,
+    :estimator, :estimator_order, :noise_spec_tag, :noise_spec_order, :seed,
+    :rmse, :rmse_rate, :rmse_yaw]
+CSV.write(stamped(SECTION, "results_$(filter_tag)"; ext="csv"), results_df[:, score_cols])
+
 # Same trials go through every estimator, so the design is paired. Box the
 # per-trial difference against the uncorrected baseline rather than reading two
 # independent-looking boxes side by side.
@@ -68,7 +74,7 @@ results_figure() do
         metric=:rmse,
         show_points=false,
         show_outliers=true,
-        save_path=stamped(SECTION, "dataset_comparison_paired_$(filter_tag)"),
+        save_path=stamped(SECTION, "dataset_comparison_paired_rmse_$(filter_tag)"),
     )
 end
 
@@ -81,6 +87,6 @@ results_figure() do
         metric=:rmse_yaw,
         show_points=false,
         show_outliers=true,
-        save_path=stamped(SECTION, "dataset_comparison_paired_$(filter_tag)"),
+        save_path=stamped(SECTION, "dataset_comparison_paired_rmse_yaw_$(filter_tag)"),
     )
 end

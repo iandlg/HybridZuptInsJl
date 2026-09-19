@@ -53,7 +53,7 @@ output_channel_idxs = [1, 2, 4]
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
-filter_tag = "V3"
+filter_tag = "V4"
 
 noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
 
@@ -68,7 +68,7 @@ sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 5 : 7
+n_steps = smoke_test ? 5 : 5
 log_range = (-1.0, 1.0)     # scale families: decades
 delta_range = (-3.0, 3.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 

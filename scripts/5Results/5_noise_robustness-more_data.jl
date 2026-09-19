@@ -40,7 +40,7 @@ data_dir_path = data_dir(data_key)
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
-filter_tag = "V3"
+filter_tag = "V4"
 
 estimators = OrderedDict(
     "Static" => CORRECTORS[filter_tag].static,
@@ -108,7 +108,7 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 15
+N_REPEATS = 3
 SEEDS = collect(1:N_REPEATS)
 
 noise_specs = OrderedDict(

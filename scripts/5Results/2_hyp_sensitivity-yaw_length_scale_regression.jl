@@ -38,7 +38,7 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 # the same point on the same data rather than a nearby one.
 data_key = "ANG2"
 data_dir_path = data_dir(data_key)
-trial_id = 14
+trial_id = 15
 train_ratio = 0.3
 
 # Only the yaw channel is corrected, matching section 3 -- that is the setting in
@@ -77,11 +77,15 @@ n_train_cutoff = floor(Int, train_ratio * N)
 gt_available = [n <= n_train_cutoff for n in 1:N]
 window = round(Int, N / 60)
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name, and picks the correctors below (CORRECTORS).
+filter_tag = "V4"
+
 # Static first so it reads as the reference the HSGP variants are compared against.
 # Keys stay plain ASCII -- they index the colour and label maps below; the rendered
 # names live in `series_labels`.
 estimators = OrderedDict{String,HybridZuptInsJl.AbstractEstimator}(
-    "Static" => HybridZuptInsJl.DecoupledStaticEstimator(window; corrected_channels=output_channels),
+    "Static" => CORRECTORS[filter_tag].static(window; params=hsgp_p, corrected_channels=output_channels),
 )
 series_labels = Dict{String,Any}("Static" => "Static")
 
@@ -109,7 +113,7 @@ for offset in log10_offsets
     key = "HSGP x$(mult)"
     trained = offset == 0
 
-    estimators[key] = HybridZuptInsJl.DecoupledHsgpEstimator(window;
+    estimators[key] = CORRECTORS[filter_tag].hsgp(window;
         params=params_with_yaw_length_scale(hsgp_p, ls), corrected_channels=output_channels)
 
     # Spelled with hp_multiplier_label, the same helper that labels the multiplier axis
@@ -127,7 +131,7 @@ predictions = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 target = nothing
 
 for (label, estimator) in estimators
-    _, _, _, io_data, _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+    _, _, _, io_data, _ = CORRECTION_FILTERS[filter_tag](
         inertial_updated, sim_config_updated, gt_traj_aligned, estimator;
         x_init=x_init, gt_available=gt_available,
         ref_frame=FRAME, feature_type=FEATURE_TYPE)
@@ -155,7 +159,7 @@ results_figure() do
         colors=series_colors, labels=series_labels,
         linestyles=series_styles, linewidths=series_widths, clip_quantile=1.1,
         dataset=data_key, trial_id=trial_id,
-        save_path=stamped(SECTION, "yaw_length_scale_$(data_key)$(trial_id)"))
+        save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_$(data_key)$(trial_id)"))
 end
 
 # Companion: unclipped, with the predictive bands and the numbers, so the figure
@@ -167,7 +171,7 @@ end
 #         linestyles=series_styles, linewidths=series_widths,
 #         show_std=true, show_rmse=true, show_mean_std=true,
 #         dataset=data_key, trial_id=trial_id,
-#         save_path=stamped(SECTION, "yaw_length_scale_$(data_key)$(trial_id)_unclipped"))
+#         save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_$(data_key)$(trial_id)_unclipped"))
 # end
 
 # Zoomed view: 40 s of the test segment, enough strides to see the shape of each
@@ -180,7 +184,7 @@ results_figure() do
         # time_window=(400.0, 440.0),
         figsize=(900, 300),
         dataset=data_key, trial_id=trial_id, show_std=false,
-        save_path=stamped(SECTION, "yaw_length_scale_$(data_key)$(trial_id)_zoom"))
+        save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_$(data_key)$(trial_id)_zoom"))
 end
 GLMakie.activate!()
 

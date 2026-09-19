@@ -27,7 +27,7 @@ if use_hand_tuned
     hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_hp=new_hp)
 end
 
-data_key = "ANG2" # meta["data_key"]
+data_key = "DCSC" # meta["data_key"]
 data_dir_path = data_dir(data_key)
 # Saved figures go to out/Results/<section>/, the same tree scripts/5Results/ writes to.
 # Plain variable, not `const`: this script gets re-included in a live REPL.
@@ -46,15 +46,20 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
-# Filter used for the Static/HSGP corrections. V3 = stride-level correction with the
-# target and feature in the inner INS's own frame (notes/013, 014); swap back to
-# `HybridZuptInsJl.hybrid_zupt_aided_insv2` to see the V2 baseline. "ZUPT only"
-# always runs through V2 (it has no learned model, so the filter choice is moot).
-# Regression plots use the HSGP run's own target: under V3 it is built in the INS
-# frame, which is not the V2 corrector-frame target the "Base" run records.
-corr_filter = HybridZuptInsJl.hybrid_zupt_aided_insv3
+# Filter used for the Static/HSGP corrections, with its correctors (see
+# CORRECTION_FILTERS / CORRECTORS in scripts/5Results/_common.jl). The two go
+# together: V4 needs the JointStride correctors, and running it with V2's
+# Decoupled ones silently corrects nothing, since `propagate_stride!` falls back
+# to the uncorrected `dynamic_update!` for any other estimator.
+# "ZUPT only" runs through the SAME filter: it has no learned model, but the
+# filter still sets where the corrector starts (V4 starts it on the mocap pose
+# when ground truth is available at k=1, V2 on `x_init`) and how the mocap fixes
+# are weighted, so running it through V2 left its training half offset from the
+# corrected runs it is the baseline for.
+filter_tag = "V4"
+corr_filter = CORRECTION_FILTERS[filter_tag]
 
-trial_id = 15 # meta["trial_id"]
+trial_id = 4 # meta["trial_id"]
 train_ratio = 0.3
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
@@ -84,16 +89,16 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 io_data = OrderedDict()
 
 default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
 zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
+decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
@@ -132,8 +137,8 @@ fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligne
 # Zoom on where the corrections diverge: the first strides after the model takes over
 # (top row) and the end of the walk (bottom row), one column per correction, ground
 # truth dashed underneath each.
-n_first_strides = 20
-n_last_strides = 20
+n_first_strides = 15
+n_last_strides = 15
 fig_traj_panels = results_figure() do
     HybridZuptInsJl.plot_trajectory_start_end_panels(
         trajs, gt_traj_aligned[step_seg][mask];
@@ -203,16 +208,16 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 io_data = OrderedDict()
 
 default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
 zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=decoup_stat_model, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
+decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)

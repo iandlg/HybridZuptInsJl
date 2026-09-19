@@ -37,16 +37,15 @@ const SECTION = "5_NoiseRobustness/NoiseSweep"
 const DATA_SECTION = "$(SECTION)/data"
 
 # 1. Define datasets / trials to process
-data_key = "ANG2"
+data_key = "DCSC"
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
-    "Angermann" => (data_dir(data_key), trial_ids(data_key)),
-    # "DCSC" => (data_dir(data_key), trial_ids(data_key)),
+    data_key => (data_dir(data_key), trial_ids(data_key)),
 )
 
 # noise_results_ANG2_HEADING_TWOD_STEP_YAW_5draws_2026-09-12T12:31:55.563.csv
 # noise_results_DCSC_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T16:55:33.086.csv
 
-results_csv = "noise_results_DCSC_HEADING_TWOD_STEP_YAW_5draws_2026-09-11T16:55:33.086.csv"
+results_csv = nothing
 
 # 2. Align INS / GT trajectories for every trial
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
@@ -59,11 +58,15 @@ hsgp_p_key = 47
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Define correction methods to compare
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name, and picks the correctors below (CORRECTORS).
+filter_tag = "V4"
+
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
     # "Joint static bias" => HybridZuptInsJl.JointStaticEstimator,
-    "Static" => HybridZuptInsJl.DecoupledStaticEstimator,
-    "HSGP" => HybridZuptInsJl.DecoupledHsgpEstimator,
+    "Static" => CORRECTORS[filter_tag].static,
+    "HSGP" => CORRECTORS[filter_tag].hsgp,
     # "Joint HSGP" => JointHsgpEstimator,
 )
 
@@ -74,10 +77,10 @@ noise_specs = [
     # Clean reference, so the figure carries its own no-noise baseline instead
     # of requiring the reader to compare against a different figure.
     HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=0.0, tag="No noise"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=0.0, tag="Position Noise Only (0.05m)"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=0.0, tag="Position Noise Only (0.1m)"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=5*pi/180, tag="Heading Noise Only (5°)"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=10*pi/180, tag="Heading Noise Only (10°)"),
+    # HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=0.0, tag="Position Noise Only (0.05m)"),
+    # HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=0.0, tag="Position Noise Only (0.1m)"),
+    # HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=5*pi/180, tag="Heading Noise Only (5°)"),
+    # HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=10*pi/180, tag="Heading Noise Only (10°)"),
     HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"),
     HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±10°)"),
     HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180, tag="Position & Heading Noise (1.0m, ±10°)"),
@@ -89,7 +92,7 @@ noise_specs = [
 #
 # Cost is trials x (1 + n_noisy_specs x N_NOISE_DRAWS) x estimators runs at
 # ~1.2 s each: 231 runs (~5 min) at 1 draw, ~2000 (~40 min) at 10.
-N_NOISE_DRAWS = 5
+N_NOISE_DRAWS = 2
 SEEDS = collect(1:N_NOISE_DRAWS)
 
 # Only the scalar columns are written: the sweep also carries the raw zupt/step_seg/
@@ -119,11 +122,12 @@ if isnothing(results_csv)
         noise_specs=noise_specs,
         seeds=SEEDS,
         keep_artifacts=false,
+        correction_filter=CORRECTION_FILTERS[filter_tag],
     )
     # The draw count is in the stem because a 1-draw and a 10-draw file are different
     # artifacts: at one seed the spread is trial-to-trial only, and that is precisely
     # the distinction this script exists to make.
-    run_stem = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
+    run_stem = "$(filter_tag)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
     csv_path = results_path(DATA_SECTION, "$(CSV_PREFIX)_$(run_stem).csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path" nrow(results_df)
@@ -141,7 +145,7 @@ const BASE_ESTIMATOR = "ZUPT only"
 # Which of the swept noise specs reach the figure. Indexed into `noise_specs` so
 # the tags cannot drift from the specs that were actually run;
 # `eachindex(noise_specs)` is all of them.
-spec_indexes = [1, 6, 7, 8] # eachindex(noise_specs)
+spec_indexes = eachindex(noise_specs) # [1, 6, 7, 8] #
 plot_specs = noise_specs[spec_indexes]
 
 for metric in (:rmse,)

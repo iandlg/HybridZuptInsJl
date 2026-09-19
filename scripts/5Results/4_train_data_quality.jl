@@ -24,7 +24,7 @@ data_dir_path = data_dir(data_key)
 # )
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
-filter_tag = "V3"
+filter_tag = "V4"
 
 estimators = OrderedDict(
     "Static" => CORRECTORS[filter_tag].static,

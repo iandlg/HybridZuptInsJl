@@ -878,13 +878,17 @@ Box geometry for [`probe_extremes_by_trial`](@ref), long form: one row per
 parameter per side, `side` being `"best"` or `"worst"`.
 
 Columns: `parameter`, `type`, `side`, `q25`, `med`, `q75`, `whisker_lo`,
-`whisker_hi`, `n_trials`, `gap`. Whiskers are Tukey's -- the furthest sample
-still within `1.5 x IQR` of the box -- so the plotting layer does no statistics
-of its own and every number in the figure is also in the saved CSV.
+`whisker_hi`, `n_trials`, `gap`, `worst_med`. Whiskers are Tukey's -- the
+furthest sample still within `1.5 x IQR` of the box -- so the plotting layer does
+no statistics of its own and every number in the figure is also in the saved CSV.
 
-`gap = median(worst) - median(best)` is carried on both rows of a parameter and
-is the sort key: how far apart the typical best and typical worst settings are,
-which is the ranking the figure exists to show.
+`worst_med = median(worst)` is carried on both rows of a parameter and is the
+sort key, descending: the parameter whose typical *worst* setting costs the most
+comes first. That is the ranking to read as a risk: how much a bad value of this
+parameter costs if you get it wrong. `gap = median(worst) - median(best)` is
+still carried -- how far apart the typical best and worst settings are -- but it
+mixes in how much there was to gain, so a parameter with a large upside ranked
+above one that is merely dangerous.
 """
 function probe_extremes_summary(df::DataFrame)::DataFrame
     ext = probe_extremes_by_trial(df)
@@ -905,8 +909,8 @@ function probe_extremes_summary(df::DataFrame)::DataFrame
         gap = w.med - b.med
         for (side, s) in (("best", b), ("worst", w))
             push!(rows, merge((parameter=first(sub.parameter), type=first(sub.type),
-                    side=side), s, (gap=gap,)))
+                    side=side), s, (gap=gap, worst_med=w.med)))
         end
     end
-    return sort!(DataFrame(rows), [order(:gap, rev=true), :side])
+    return sort!(DataFrame(rows), [order(:worst_med, rev=true), :side])
 end
