@@ -311,11 +311,13 @@ function posyaw_measurement_update!(c::AbstractJointStrideEstimator;
     # H touches only [δp; δθ_z], so H Σ is four rows of Σ.
     rows = [1, 2, 3, 6]
     HΣ = c.Σ[rows, :]
-    # Footfall jitter on the fix; horizontal taken isotropic, since the
-    # position channels are in the stride's local frame.
+    # The fix's noise is the footfall jitter alone: the jitter is identified
+    # from stride errors that already contain the mocap noise, so adding Σy on
+    # top would count it twice. Σy is its floor. Horizontal jitter is taken
+    # isotropic, since the position channels are in the stride's local frame.
     _, σ_j = noise_split(c.noise)
     σ_h² = (σ_j[1]^2 + σ_j[2]^2) / 2
-    S = Symmetric(HΣ[:, rows] + Σy + Diagonal([σ_h², σ_h², σ_j[3]^2, σ_j[4]^2]))
+    S = Symmetric(HΣ[:, rows] + Diagonal(max.([σ_h², σ_h², σ_j[3]^2, σ_j[4]^2], diag(Σy))))
     K = HΣ' / S
     c.δx .+= K * (r - c.δx[rows])
     c.Σ .-= K * HΣ
