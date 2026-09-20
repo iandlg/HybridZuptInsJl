@@ -62,6 +62,11 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
 
+# The baseline runs through the SAME filter as the corrections: the sweep hands
+# `correction_filter` every estimator in this dict, `BaseEstimator` included, so
+# "ZUPT only" here is that filter's own uncorrected run -- same corrector start
+# (V4 starts it on the mocap pose at k=1), same fix path, same scoring. A
+# baseline from a different filter is not the thing the corrections are adding to.
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
     # "Joint static bias" => HybridZuptInsJl.JointStaticEstimator,
@@ -69,6 +74,25 @@ estimators = OrderedDict(
     "HSGP" => CORRECTORS[filter_tag].hsgp,
     # "Joint HSGP" => JointHsgpEstimator,
 )
+
+# Does every filter get told how noisy the mocap it is handed actually is?
+#
+# `false` is what the earlier runs did: noise goes into the ground truth, while
+# `sigma_groundtruth` stays at the clean 1cm/0.001rad, so at pos_std=1.0 every
+# filter is handed an R ~100x too tight. That measures tolerance of a
+# mis-specified R -- which V4 wins by re-estimating it online (notes/016) -- and
+# it drags the "ZUPT only" baseline down with it (0.25m clean -> 1.05m).
+# `true` gives every estimator the true noise, so what is left to measure is the
+# correction model. V4's online jitter estimate floors at this value, so it can
+# still inflate above the truth, just not profit from discovering it.
+match_gt_sigma = true
+sigma_tag = match_gt_sigma ? "matchedR" : "assumedR"
+
+# The baseline is only a baseline if it ran through the same filter; assert it
+# rather than trusting the dict above to have been edited in step with the tag.
+@assert CORRECTION_FILTERS[filter_tag] === HybridZuptInsJl.hybrid_zupt_aided_insv4
+@assert estimators["Static"] === CORRECTORS[filter_tag].static
+@assert estimators["HSGP"] === CORRECTORS[filter_tag].hsgp
 
 output_channels = [:pos_1, :pos_2, :yaw]
 
@@ -103,6 +127,9 @@ SEEDS = collect(1:N_NOISE_DRAWS)
 # the boxplots but throws in the paired cells below.
 score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_ratio_order,
     :estimator, :estimator_order, :noise_spec_tag, :noise_spec_order, :seed,
+    # The R each row ran under, so a CSV says on its face whether it is a
+    # matched-R sweep -- the noise columns alone cannot tell you that.
+    :gt_sigma_pos, :gt_sigma_yaw,
     :rmse, :rmse_rate, :rmse_yaw]
 
 # Stem shared by the scores table and every figure drawn from it. On a re-plot it
@@ -123,11 +150,54 @@ if isnothing(results_csv)
         seeds=SEEDS,
         keep_artifacts=false,
         correction_filter=CORRECTION_FILTERS[filter_tag],
+        match_gt_sigma=match_gt_sigma,
     )
+
+    # Dead-reckoning reference: the same corrector with no mocap fix at all. It
+    # bounds the comparison from the other side -- once the mocap is noisy enough,
+    # the question is not which correction is best but whether using the fixes
+    # beats ignoring them.
+    #
+    # Run ONCE per trial: with the fixes off, the noise never enters the filter,
+    # so every (spec, seed) would reproduce this run exactly. The rows are then
+    # copied onto each (spec, seed) key so `paired_estimator_contrast` can pair
+    # them inside every cell. Those copies are one measurement repeated, not
+    # repeated measurements: its box has no spread beyond the trial-to-trial one.
+    nomocap_df = HybridZuptInsJl.run_online_correction_sweep(
+        aligned,
+        FRAME,
+        FEATURE_TYPE,
+        hsgp_p,
+        train_ratios,
+        OrderedDict("ZUPT only (no mocap)" => HybridZuptInsJl.BaseEstimator),
+        output_channels;
+        noise_specs=[first(noise_specs)],
+        seeds=SEEDS[1:1],
+        keep_artifacts=false,
+        correction_filter=CORRECTION_FILTERS[filter_tag],
+        match_gt_sigma=match_gt_sigma,
+        posyaw_measurement_update=false,
+    )
+    nomocap_df.estimator_order .= length(estimators) + 1
+    results_df = vcat(results_df, [
+        let d = copy(nomocap_df)
+            d.noise_spec_tag .= spec.tag
+            d.noise_spec_order .= order
+            d.seed .= seed
+            d
+        end
+        for (order, spec) in enumerate(noise_specs)
+        for seed in (HybridZuptInsJl.is_noiseless(spec) ? SEEDS[1:1] : SEEDS)
+    ]...)
+
     # The draw count is in the stem because a 1-draw and a 10-draw file are different
     # artifacts: at one seed the spread is trial-to-trial only, and that is precisely
     # the distinction this script exists to make.
-    run_stem = "$(filter_tag)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
+    # The hyperparameter key is part of the identity of a run, not a detail: the
+    # same dataset under key 47 and key 42 gives a different answer on the yaw
+    # channel (47's yaw prior underflows, 014), and without the key in the name
+    # the two files differ only by timestamp.
+    run_stem = "$(filter_tag)_$(sigma_tag)_$(data_key)_key$(hsgp_p_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
     csv_path = results_path(DATA_SECTION, "$(CSV_PREFIX)_$(run_stem).csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path" nrow(results_df)

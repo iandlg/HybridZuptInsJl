@@ -26,11 +26,24 @@ consequences worth keeping:
   should. The flip side is that the figure carries one noise realisation per track, so it
   marginalises over order but not over noise.
 
+The training runs are also *told* how noisy the ground truth they are handed is:
+`sigma_groundtruth` is raised to match the injected noise (`matched_gt_sigma_config`).
+WAS: the noise went into the ground truth while the R stayed at the trial's clean
+1cm/0.001rad, so a `pos_std=1.0` spec measured which corrector tolerates a mis-specified
+R rather than which correction model recovers from bad training data. The test tracks
+keep their clean ground truth and their clean R — the noise is a training-data-quality
+manipulation, and the test half is the thing being measured.
+
 Rows carry `seed` (which repeat), `train_set_order` (how many tracks had been accumulated)
 and `train_set`/`train_ids` (that repeat's ordered ids — the only record of the permutation
-it drew). Baseline rows (`train_set == "Base"`) are untrained, hence noise- and
-order-independent: they are computed once and carry `seed === missing`. Their estimator
-name defaults to `"ZUPT only"` so it keys into `_METHOD_COLOR_INDICES`
+it drew). Baseline rows (`train_set == "Base"`) are `BaseEstimator` run through
+`correction_filter` itself: the same filter, the same corrector start (V4 starts it on the
+mocap pose at k=1), the same mocap fixes over the first `test_tr_ratio` and the same
+scoring as every trained row, so a box and the baseline differ by the correction model and
+nothing else. WAS: the raw rigidly-aligned ZUPT INS, which went through no filter at all.
+They are untrained and see only clean test ground truth, hence noise- and
+order-independent: computed once per test track, carrying `seed === missing`. Their
+estimator name defaults to `"ZUPT only"` so it keys into `_METHOD_COLOR_INDICES`
 (`Plotting/OfflineCorrection.jl`) and matches the other Section 5 figures; rename it and
 the baseline silently drops to the fallback grey.
 """
@@ -75,7 +88,7 @@ function multi_track_training_analysis(
     test_cache = Dict{Int,Tuple}()
     for (test_order, (test_id, test_name)) in enumerate(test_labels)
         try
-            ins_traj_aligned, gt_traj_aligned, _, segs, inertial_updated, sim_config_updated =
+            ins_traj_aligned, gt_traj_aligned, _, _, inertial_updated, sim_config_updated =
                 compute_aligned_ins_trajectory(data_dir, test_id)
 
             x_init = vcat(
@@ -86,11 +99,25 @@ function multi_track_training_analysis(
             N = length(inertial_updated)
             test_cache[test_id] = (inertial_updated, sim_config_updated, gt_traj_aligned, x_init, N)
 
-            # Compute base RMSE (without training)
-            step_traj = ins_traj_aligned[segs]
-            gt_step_traj = gt_traj_aligned[segs]
+            # The untrained baseline, through the SAME filter as every trained row:
+            # `BaseEstimator` propagates the raw stride, so this is that filter's own
+            # uncorrected run and the only difference from a trained row is the
+            # correction model. Everything else below mirrors the test path in the main
+            # loop exactly -- same `gt_available` mask, same clean ground truth, same
+            # scoring on the filter's own `step_seg`.
+            gt_available_base = [n <= floor(Int, test_tr_ratio * N) for n in 1:N]
+            estimator_base = BaseEstimator(300; params=params, corrected_channels=corrected_channels)
+            _, step_seg, corr_traj, _, _ = correction_filter(
+                inertial_updated, sim_config_updated, gt_traj_aligned, estimator_base;
+                x_init=x_init,
+                gt_available=gt_available_base,
+                ref_frame=frame,
+                feature_type=feature_type
+            )
+
+            gt_step_traj = gt_traj_aligned[step_seg]
             n_test_cutoff = floor(Int, test_tr_ratio * length(gt_step_traj))
-            _rmse = rmse(step_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]
+            _rmse = rmse(corr_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]
             _rmse_rate = _rmse / total_distance(gt_step_traj[n_test_cutoff:end])
 
             push!(results, (
@@ -112,6 +139,10 @@ function multi_track_training_analysis(
     end
 
     # ---------- Pre‑cache train tracks ----------
+    # The corrupted ground truth and the R that goes with it are built here, once per
+    # track: the noise is keyed on `train_id` alone, so neither depends on the repeat,
+    # the estimator or the track's place in the permutation. What the cache holds is
+    # therefore exactly what the training runs are handed.
     train_cache = Dict{Int,Tuple}()
     for (train_id, _) in train_labels
         try
@@ -124,6 +155,24 @@ function multi_track_training_analysis(
                 matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
             )
             N_train = length(inertial_updated)
+
+            # Seeded by `train_id` alone: not by the estimator, so the estimators stay
+            # paired, and not by the repeat or by the track's position in the
+            # permutation, so a track's noise does not change when the order does.
+            if !isnothing(noise_spec)
+                gt_traj_aligned = add_gaussian_noise(
+                    gt_traj_aligned;
+                    pos_std=noise_spec.pos_std,
+                    pos_bias=noise_spec.pos_bias,
+                    att_std=noise_spec.att_std,
+                    att_bias=noise_spec.att_bias,
+                    rng=Random.Xoshiro(1000 * train_id)
+                )
+                # ... and the filter is told about it, rather than being handed an R
+                # that still describes the clean mocap.
+                sim_config_updated = matched_gt_sigma_config(sim_config_updated, noise_spec)
+            end
+
             train_cache[train_id] = (inertial_updated, sim_config_updated, gt_traj_aligned, x_init, N_train)
         catch e
             @warn "Skipping train trial $train_id in $data_dir" exception=e
@@ -150,25 +199,9 @@ function multi_track_training_analysis(
                     break
                 end
 
-                # Retrieve cached train data
-                inertial_train, sim_config_train, gt_traj_train, x_init_train, N_train = train_cache[train_id]
-
-                # Prepare noisy ground truth if requested. Seeded by `train_id` alone: not by
-                # the estimator, so the estimators stay paired, and not by the repeat or by
-                # the track's position in the permutation, so a track's noise does not change
-                # when the order does.
-                gt_for_training = if isnothing(noise_spec)
-                    gt_traj_train
-                else
-                    add_gaussian_noise(
-                        gt_traj_train;
-                        pos_std=noise_spec.pos_std,
-                        pos_bias=noise_spec.pos_bias,
-                        att_std=noise_spec.att_std,
-                        att_bias=noise_spec.att_bias,
-                        rng=Random.Xoshiro(1000 * train_id)
-                    )
-                end
+                # Retrieve cached train data: the ground truth is already corrupted and
+                # the config already carries the matching R (see the pre-cache above).
+                inertial_train, sim_config_train, gt_for_training, x_init_train, N_train = train_cache[train_id]
 
                 # Training mask – only first `train_tr_ratio` fraction has GT
                 n_train_cutoff = floor(Int, train_tr_ratio * N_train)

@@ -5,29 +5,6 @@
 # frozen model is re-tested after each addition, against the no-correction ZUPT baseline
 # (dashed line in the figure). Noise is applied to the training tracks only; the test
 # tracks' GT stays clean.
-#
-# The accumulation order is now DRAWN, not chosen. WAS: tracks were fed in the declared
-# order of `train_labels`, one arbitrary permutation, so every point on the curve confounded
-# "more data" with "which track came next" -- and whichever permutation happened to be typed
-# at the top of this file decided what the figure said. Each of the SEEDS repeats now walks
-# its own random permutation and each box spans the repeats.
-#
-# Two things to keep straight when reading a box:
-#
-#   - up to the last group, a box spans both the order AND which subset of tracks that
-#     permutation reached first, which is part of the "more data" question;
-#   - in the LAST group every repeat has trained on the same set of tracks in a different
-#     sequence, so the box there is order sensitivity in the fit alone. It should be
-#     near-degenerate; that is the check that the shuffling measures what it should.
-#
-# Each run writes its per-repeat rows to a CSV beside the figure; set `replot_csv` below to
-# one of those paths to redraw it without paying for the sweep again.
-#
-# The training-GT noise is NOT redrawn per repeat: a track's realisation is keyed on the
-# track id alone (`Xoshiro(1000*train_id)` in `multi_track_training_analysis`), so it is the
-# same in every repeat and for every estimator. That is what makes the last group a clean
-# order-only check -- and it also means this figure marginalises over order but carries a
-# single noise draw per track. See notes/005 and notes/006.
 
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
@@ -46,6 +23,14 @@ estimators = OrderedDict(
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
+
+# The baseline row is produced inside `multi_track_training_analysis` by running
+# `BaseEstimator` through `correction_filter`, so it is whichever filter `filter_tag`
+# selects. Assert the pairing rather than trusting the tag to have been edited in step
+# with the correctors -- the analysis function still defaults to V2 if nothing is passed.
+@assert CORRECTION_FILTERS[filter_tag] === HybridZuptInsJl.hybrid_zupt_aided_insv4
+@assert estimators["Static"] === CORRECTORS[filter_tag].static
+@assert estimators["HSGP"] === CORRECTORS[filter_tag].hsgp
 # NOTE: the order of these entries no longer matters -- it defines the *set* of training
 # tracks, and each repeat draws its own permutation of it.
 train_labels = Dict(
@@ -78,7 +63,7 @@ test_labels = Dict(
     )
 )[data_key]
 # Choose Parameters file
-hsgp_p_key = 47
+hsgp_p_key = 42
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
@@ -108,7 +93,7 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 3
+N_REPEATS = 5
 SEEDS = collect(1:N_REPEATS)
 
 noise_specs = OrderedDict(
@@ -192,18 +177,29 @@ if isnothing(replot_csv)
         )
         results[noise_label] = df_spec
 
+        # The hyperparameter key and dataset are part of a run's identity: key 47
+        # and key 42 disagree on this experiment (47's larger sigma_n makes it
+        # conservative under noisy mocap), and without them in the name two runs
+        # differ only by timestamp. `matchedR` says the filters were given the R
+        # their training ground truth actually has, which is what separates these
+        # artifacts from the ones already in this directory.
+        #
+        # One `stamped` call for both artifacts: the re-plot branch below finds a
+        # figure by swapping the CSV's extension, which only works if the two carry
+        # the same timestamp. Two calls gave them timestamps milliseconds apart.
+        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_matchedR_key$(hsgp_p_key)_$(data_key)_$(noise_label)")
         results_figure() do
             HybridZuptInsJl.plot_multi_track_training_quality(
                 df_spec;
                 metric=METRIC,
-                save_path=stamped(SECTION, "multi_track_training_$(filter_tag)_$(noise_label)"),
+                save_path=fig_path,
             )
         end
 
         # The per-repeat rows, beside the figure: a box of 5 points is worth being able to
         # look at, the `train_set` column is the only record of which permutation each
         # repeat drew, and `replot_csv` above turns this file back into the figure.
-        CSV.write(stamped(SECTION, "multi_track_training_$(filter_tag)_$(noise_label)"; ext="csv"), df_spec)
+        CSV.write(first(splitext(fig_path)) * ".csv", df_spec)
 
         summarise_more_data(df_spec, noise.tag)
         summarise_order_invariance(df_spec, noise.tag)

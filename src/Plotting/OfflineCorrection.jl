@@ -232,6 +232,10 @@ const _METHOD_COLOR_INDICES = Dict{String,Int}(
     "ZUPT only" => 1,
     "Static" => 2,
     "HSGP" => 3,
+    # The same run as "ZUPT only" with the mocap fixes switched off, so it takes
+    # wong 4 rather than the fallback grey: it is a fourth series a reader
+    # compares against the other three, not an unrecognised name.
+    "ZUPT only (no mocap)" => 4,
 )
 
 const _METHOD_FALLBACK_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)

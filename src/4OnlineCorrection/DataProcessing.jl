@@ -495,6 +495,33 @@ is_noiseless(spec::NoiseSpec)::Bool =
     (isnothing(spec.att_std) || all(iszero, spec.att_std))
 
 """
+    matched_gt_sigma_config(cfg::InsConfig, spec::NoiseSpec) -> InsConfig
+
+A copy of `cfg` whose `sigma_groundtruth` is `hypot(clean, injected)`, i.e. the R a
+filter should be given once `spec`'s noise has been added to the ground truth it is
+handed. Leaving the clean value in place instead means a `pos_std=1.0` run is given an
+R ~100x too tight, which tests whether a filter survives a mis-specified R -- won by
+construction by the correctors that re-estimate it online -- rather than which
+correction model is better.
+
+`sigma_groundtruth` reaches the ground-truth stride covariance in `stride_error`, the
+mocap fix's `Σy`, and V4's initial corrector covariance when it starts on mocap, so
+raising it here keeps all three consistent.
+
+Only the yaw component of the injected attitude noise enters the 4th channel: roll and
+pitch reach the target only through the local frame.
+"""
+function matched_gt_sigma_config(cfg::InsConfig, spec::NoiseSpec)::InsConfig
+    σ = sigma_groundtruth_array(cfg)
+    inj = zeros(4)
+    isnothing(spec.pos_std) || (inj[1:3] = spec.pos_std)
+    isnothing(spec.att_std) || (inj[4] = spec.att_std[3])
+    matched = deepcopy(cfg)
+    matched.sigma_groundtruth = Tuple(sqrt.(σ .^ 2 .+ inj .^ 2))
+    return matched
+end
+
+"""
     function run_online_correction_sweep(
         aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
         frame::ReferenceFrame,
@@ -546,6 +573,14 @@ outputs together with the resulting horizontal RMSE / RMSE-rate.
   `3 x N` with `N` the trial length, shorter trials get a prefix of what longer ones
   get: draws are identical *within* a cell by design, and only partly independent
   *across* trials.
+- `match_gt_sigma`: tell the filters how noisy the ground truth they are handed actually
+  is, via [`matched_gt_sigma_config`](@ref) — the same R for every estimator in the cell,
+  built once beside the noise draw. `false` (the default, and what every run before it
+  used) leaves the trial's clean value in place, which also degrades the "ZUPT only"
+  baseline the others are scored against.
+- `posyaw_measurement_update`: forwarded to the filter. `false` gives the dead-reckoning
+  reference — the corrector with no mocap fix at all, which is the bound worth knowing when
+  the fixes are noisy enough to be worth ignoring.
 - `keep_artifacts`: keep the raw `zupt`/`step_seg`/`corr_traj`/`io_data`/`model` objects
   in the returned frame. They cost roughly **2.5 MB per row**, which a one-draw sweep
   can afford and a Monte-Carlo one cannot: 11 trials x 6 specs x 10 draws x 3 estimators
@@ -557,8 +592,11 @@ outputs together with the resulting horizontal RMSE / RMSE-rate.
 - `DataFrame` with columns:
   `dataset_name, trial_id, train_ratio, train_ratio_order, estimator, estimator_order,
    noise_spec_tag, noise_spec_order, seed,
+   gt_sigma_pos, gt_sigma_yaw,
    zupt, step_seg, corr_traj, io_data, model,
    rmse, rmse_rate, rmse_yaw`
+  where `gt_sigma_pos`/`gt_sigma_yaw` are the R the run was *given* (see
+  `match_gt_sigma`), as opposed to `pos_std`/`att_std`, which are the noise it was given.
   where `zupt`, `step_seg`, `corr_traj`, `io_data`, `model` hold the raw objects
   returned by `hybrid_zupt_aided_insv2` (`Any`-typed columns — no serialization).
   `estimator_order`/`train_ratio_order` are 1-based indices matching the iteration
@@ -581,6 +619,16 @@ function run_online_correction_sweep(
     # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
     # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
     correction_filter::Function=hybrid_zupt_aided_insv2,
+    # Tell the filters how noisy the ground truth they are handed actually is
+    # (`matched_gt_sigma_config`). `false` (the default, and what every existing
+    # run used) leaves `sigma_groundtruth` at the trial's clean value whatever
+    # noise is injected, so at `pos_std=1.0` every filter is handed an R that is
+    # ~100x too tight.
+    match_gt_sigma::Bool=false,
+    # Forwarded to the filter. `false` runs without any mocap fix, i.e. the
+    # dead-reckoning reference: what the corrector does when it ignores ground
+    # truth entirely.
+    posyaw_measurement_update::Bool=true,
     # pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
     # pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
     # att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
@@ -605,6 +653,11 @@ function run_online_correction_sweep(
         pos_bias=Any[],
         att_std=Any[],
         att_bias=Any[],
+        # The R the run was given, not the noise it was given: with
+        # `match_gt_sigma=false` these stay at the trial's clean sigma_groundtruth
+        # however much noise `pos_std`/`att_std` injected.
+        gt_sigma_pos=Float64[],
+        gt_sigma_yaw=Float64[],
         zupt=Any[],
         step_seg=Any[],
         corr_traj=Any[],
@@ -627,6 +680,14 @@ function run_online_correction_sweep(
                 gt_available = [n <= n_train_cutoff for n in 1:N]
 
                 for (noise_spec_order, noise_spec) in enumerate(noise_specs)
+
+                    # The R every estimator in this cell is given. Built once per
+                    # spec so all of them share it exactly, like the noise draw
+                    # below.
+                    sim_config = match_gt_sigma ?
+                                 matched_gt_sigma_config(res.sim_config_updated, noise_spec) :
+                                 res.sim_config_updated
+                    gt_sigma = sigma_groundtruth_array(sim_config)
 
                     # A noiseless spec is deterministic, so extra seeds would only
                     # duplicate the same run (and would inflate its box with copies
@@ -660,7 +721,7 @@ function run_online_correction_sweep(
 
                                 zupt, step_seg, corr_traj, io_data, model = correction_filter(
                                     res.inertial_updated,
-                                    res.sim_config_updated,
+                                    sim_config,
                                     gt_traj_noisy,
                                     estimator;
                                     step_detector=step_detector_factory(),
@@ -668,6 +729,7 @@ function run_online_correction_sweep(
                                     gt_available=gt_available,
                                     ref_frame=frame,
                                     feature_type=feature_type,
+                                    posyaw_measurement_update=posyaw_measurement_update,
                                 )
 
                                 # RMSE evaluated against the clean ground truth
@@ -687,6 +749,7 @@ function run_online_correction_sweep(
                                     seed,
                                     noise_spec.pos_std, noise_spec.pos_bias,
                                     noise_spec.att_std, noise_spec.att_bias,
+                                    gt_sigma[1], gt_sigma[4],
                                     (keep_artifacts ? (zupt, step_seg, corr_traj, io_data, model) :
                                      (nothing, nothing, nothing, nothing, nothing))...,
                                     _rmse, _rmse_rate, _rmse_yaw,
