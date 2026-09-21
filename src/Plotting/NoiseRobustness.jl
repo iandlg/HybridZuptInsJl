@@ -13,6 +13,7 @@ function _grouped_boxplot!(
     group_order_col::Symbol=:noise_spec_order,
     series_col::Symbol=:estimator,
     series_order_col::Symbol=:estimator_order,
+    series_colors::Union{Nothing,AbstractDict}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
 )
@@ -32,7 +33,11 @@ function _grouped_boxplot!(
     # scheme shifts every remaining estimator onto its neighbour's colour. Wong 1/2/3
     # belong to ZUPT only / Static / HSGP by convention -- one table, in
     # `_METHOD_COLOR_INDICES` (Plotting/OfflineCorrection.jl).
-    series_color = Dict(ser => method_color(ser) for ser in series)
+    # `series_colors` overrides the table for series it names, for figures whose
+    # series are variants of a method ("HSGP (split)") rather than methods: those miss
+    # the table and would all land on one fallback grey. Everything else is unchanged.
+    series_color = Dict(ser => isnothing(series_colors) ? method_color(ser) :
+                               get(series_colors, ser, method_color(ser)) for ser in series)
 
     group_width = 0.8
     bar_width = n_series > 0 ? group_width / n_series : group_width

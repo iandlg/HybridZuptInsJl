@@ -39,6 +39,7 @@ residual, and under mocap noise the jitter is the mocap noise, which nothing
 else tells the filter.
 """
 mutable struct StrideNoise
+    noise_mode::Symbol          # :split, or :process_only / :online_total (ablation arms)
     γ₀_prior::Vector{Float64}
     γ₁_prior::Vector{Float64}
     n₀::Int                     # prior weight, in strides
@@ -52,9 +53,25 @@ end
 const NOISE_PRIOR_LAG1 = [0.0, 0.0, 0.0, -0.33]
 const NOISE_PRIOR_STRIDES = 3
 
-function StrideNoise(params::HsgpParameters)
+"""
+    StrideNoise(params; noise_mode=:split)
+
+The two ablation arms of `scripts/5Results/8_noise_split_ablation.jl` both put no jitter on
+the mocap fix, so its noise falls back to `Σ_gt`, and both take `σ_w = √γ₀`; they differ in
+where `γ₀` comes from:
+
+- `:process_only` freezes it at the prior, i.e. `σ_w = σ_n` fixed — the model this replaced,
+  with neither half of `StrideNoise` (no split, no online estimate);
+- `:online_total` keeps the online estimate and drops only the split, which is what separates
+  the two things the `:split` arm changes at once (notes/018 §5).
+"""
+function StrideNoise(params::HsgpParameters; noise_mode::Symbol=:split)
+    noise_mode in (:split, :process_only, :online_total) ||
+        throw(ArgumentError("noise_mode must be :split, :process_only or :online_total, \
+                             got :$noise_mode"))
     σ_n² = [(getfield(params.hp, Symbol(_OUTPUT_NAMES[j]))[1] * params.output_stats[2][j])^2 for j in 1:4]
-    return StrideNoise(σ_n², NOISE_PRIOR_LAG1 .* σ_n², NOISE_PRIOR_STRIDES, 0, zeros(4), zeros(4), zeros(4), zeros(4))
+    return StrideNoise(noise_mode, σ_n², NOISE_PRIOR_LAG1 .* σ_n², NOISE_PRIOR_STRIDES, 0,
+        zeros(4), zeros(4), zeros(4), zeros(4))
 end
 
 """
@@ -66,10 +83,11 @@ does not inflate the next track's noise.
 """
 function carry_over(ν::StrideNoise)::StrideNoise
     γ₀, γ₁ = _moments(ν)
-    return StrideNoise(γ₀, γ₁, ν.n₀ + ν.n, 0, zeros(4), zeros(4), zeros(4), zeros(4))
+    return StrideNoise(ν.noise_mode, γ₀, γ₁, ν.n₀ + ν.n, 0, zeros(4), zeros(4), zeros(4), zeros(4))
 end
 
 function update!(ν::StrideNoise, r::AbstractVector{Float64})
+    ν.noise_mode === :process_only && return ν
     ν.n > 0 && (ν.S₁₂ .+= ν.last .* r)
     ν.n += 1
     ν.S₁ .+= r
@@ -89,6 +107,7 @@ end
 "`(σ_w, σ_j)` per channel."
 function noise_split(ν::StrideNoise)
     γ₀, γ₁ = _moments(ν)
+    ν.noise_mode === :split || return sqrt.(γ₀), zeros(4)
     σ_j² = clamp.(-γ₁, 0.0, γ₀ ./ 2)
     return sqrt.(max.(γ₀ .- 2σ_j², 0.0)), sqrt.(σ_j²)
 end
@@ -108,11 +127,12 @@ mutable struct JointStrideStaticEstimator <: AbstractJointStrideEstimator
 end
 
 function JointStrideStaticEstimator(N::Int; params::HsgpParameters,
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...)
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
+    noise_mode::Symbol=:split, kwargs...)
     mask = _channel_mask(corrected_channels)
     p = length(mask)
     return JointStrideStaticEstimator(zeros(N), zeros(3, N), zeros(4, N),
-        zeros(6 + p), zeros(6 + p, 6 + p), 1, zeros(p), StrideNoise(params),
+        zeros(6 + p), zeros(6 + p, 6 + p), 1, zeros(p), StrideNoise(params; noise_mode=noise_mode),
         params, mask, p)
 end
 
@@ -132,12 +152,13 @@ mutable struct JointStrideHsgpEstimator <: AbstractJointStrideEstimator
 end
 
 function JointStrideHsgpEstimator(N::Int; params::HsgpParameters,
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...)
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
+    noise_mode::Symbol=:split, kwargs...)
     mask = _channel_mask(corrected_channels)
     p = length(mask)
     nβ = p * params.m
     return JointStrideHsgpEstimator(zeros(N), zeros(3, N), zeros(4, N),
-        zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), StrideNoise(params),
+        zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), StrideNoise(params; noise_mode=noise_mode),
         params, calc_eigenvalues(params.LL, params.m, params.d), mask, p)
 end
 

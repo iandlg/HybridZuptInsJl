@@ -52,6 +52,7 @@ end
         save_path::Union{String,Nothing}=nothing,
         show_outliers::Bool=true,
         show_points::Bool=false,
+        series_colors::Union{Nothing,AbstractDict}=nothing,
     )
 
 `plot_noise_paired_relative_change` with `train_ratio` on the x axis instead of the
@@ -84,6 +85,7 @@ function plot_train_ratio_paired_relative_change(
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
+    series_colors::Union{Nothing,AbstractDict}=nothing,
 )
     check_metric(metric)
     value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
@@ -116,6 +118,7 @@ function plot_train_ratio_paired_relative_change(
     hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
     labeled = _grouped_boxplot!(ax, sub, value_col;
         group_col=:train_ratio, group_order_col=:train_ratio_order,
+        series_colors=series_colors,
         show_outliers=show_outliers, show_points=show_points)
 
     # `_grouped_boxplot!` labels the groups with the raw Float64; a percentage
@@ -160,6 +163,8 @@ the zero line.
 
 # Arguments
 - `paired`: output of `paired_estimator_contrast`.
+- `series_colors`: per-series colour override, for series that are variants of a method
+  (`"HSGP (split)"`) and so miss `method_color`'s table. Unnamed series keep the table's.
 - `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
 - `metric`: only used to name the quantity in the axis label — it must be the one
   `paired_estimator_contrast` was called with, which is not checked.

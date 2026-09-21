@@ -91,9 +91,10 @@ io_data = OrderedDict()
 default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME,
+    feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, mod) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
 zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)

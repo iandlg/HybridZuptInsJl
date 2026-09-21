@@ -188,6 +188,36 @@ function corrector_nees_series(d::CorrectorDiagnostics, gt_traj;
 end
 
 """
+    nees_yaw_series(d, gt_traj; att_convention=:left) -> (k, yaw, lower, upper, dof=1)
+
+Yaw-only NEES of a corrector, per footfall: the third component of the same
+attitude error vector `corrector_nees_series` uses, over `Σ[6,6]` alone, against
+a `Chisq(1)` envelope.
+
+Separate from the 3-dof `att` NEES because roll and pitch are observed by nothing
+in this corrector, so their inflated covariance drags the 3-dof statistic towards
+zero and hides what the yaw channel is doing — which is the channel the stride
+noise model is argued on (notes/015 §2.5).
+"""
+function nees_yaw_series(d::CorrectorDiagnostics, gt_traj; att_convention::Symbol=:left)
+    n = length(d)
+    n == 0 && error("No footfalls recorded; pass `diagnostics=` to the filter.")
+
+    gt = gt_traj[d.k]
+    nyaw = Float64[]
+    for i in 1:n
+        R_est = quat_to_matrix(d.quat[i])
+        R_gt = gt.R_nb[:, :, i]
+        R_err = att_convention === :right ? R_est' * R_gt : R_gt * R_est'
+        eψ = rotmat_to_rotvec(R_err)[3]
+        push!(nyaw, mahalanobis([eψ], view(d.Σ[i], 6:6, 6:6)))
+    end
+
+    lo, hi = quantile(Chisq(1), 0.025), quantile(Chisq(1), 0.975)
+    return (k=copy(d.k), yaw=nyaw, lower=lo, upper=hi, dof=1)
+end
+
+"""
     pos_cov_trace(d)
 
 `tr(Σ[1:3,1:3])` per footfall -- the position uncertainty the corrector reports,

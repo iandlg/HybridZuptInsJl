@@ -532,6 +532,7 @@ end
         output_channels::Vector{Symbol};
         step_detector_factory::Type=StepDetector,
         estimator_alloc::Int=300,
+        estimator_kwargs::NamedTuple=(;),
         pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
         pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
         att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
@@ -555,8 +556,14 @@ outputs together with the resulting horizontal RMSE / RMSE-rate.
   preserved in `train_ratio_order`.
 - `estimators`: `OrderedDict{String,Type}` name => estimator type, e.g.
   `OrderedDict("Joint HSGP" => JointHsgpEstimator, "Base" => BaseEstimator)`. Types are
-  constructed as `T(estimator_alloc; params=hsgp_params, corrected_channels=output_channels)`.
-  Order is preserved in `estimator_order`.
+  constructed as `T(estimator_alloc; params=hsgp_params, corrected_channels=output_channels,
+  estimator_kwargs...)`. Order is preserved in `estimator_order`.
+- `estimator_kwargs`: extra constructor keywords, the same for every estimator in the sweep —
+  one sweep call is one setting. Every estimator constructor ends in `kwargs...`, so a keyword
+  only some of them read (e.g. `noise_mode=` on the V4 joint correctors,
+  `scripts/5Results/8_noise_split_ablation.jl`) is silently ignored by the rest, `BaseEstimator`
+  included. To compare two settings, call the sweep once per setting and `vcat` the frames with
+  the setting written into `estimator`.
 - `output_channels`: e.g. `[:pos_1, :pos_2, :yaw]`, forwarded as `corrected_channels`.
 - `seeds`: one noise realisation per seed, per `(trial, train_ratio, noise_spec)`. Each
   realisation comes from its own `Xoshiro(seed)`, so a seed always means the same draw
@@ -613,6 +620,7 @@ function run_online_correction_sweep(
     output_channels::Vector{Symbol};
     step_detector_factory::Type=StepDetector,
     estimator_alloc::Int=300,
+    estimator_kwargs::NamedTuple=(;),
     noise_specs::AbstractVector{NoiseSpec}=[NoiseSpec()], # Default noise is none at all
     seeds::AbstractVector{Int}=[123],
     keep_artifacts::Bool=true,
@@ -717,6 +725,7 @@ function run_online_correction_sweep(
                                     estimator_alloc;
                                     params=hsgp_params,
                                     corrected_channels=output_channels,
+                                    estimator_kwargs...,
                                 )
 
                                 zupt, step_seg, corr_traj, io_data, model = correction_filter(

@@ -61,6 +61,7 @@ function multi_track_training_analysis(
     noise_spec::Union{Nothing,NoiseSpec}=nothing,
     order_seeds::AbstractVector{Int}=[1],
     base_estimator_name::AbstractString="ZUPT only",
+    estimator_kwargs::NamedTuple=(;),
     # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
     # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
     correction_filter::Function=hybrid_zupt_aided_insv2,
@@ -112,7 +113,7 @@ function multi_track_training_analysis(
                 x_init=x_init,
                 gt_available=gt_available_base,
                 ref_frame=frame,
-                feature_type=feature_type
+                feature_type=feature_type,
             )
 
             gt_step_traj = gt_traj_aligned[step_seg]
@@ -209,7 +210,7 @@ function multi_track_training_analysis(
 
                 # Train on this track, continuing from previous model
                 try
-                    estimator_train = estimator_factory(300; params=params, corrected_channels=corrected_channels)
+                    estimator_train = estimator_factory(300; params=params, corrected_channels=corrected_channels, estimator_kwargs...)
                     _, _, _, _, init_model = correction_filter(
                         inertial_train, sim_config_train, gt_for_training, estimator_train;
                         x_init=x_init_train,

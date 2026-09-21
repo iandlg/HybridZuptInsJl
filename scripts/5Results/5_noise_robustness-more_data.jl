@@ -65,7 +65,7 @@ test_labels = Dict(
 # Choose Parameters file
 hsgp_p_key = 42
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-
+mode = :process_only
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 
 # Hand-tuned override of the loaded hyperparameters. Set `use_hand_tuned=false`
@@ -93,7 +93,7 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 5
+N_REPEATS = 10
 SEEDS = collect(1:N_REPEATS)
 
 noise_specs = OrderedDict(
@@ -173,6 +173,7 @@ if isnothing(replot_csv)
             order_seeds=SEEDS,
             train_tr_ratio=1.0,
             test_tr_ratio=0.1,
+            estimator_kwargs=(noise_mode=mode,),
             correction_filter=CORRECTION_FILTERS[filter_tag],
         )
         results[noise_label] = df_spec
