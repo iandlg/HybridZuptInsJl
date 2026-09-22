@@ -37,7 +37,9 @@ const SECTION = "5_NoiseRobustness/NoiseSweep"
 const DATA_SECTION = "$(SECTION)/data"
 
 # 1. Define datasets / trials to process
-data_key = "DCSC"
+# `DATA_KEY` in the environment overrides the default, which is how one unattended run
+# covers both datasets without editing the file; a bare REPL include behaves as before.
+data_key = get(ENV, "DATA_KEY", "DCSC")
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
     data_key => (data_dir(data_key), trial_ids(data_key)),
 )
@@ -54,13 +56,22 @@ aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(
 
 ## 3. Load HSGP hyperparameters / Input feature type
 m = 200
-hsgp_p_key = 47
+# Key 42 for both datasets, as everywhere else in the chapter. WAS 47, hand-tuned for
+# this script on DCSC; notes/014 has why 47's DCSC yaw prior is the exception rather
+# than the setting to compare the rest of the results against.
+hsgp_p_key = 42
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Define correction methods to compare
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
+# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
+# hyperparameters, no split and no online estimate. Note what that removes from THIS
+# experiment specifically: the online re-sizing is how V4 discovers mocap noise it was
+# not told about (notes/016), so under `:process_only` the filters rely on the R they
+# are handed -- which `match_gt_sigma=true` below makes the true one.
+noise_mode = :process_only
 
 # The baseline runs through the SAME filter as the corrections: the sweep hands
 # `correction_filter` every estimator in this dict, `BaseEstimator` included, so
@@ -116,7 +127,7 @@ noise_specs = [
 #
 # Cost is trials x (1 + n_noisy_specs x N_NOISE_DRAWS) x estimators runs at
 # ~1.2 s each: 231 runs (~5 min) at 1 draw, ~2000 (~40 min) at 10.
-N_NOISE_DRAWS = 2
+N_NOISE_DRAWS = 10
 SEEDS = collect(1:N_NOISE_DRAWS)
 
 # Only the scalar columns are written: the sweep also carries the raw zupt/step_seg/
@@ -150,6 +161,7 @@ if isnothing(results_csv)
         seeds=SEEDS,
         keep_artifacts=false,
         correction_filter=CORRECTION_FILTERS[filter_tag],
+        estimator_kwargs=(noise_mode=noise_mode,),
         match_gt_sigma=match_gt_sigma,
     )
 
@@ -175,6 +187,7 @@ if isnothing(results_csv)
         seeds=SEEDS[1:1],
         keep_artifacts=false,
         correction_filter=CORRECTION_FILTERS[filter_tag],
+        estimator_kwargs=(noise_mode=noise_mode,),
         match_gt_sigma=match_gt_sigma,
         posyaw_measurement_update=false,
     )
@@ -197,7 +210,7 @@ if isnothing(results_csv)
     # same dataset under key 47 and key 42 gives a different answer on the yaw
     # channel (47's yaw prior underflows, 014), and without the key in the name
     # the two files differ only by timestamp.
-    run_stem = "$(filter_tag)_$(sigma_tag)_$(data_key)_key$(hsgp_p_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
+    run_stem = "$(filter_tag)_$(noise_mode)_$(sigma_tag)_$(data_key)_key$(hsgp_p_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
     csv_path = results_path(DATA_SECTION, "$(CSV_PREFIX)_$(run_stem).csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path" nrow(results_df)

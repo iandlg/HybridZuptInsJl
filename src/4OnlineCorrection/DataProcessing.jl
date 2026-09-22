@@ -881,3 +881,258 @@ function paired_estimator_contrast(
     sort!(out, [:dataset_order, :noise_spec_order, :estimator_order, :trial_id, :seed])
     return out
 end
+
+# ── Learning curve: how much online mocap does the correction need? ───────
+#
+# `run_online_correction_sweep` varies `train_ratio`, which moves two things at once:
+# it scores each cell on `corr_traj[floor(r*N_s):end]`, so more training also buys a
+# shorter, later evaluation window. A ZUPT-INS drifts with open-loop distance, so its
+# RMSE falls with `train_ratio` whether or not anything was learned, and the columns of
+# that figure cannot be compared with each other. See notes/011.
+#
+# Here the evaluation window is a fixed number of strides at the END of the walk, and
+# the budget is the window of ground-truth strides immediately before it: recency and
+# the scored strides are both held fixed, and only the amount of mocap varies.
+#
+#   stride:  1 ............ ks-b .... ks | ks+1 ...... N
+#   mocap:   .  no mocap  . [==== b ====] |   none (test)
+#   score:                                 [=== n_test ==]
+#
+# V4 has no separate train/anchor switch: `β` lives in the corrector's error state and
+# the mocap pose update is what learns it (JointStrideEstimators.jl), so the budget IS
+# the mocap. The pose entering the test window is pinned by the last fix whatever `b`
+# is, but the covariance is not, so the `"ZUPT only"` reference is re-run at every
+# budget and `learning_curve_contrast` pairs within a budget rather than assuming one
+# reference per trial.
+
+"""
+    run_online_learning_curve(aligned, frame, feature_type, hsgp_params, budgets,
+                              estimators, output_channels; n_test_strides, ...) -> DataFrame
+
+For every `(dataset_name, trial_id)` in `aligned`, every budget in `budgets` and every
+estimator in `estimators`, run `correction_filter` with mocap available only over the
+`budget` strides before the split and score the result on the last `n_test_strides`
+strides.
+
+`budgets` are stride counts: budget `b` marks the closed sample range
+`[step_seg[k_split - b], step_seg[k_split]]`, i.e. `b+1` footfall fixes bounding exactly
+`b` ground-truth strides. A budget larger than a trial's pre-split prefix is skipped for
+that trial rather than clamped, so the wide end of the axis can rest on fewer trials.
+
+`estimator_kwargs` are extra constructor keywords, the same for every estimator — one
+call is one setting, as in [`run_online_correction_sweep`](@ref).
+"""
+function run_online_learning_curve(
+    aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
+    frame::ReferenceFrame,
+    feature_type::FeatureType,
+    hsgp_params::HsgpParameters,
+    budgets::AbstractVector{Int},
+    estimators::AbstractDict{<:AbstractString,<:Type},
+    output_channels::Vector{Symbol};
+    n_test_strides::Int,
+    step_detector_factory::Type=StepDetector,
+    estimator_alloc::Int=300,
+    estimator_kwargs::NamedTuple=(;),
+    correction_filter::Function=hybrid_zupt_aided_insv4,
+    keep_artifacts::Bool=false,
+)::DataFrame
+
+    isempty(budgets) && throw(ArgumentError("budgets must not be empty"))
+    allunique(budgets) || throw(ArgumentError("budgets must be unique, got $budgets"))
+    all(>(0), budgets) || throw(ArgumentError("budgets must be positive, got $budgets"))
+    n_test_strides > 0 ||
+        throw(ArgumentError("n_test_strides must be positive, got $n_test_strides"))
+
+    df = DataFrame(
+        dataset_name=String[],
+        dataset_order=Int[],
+        trial_id=Int[],
+        train_strides=Int[],
+        train_strides_order=Int[],
+        estimator=String[],
+        estimator_order=Int[],
+        n_strides=Int[],
+        k_split=Int[],
+        n_test_strides=Int[],
+        test_distance_m=Float64[],
+        zupt=Any[],
+        step_seg=Any[],
+        corr_traj=Any[],
+        io_data=Any[],
+        model=Any[],
+        rmse=Float64[],
+        rmse_rate=Float64[],
+        rmse_yaw=Float64[],
+        final_pos_err=Float64[],
+    )
+
+    n_ok = 0
+    n_fail = 0
+    n_short = 0
+
+    for (dataset_order, (dataset_name, trials)) in enumerate(aligned)
+        for (trial_id, res) in trials
+            N = length(res.inertial_updated)
+
+            # The segmentation depends only on the ZUPT detector and the IMU stream, not
+            # on the corrector or on what ground truth is available, so one throwaway run
+            # fixes the stride grid every cell of this trial is built on. Each cell below
+            # asserts it got that same grid back.
+            _, step_seg_ref, _, _, _ = correction_filter(
+                res.inertial_updated,
+                res.sim_config_updated,
+                res.gt_traj_aligned,
+                BaseEstimator(estimator_alloc);
+                step_detector=step_detector_factory(),
+                x_init=res.x_init,
+                gt_available=zeros(Bool, N),
+                ref_frame=frame,
+                feature_type=feature_type,
+            )
+
+            n_strides = length(step_seg_ref)
+            k_split = n_strides - n_test_strides
+            if k_split < 2
+                @warn "trial $trial_id has $n_strides strides, too few for a \
+                       $n_test_strides-stride test window; skipping"
+                continue
+            end
+
+            split_sample = step_seg_ref[k_split]
+            gt_step = res.gt_traj_aligned[step_seg_ref]
+            test_ks = (k_split+1):n_strides
+            test_distance = total_distance(gt_step[test_ks])
+
+            for (budget_order, budget) in enumerate(budgets)
+                first_k = k_split - budget
+                if first_k < 1
+                    n_short += 1
+                    @info "trial $trial_id: $(k_split - 1) strides before the split, \
+                           budget $budget skipped"
+                    continue
+                end
+                # Ground truth is read only at footfall samples, so marking the closed
+                # sample range [step_seg_ref[first_k], split_sample] gives exactly
+                # `budget` strides with mocap at both ends.
+                gt_available = [step_seg_ref[first_k] <= n <= split_sample for n in 1:N]
+
+                for (estimator_order, (est_name, est_type)) in enumerate(estimators)
+                    # Only the filter run is guarded: a trial that diverges should cost one
+                    # cell, but a segmentation mismatch or a scoring failure below is a bug
+                    # in the design of the sweep and must not be swallowed as a skipped cell.
+                    result = nothing
+                    try
+                        estimator = est_type(
+                            estimator_alloc;
+                            params=hsgp_params,
+                            corrected_channels=output_channels,
+                            estimator_kwargs...,
+                        )
+
+                        result = correction_filter(
+                            res.inertial_updated,
+                            res.sim_config_updated,
+                            res.gt_traj_aligned,
+                            estimator;
+                            step_detector=step_detector_factory(),
+                            x_init=res.x_init,
+                            gt_available=gt_available,
+                            ref_frame=frame,
+                            feature_type=feature_type,
+                        )
+                    catch e
+                        @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, \
+                               budget=$budget, estimator=$est_name)" exception = e
+                        n_fail += 1
+                    end
+                    isnothing(result) && continue
+
+                    zupt, step_seg, corr_traj, io_data, model = result
+                    step_seg == step_seg_ref || error(
+                        "segmentation moved between runs of trial $trial_id \
+                         ($(length(step_seg)) strides against $n_strides): the fixed \
+                          evaluation window is not the same window in every cell.")
+
+                    _rmse = rmse(corr_traj[test_ks], gt_step[test_ks])[end]
+                    _rmse_yaw = rmse_yaw(corr_traj[test_ks], gt_step[test_ks])[end]
+                    _final = norm(corr_traj.pos[1:2, end] .- gt_step.pos[1:2, end])
+
+                    push!(df, (
+                        dataset_name, dataset_order, trial_id,
+                        budget, budget_order,
+                        est_name, estimator_order,
+                        n_strides, k_split, length(test_ks), test_distance,
+                        (keep_artifacts ? (zupt, step_seg, corr_traj, io_data, model) :
+                         (nothing, nothing, nothing, nothing, nothing))...,
+                        _rmse, _rmse / test_distance, _rmse_yaw, _final,
+                    ))
+                    n_ok += 1
+                end
+            end
+        end
+    end
+
+    @info "run_online_learning_curve: $n_ok succeeded, $n_fail failed, $n_short budget(s) \
+           skipped as longer than the trial's pre-split prefix"
+    return df
+end
+
+"The columns that identify one cell of a learning-curve sweep."
+const _LC_TRIAL_KEYS = [:dataset_name, :dataset_order, :trial_id,
+    :train_strides, :train_strides_order]
+
+"""
+    learning_curve_contrast(df; metric=:rmse, reference_estimator="ZUPT only") -> DataFrame
+
+Per-trial change in `metric` against `reference_estimator`, paired within one budget.
+
+The reference is re-run at every budget because under V4 the mocap window is the
+budget, so it is only *near*-budget-independent: the last fix pins its pose but not its
+covariance. Its spread across budgets is reported here rather than assumed — a large
+spread means mocap is reaching the test window.
+
+Returns the trial keys plus `estimator`, `estimator_order`, `value`, `ref_value`,
+`delta` and `rel_change_pct`. Negative means the estimator beat the baseline.
+"""
+function learning_curve_contrast(
+    df::DataFrame;
+    metric::Symbol=:rmse,
+    reference_estimator::AbstractString="ZUPT only",
+)::DataFrame
+    _require_cols(df, vcat(_LC_TRIAL_KEYS, [:estimator, :estimator_order, metric]),
+        "learning_curve_contrast")
+
+    ref_rows = df[df.estimator .== reference_estimator, :]
+    isempty(ref_rows) && throw(ArgumentError(
+        "learning_curve_contrast: no rows with estimator = \"$reference_estimator\". \
+         Available: $(join(unique(df.estimator), ", "))"))
+
+    # How much the reference moves across budgets, per trial: the invariant the fixed
+    # evaluation window rests on, reported rather than asserted.
+    spread = combine(groupby(ref_rows, [:dataset_name, :trial_id]),
+        metric => (v -> (maximum(v) - minimum(v)) / abs(median(v))) => :rel_spread)
+    @info "learning_curve_contrast: \"$reference_estimator\" spread across budgets \
+           (median $(round(100 * median(spread.rel_spread); digits=2))%, \
+           max $(round(100 * maximum(spread.rel_spread); digits=2))% \
+           on trial $(spread.trial_id[argmax(spread.rel_spread)]))"
+
+    ref = select(ref_rows, _LC_TRIAL_KEYS, metric => :ref_value)
+    test = select(df[df.estimator .!= reference_estimator, :],
+        _LC_TRIAL_KEYS, [:estimator, :estimator_order], metric => :value)
+
+    out = innerjoin(test, ref, on=_LC_TRIAL_KEYS)
+    isempty(out) && throw(ArgumentError(
+        "learning_curve_contrast: no cell has both \"$reference_estimator\" and \
+         another estimator — nothing to pair."))
+
+    ok = isfinite.(out.value) .& isfinite.(out.ref_value)
+    n_bad = count(!, ok)
+    n_bad > 0 && @warn "learning_curve_contrast: dropping $n_bad pair(s) with non-finite metric values"
+    out = out[ok, :]
+
+    out.delta = out.value .- out.ref_value
+    out.rel_change_pct = 100 .* out.delta ./ abs.(out.ref_value)
+    sort!(out, [:dataset_order, :train_strides_order, :estimator_order, :trial_id])
+    return out
+end

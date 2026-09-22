@@ -32,6 +32,11 @@ function training_data_quality_analysis(
     test_tr_ratio::Float64=0.1,
     train_tr_ratio::Float64=1.0,
     base_estimator::Tuple{<:AbstractString,<:Any}=("ZUPT only", BaseEstimator),
+    # Extra constructor keywords, the same for train and test, e.g. `noise_mode=` on the
+    # V4 joint correctors. Both estimators below get them: the test corrector inherits the
+    # noise state through `init_model`, but the mode it is built with should say the same
+    # thing rather than relying on that.
+    estimator_kwargs::NamedTuple=(;),
     # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
     # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
     correction_filter::Function=hybrid_zupt_aided_insv2,
@@ -120,7 +125,7 @@ function training_data_quality_analysis(
                 n_train_cutoff = floor(Int, train_tr_ratio * N_train)
                 gt_available_train = [n <= n_train_cutoff for n in 1:N_train]
 
-                estimator_train = estimator_factory(300; params=params, corrected_channels=corrected_channels)
+                estimator_train = estimator_factory(300; params=params, corrected_channels=corrected_channels, estimator_kwargs...)
                 _, _, _, _, init_model = correction_filter(
                     inertial_train, sim_config_train, gt_traj_train, estimator_train;
                     x_init=x_init_train, gt_available=gt_available_train,
@@ -139,7 +144,7 @@ function training_data_quality_analysis(
                 gt_available_test = [n <= n_test_cutoff for n in 1:N]
 
                 try
-                    estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels)
+                    estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels, estimator_kwargs...)
                     _, step_seg, corr_traj, _, _ = correction_filter(
                         inertial_updated, sim_config_updated, gt_traj_aligned, estimator_test;
                         x_init=x_init, gt_available=gt_available_test,

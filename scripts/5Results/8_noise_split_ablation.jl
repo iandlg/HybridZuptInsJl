@@ -43,7 +43,7 @@
 ### the filter discovering mocap noise it was not told about. That regime is
 ### 5_noise_robustness.jl's, and notes/016 §7 is the warning about reading it.
 ###
-### Run twice, editing `data_key` only -- the key stays 42 for both datasets.
+### Run twice, once per dataset -- the key stays 42 for both.
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("_common.jl")
@@ -54,7 +54,9 @@ const SECTION = "8_NoiseSplit"
 const DATA_SECTION = "$(SECTION)/data"
 
 # 1. Dataset / trials.
-data_key = "ANG2"       # or "DCSC"
+# `DATA_KEY` in the environment overrides the default, which is how one unattended run
+# covers both datasets without editing the file; a bare REPL include behaves as before.
+data_key = get(ENV, "DATA_KEY", "ANG2")   # or "DCSC"
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
     data_key => (data_dir(data_key), trial_ids(data_key)),
 )

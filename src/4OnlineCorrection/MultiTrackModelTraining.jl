@@ -240,7 +240,7 @@ function multi_track_training_analysis(
                     gt_available_test = [n <= n_test_cutoff for n in 1:N_test]
 
                     try
-                        estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels)
+                        estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels, estimator_kwargs...)
                         _, step_seg, corr_traj, _, _ = correction_filter(
                             inertial_test, sim_config_test, gt_traj_test, estimator_test;
                             x_init=x_init_test,

@@ -31,8 +31,11 @@ data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
 )
 
 const SECTION = "1_Performance"
+# Figures in the section directory, scores tables in its data/ subdirectory, as in
+# section 5. `results_path` mkpaths whatever nested section it is handed.
+const DATA_SECTION = "$(SECTION)/data"
 
-# Set this to the file name of a scores CSV under out/Results/1_Performance/ to re-plot a
+# Set this to the file name of a scores CSV under out/Results/1_Performance/data/ to re-plot a
 # finished sweep instead of recomputing it, e.g.
 # results_csv = "results_ANG2_HEADING_TWOD_STEP_YAW_2026-09-04T16:54:43.420.csv"   # V2
 # `nothing` runs the sweep and writes a fresh CSV.
@@ -41,6 +44,12 @@ results_csv = nothing
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
+# V4 stride-noise arm (`StrideNoise`, ignored by the V2/V3 correctors): `:process_only`
+# is σ_w = σ_n fixed from the hyperparameters, with no split and no online estimate.
+# It goes into the file stems as well as the correctors, because a `:split` run and a
+# `:process_only` run of this script are different artifacts that the names alone would
+# otherwise distinguish by timestamp.
+noise_mode = :process_only
 
 # 2. Align INS / GT trajectories once per trial.
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
@@ -62,7 +71,7 @@ estimators = OrderedDict(
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
-train_ratios = [0.3, 0.5, 0.6] #  0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+train_ratios = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 
 ## 5/6. Run the sweep and save the scores, or read a finished run back
 # Only the scalar columns are written: the sweep also carries the raw zupt/step_seg/
@@ -86,12 +95,16 @@ if isnothing(results_csv)
         output_channels;
         estimator_alloc=300,
         correction_filter=CORRECTION_FILTERS[filter_tag],
+        estimator_kwargs=(noise_mode=noise_mode,),
+        # 11 trials x 7 ratios x 3 estimators is 231 rows, and the raw trajectory/model
+        # objects cost ~2.5 MB each. Nothing below the scores table reads them.
+        keep_artifacts=false,
     )
-    csv_path = stamped(SECTION, "results_$(filter_tag)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
+    csv_path = stamped(DATA_SECTION, "results_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path"
 else
-    csv_path = results_path(SECTION, results_csv)
+    csv_path = results_path(DATA_SECTION, results_csv)
     results_df = CSV.read(csv_path, DataFrame)
     # CSVs written before the pairing keys joined `score_cols` hold the scores only. This
     # script runs one dataset, no noise and one seed, so each missing key has exactly one
@@ -126,7 +139,7 @@ for metric in (:rmse, :rmse_yaw)
             metric=metric,
             show_outliers=true,
             show_points=false,
-            save_path=stamped(SECTION, "train_ratio_paired_$(metric)_$(filter_tag)"),
+            save_path=stamped(SECTION, "train_ratio_paired_$(metric)_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)"),
         )
     end
 end

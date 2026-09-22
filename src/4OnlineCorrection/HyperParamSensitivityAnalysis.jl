@@ -126,6 +126,10 @@ function make_rmse_evaluator(
     hsgp_estimator_factory::Type=JointHsgpEstimator,
     noise_spec::NoiseSpec=NoiseSpec(),
     pred_includes_noise::Bool=false,
+    # Extra constructor keywords for the estimator, e.g. `noise_mode=` on the V4 joint
+    # correctors. Every constructor ends in `kwargs...`, so one a corrector does not read
+    # is silently ignored rather than an error.
+    estimator_kwargs::NamedTuple=(;),
     eval_test_half_only::Bool=true,
     # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
     # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
@@ -174,7 +178,7 @@ function make_rmse_evaluator(
         )
         hsgp_estimator = hsgp_estimator_factory(300; params=hsgp_params,
             corrected_channels=[Symbol(_OUTPUT_NAMES[val]) for val in output_channel_idxs],
-            pred_includes_noise=pred_includes_noise)
+            pred_includes_noise=pred_includes_noise, estimator_kwargs...)
         _, step_seg, slamHsgp_corr_traj, _ = correction_filter(
             inertial_updated, sim_config_updated, gt_noisy, hsgp_estimator;
             x_init=x_init, gt_available=gt_available, ref_frame=ref_frame, feature_type=feature_type)

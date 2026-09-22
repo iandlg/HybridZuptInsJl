@@ -17,21 +17,40 @@ using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
 
 const SECTION = "5_NoiseRobustness/MoreData"
+const DATA_SECTION = "$(SECTION)/data"
 const METRIC = :rmse   # the per-spec CSVs carry rmse / rmse_rate only, no rmse_yaw
 
-# Which test track every panel shows. Ids are the keys of `test_labels` in the sibling
-# script; a track that is not in the tables below is an error naming the ones that are.
-TEST_ID = 2
+# The run whose tables are stitched. These four must match the sibling script's settings:
+# they are what its file stems are built from, and so what the panels are looked up by.
+filter_tag = "V4"
+noise_mode = :process_only
+hsgp_p_key = 42
+data_key = get(ENV, "DATA_KEY", "DCSC")
 
-# Panel label => the CSV that run wrote, in panel order. The noise spec is not a column in
-# those files -- one run is one spec -- so the label here is the only record of which
-# spec a table came from. Paths are taken as given (relative to the repo root, or
-# absolute), like `replot_csv` in the sibling script.
-panel_csvs = OrderedDict{String,String}(
-    "No Noise" => "out/Results/5_NoiseRobustness/MoreData/multi_track_training_no_noise_2026-09-15T11:10:37.055.csv",
-    "Position & Heading Noise (0.1m, ±10°)" => "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos0.1_att10_2026-09-15T11:29:30.728.csv",
-    "Position & Heading Noise (1.0m, ±10°)" => "out/Results/5_NoiseRobustness/MoreData/multi_track_training_pos1.0_att10_2026-09-15T11:48:25.205.csv",
+# Panel label => the `noise_label` the sibling wrote into its file stem, in panel order.
+# The noise spec is not a column in those tables -- one run is one spec -- so this is the
+# only record of which spec a table came from. WAS a list of pasted absolute paths, which
+# went stale the moment the sweep was re-run.
+panel_specs = OrderedDict{String,String}(
+    "No Noise" => "no_noise",
+    "Position & Heading Noise (0.1m, ±10°)" => "pos0.1_att10",
+    "Position & Heading Noise (1.0m, ±10°)" => "pos1.0_att10",
 )
+
+"""Newest table this configuration wrote for `noise_label`. The sibling stamps every file
+with the moment it ran, so the name cannot be known in advance; the stem is otherwise
+identical, which makes the lexicographic maximum the most recent run."""
+function latest_run_csv(noise_label::AbstractString)::String
+    dir = joinpath(RESULTS_ROOT, DATA_SECTION)
+    prefix = "multi_track_training_$(filter_tag)_$(noise_mode)_matchedR_key$(hsgp_p_key)_$(data_key)_$(noise_label)_"
+    matches = isdir(dir) ? filter(f -> startswith(f, prefix) && endswith(f, ".csv"), readdir(dir)) : String[]
+    isempty(matches) && error("no $(prefix)*.csv in $dir -- run 5_noise_robustness-more_data.jl \
+                               with DATA_KEY=$data_key first")
+    return joinpath(dir, last(sort(matches)))
+end
+
+panel_csvs = OrderedDict{String,String}(
+    label => latest_run_csv(noise_label) for (label, noise_label) in panel_specs)
 
 """Relative standard deviation (std/mean) of the metric at the final accumulation step,
 one row per panel. Every repeat has trained on the same set of tracks there, in a
@@ -70,12 +89,17 @@ end)
 
 @info "Panels stitched from $(length(panel_csvs)) runs" collect(values(panel_csvs)) nrow(df)
 
+# Which test track the panels show. The sibling runs one test track per dataset, so the
+# frame names it; `TEST_ID` in the environment picks one when a run had several.
+TEST_ID = haskey(ENV, "TEST_ID") ? parse(Int, ENV["TEST_ID"]) : only(unique(df.test_id))
+
 test_name = first(df[df.test_id .== TEST_ID, :test_name])
 results_figure() do
     HybridZuptInsJl.plot_multi_track_training_noise_panels(
         df, TEST_ID;
         metric=METRIC,
-        save_path=stamped(SECTION, "multi_track_training_noise_panels_$(test_name)"),
+        save_path=stamped(SECTION,
+            "multi_track_training_noise_panels_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_$(test_name)"),
     )
 end
 

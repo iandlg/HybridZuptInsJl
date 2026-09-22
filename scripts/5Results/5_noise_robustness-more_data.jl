@@ -12,7 +12,9 @@ include("_common.jl")
 using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
 
-data_key = "DCSC"
+# `DATA_KEY` in the environment overrides the default, which is how one unattended run
+# covers both datasets without editing the file; a bare REPL include behaves as before.
+data_key = get(ENV, "DATA_KEY", "DCSC")
 data_dir_path = data_dir(data_key)
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
@@ -93,7 +95,7 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 10
+N_REPEATS = 20
 SEEDS = collect(1:N_REPEATS)
 
 noise_specs = OrderedDict(
@@ -105,6 +107,10 @@ noise_specs = OrderedDict(
 )
 
 const SECTION = "5_NoiseRobustness/MoreData"
+# Figures in the section directory, per-run tables in its data/ subdirectory. The two
+# keep the SAME stem: the re-plot branch below and the panel script find one from the
+# other by swapping the extension, which works across directories but not across stems.
+const DATA_SECTION = "$(SECTION)/data"
 const METRIC = :rmse
 
 """Median metric at every training-set size, with the no-correction baseline beside it.
@@ -188,7 +194,7 @@ if isnothing(replot_csv)
         # One `stamped` call for both artifacts: the re-plot branch below finds a
         # figure by swapping the CSV's extension, which only works if the two carry
         # the same timestamp. Two calls gave them timestamps milliseconds apart.
-        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_matchedR_key$(hsgp_p_key)_$(data_key)_$(noise_label)")
+        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_$(mode)_matchedR_key$(hsgp_p_key)_$(data_key)_$(noise_label)")
         results_figure() do
             HybridZuptInsJl.plot_multi_track_training_quality(
                 df_spec;
@@ -200,7 +206,7 @@ if isnothing(replot_csv)
         # The per-repeat rows, beside the figure: a box of 5 points is worth being able to
         # look at, the `train_set` column is the only record of which permutation each
         # repeat drew, and `replot_csv` above turns this file back into the figure.
-        CSV.write(first(splitext(fig_path)) * ".csv", df_spec)
+        CSV.write(results_path(DATA_SECTION, file_stem(fig_path) * ".csv"), df_spec)
 
         summarise_more_data(df_spec, noise.tag)
         summarise_order_invariance(df_spec, noise.tag)
