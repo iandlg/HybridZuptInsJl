@@ -287,7 +287,7 @@ function _clip_marks!(ax::Axis, y::Real, lo_val::Real, hi_val::Real;
 end
 
 """
-    plot_probe_ranking(df; xlims=nothing, save_path=nothing, figsize=(940, 560))
+    plot_probe_ranking(df; xlims=nothing, save_path=nothing, log_scale=false, figsize=(940, 560))
 
 Which parameters move RMSE, by how much, and in which direction. The overview
 figure, and the one to read first.
@@ -336,6 +336,7 @@ function plot_probe_ranking(df::DataFrame;
     xlims::Union{Nothing,Tuple{Float64,Float64}}=nothing,
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
+    log_scale::Bool=false,
     figsize::Tuple{Int,Int}=(750, 600))
 
     g = probe_extremes_summary(df)          # sorted by the worst-side median, descending
@@ -357,6 +358,8 @@ function plot_probe_ranking(df::DataFrame;
     ypos(i) = n - i + 1
     ax = Axis(fig[1, 1];
         xlabel=_rmse_change_label(),
+        # pseudolog10, not log10: the axis crosses zero into negative changes.
+        xscale=log_scale ? Makie.pseudolog10 : identity,
         xtickformat=_HP_PCT_TICKFORMAT,
         yticks=(1:n, [hp_param_label(params[ypos(i)]) for i in 1:n]),
         ygridvisible=false)

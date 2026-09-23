@@ -256,7 +256,7 @@ println()
 # Set `replot_basename` to re-plot a previously saved sweep, or leave it
 # `nothing` to plot the sweep just computed above.
 # replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"   # V2
-replot_basename = nothing
+replot_basename = "V4_process_only_key42_ANG2_HEADING_TWOD_STEP_YAW_2026-09-21T23:37:28.017"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -310,7 +310,8 @@ end
 # data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
     HybridZuptInsJl.plot_probe_ranking(plot_df;
-        xlims=(-35.0, 150.0),
+        xlims=(-50.0, 200.0),
+        log_scale=false,
         save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"),
         figsize=(900, 475))
 end
@@ -332,6 +333,6 @@ for focus_param in focus_params
         HybridZuptInsJl.plot_param_closeup(plot_df, focus_param;
             box_df=plot_box,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"),
-            _ylims=(-5.0, 100.0))
+            _ylims=(-50.0, 200.0))
     end
 end
