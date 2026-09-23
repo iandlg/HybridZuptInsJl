@@ -574,7 +574,7 @@ end
 
 """
     plot_trajectory_start_end_panels(trajs, gt_traj; train_ratio, n_first=40, n_last=40,
-                                     save_path=nothing)
+                                     markers=false, save_path=nothing)
 
 Six panels: the first `n_first` strides of the test segment on the top row and the last
 `n_last` strides of the trial on the bottom row, one column per correction in `trajs`, with
@@ -582,7 +582,8 @@ the ground truth dashed underneath in every panel and one shared legend in the t
 
 All six panels share one pair of x/y limits, fitted to the widest extent over every
 trajectory (and the ground truth) in both windows, so a divergence is the same size on the
-page wherever it appears.
+page wherever it appears. `markers=true` marks the test-segment start (circle, top row)
+and the trial end (square, bottom row).
 """
 function plot_trajectory_start_end_panels(
     trajs::AbstractDict{String,Trajectory},
@@ -590,6 +591,7 @@ function plot_trajectory_start_end_panels(
     train_ratio::Real,
     n_first::Int=40,
     n_last::Int=40,
+    markers::Bool=false,
     save_path::Union{String,Nothing}=nothing
 )
     # Clamped against the shortest series so a correction that ended early cannot index
@@ -624,16 +626,27 @@ function plot_trajectory_start_end_panels(
                 color=:black, linestyle=:dash, linewidth=line_width)
             lines!(ax, traj.pos[1, window], traj.pos[2, window];
                 color=method_color(key), linewidth=line_width)
+            if markers
+                # Only the test start (top row) and the trial end (bottom row).
+                k, m = row == 1 ? (first(window), :circle) : (last(window), :rect)
+                for (p, c) in ((gt_traj.pos, :black), (traj.pos, method_color(key)))
+                    scatter!(ax, [p[1, k]], [p[2, k]]; color=c, marker=m, markersize=10)
+                end
+            end
             push!(axs, ax)
         end
     end
     # One scale for all six panels: linkaxes! fits the union of every panel's data.
     linkaxes!(axs...)
 
+    marker_elems = markers ?
+        [MarkerElement(color=:black, marker=:circle, markersize=10),
+            MarkerElement(color=:black, marker=:rect, markersize=10)] : []
     Legend(fig[3, :],
         vcat([LineElement(color=:black, linestyle=:dash, linewidth=line_width)],
-            [LineElement(color=method_color(k), linewidth=line_width) for k in keys(trajs)]),
-        vcat(["Ground truth"], collect(keys(trajs)));
+            [LineElement(color=method_color(k), linewidth=line_width) for k in keys(trajs)],
+            marker_elems),
+        vcat(["Ground truth"], collect(keys(trajs)), markers ? ["Start", "End"] : String[]);
         orientation=:horizontal, framevisible=false, tellwidth=false, tellheight=true)
 
     resize_to_layout!(fig)

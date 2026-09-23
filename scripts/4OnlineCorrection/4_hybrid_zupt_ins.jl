@@ -1,7 +1,7 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("../5Results/_common.jl")
-using GLMakie, OrderedCollections
+using GLMakie, OrderedCollections, Printf
 
 # Choose Parameters file (see HSGP_PARAM_PATHS in scripts/5Results/_common.jl)
 hsgp_p_key = 42
@@ -64,8 +64,8 @@ filter_tag = "V4"
 noise_mode = :process_only
 corr_filter = CORRECTION_FILTERS[filter_tag]
 
-trial_id = 15 # meta["trial_id"]
-train_ratio = 0.5
+trial_id = 14 # meta["trial_id"]
+train_ratio = 0.35
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -93,7 +93,7 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 # Run online correction
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
+default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[], noise_mode=noise_mode)
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME,
@@ -136,6 +136,8 @@ trajs = OrderedDict(
     "Static" => decoupled_stat_traj[mask],
     "HSGP" => hsgp1_corr_traj[mask],
 )
+final_rmse = OrderedDict(k => HybridZuptInsJl.rmse(tr, gt_traj_aligned[step_seg][mask])[end] for (k, tr) in trajs)
+foreach(((k, r),) -> @info(@sprintf("%-10s final RMSE %.3f m (%+.1f %% vs ZUPT only)", k, r, 100 * (r / final_rmse["ZUPT only"] - 1))), final_rmse)
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg][mask])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg][mask])
@@ -143,12 +145,12 @@ fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligne
 # Zoom on where the corrections diverge: the first strides after the model takes over
 # (top row) and the end of the walk (bottom row), one column per correction, ground
 # truth dashed underneath each.
-n_first_strides = 15
-n_last_strides = 15
+n_first_strides = 20
+n_last_strides = 20
 fig_traj_panels = results_figure() do
     HybridZuptInsJl.plot_trajectory_start_end_panels(
         trajs, gt_traj_aligned[step_seg][mask];
-        train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides,
+        train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides, markers=true,
         save_path=stamped(section, "trajectory2d_panels_$(data_key)_trial$(trial_id)"))
 end
 
@@ -213,7 +215,7 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
+default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[], noise_mode=noise_mode)
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
@@ -240,6 +242,8 @@ trajs = OrderedDict(
     "Static" => decoupled_stat_traj,
     "HSGP" => hsgp1_corr_traj,
 )
+final_rmse = OrderedDict(k => HybridZuptInsJl.rmse(tr, gt_traj_aligned[step_seg])[end] for (k, tr) in trajs)
+foreach(((k, r),) -> @info(@sprintf("%-10s final RMSE %.3f m (%+.1f %% vs ZUPT only)", k, r, 100 * (r / final_rmse["ZUPT only"] - 1))), final_rmse)
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])

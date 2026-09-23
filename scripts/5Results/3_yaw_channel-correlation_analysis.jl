@@ -12,7 +12,7 @@ using OrderedCollections, DataFrames, Statistics
 # ANG2 silently selected a different set of walks instead of erroring, so the
 # published heatmap does not describe the trials its caption claims. Now taken
 # from the shared table, which is keyed by dataset.
-data_key = "ANG2"
+data_key = "DCSC"
 data_dir_path = data_dir(data_key)
 ids = trial_ids(data_key)
 

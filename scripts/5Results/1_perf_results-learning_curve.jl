@@ -53,7 +53,7 @@ ids = trial_ids(data_key)
 # need" is worth asking. Eight of ANG2's eleven walks are ~30 strides long, so there the
 # test window and the budgets both have to shrink; the axis is much shorter.
 N_TEST_STRIDES = Dict("DCSC" => 40, "ANG2" => 10)[data_key]
-BUDGETS = Dict("DCSC" => [5, 10, 20, 40, 80], "ANG2" => [3, 8, 17])[data_key]
+BUDGETS = Dict("DCSC" => [5, 10, 20, 40, 80], "ANG2" => [3, 8, 16])[data_key]
 
 # Constructor keywords for the correctors. `noise_mode` is :split, :process_only
 # (σ_n as w) or :online_total (√γ₀ as w) — see StrideNoise in JointStrideEstimators.jl
@@ -187,6 +187,12 @@ end
 for metric in (:rmse, :rmse_yaw)
     paired = HybridZuptInsJl.learning_curve_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
+
+    base = results_df[results_df.estimator .== BASE_ESTIMATOR, :]
+    for b in budget_levels
+        v = base[base.train_strides .== b, metric]
+        @printf("%s %s %4d strides: median %.3f over %d trials\n", BASE_ESTIMATOR, metric, b, median(v), length(v))
+    end
 
     print_change(paired, metric, "all trials")
     print_change(paired[in.(paired.trial_id, Ref(full_trials)), :], metric,
