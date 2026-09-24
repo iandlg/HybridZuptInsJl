@@ -43,7 +43,7 @@ const DATA_SECTION = "$(SECTION)/data"
 ## 1. Dataset / trials / budgets — the knobs.
 # `DATA_KEY` in the environment overrides the default, which is how one unattended run
 # covers both datasets without editing the file; a bare REPL include behaves as before.
-data_key = get(ENV, "DATA_KEY", "ANG2")
+data_key = get(ENV, "DATA_KEY", "DCSC")
 # Every trial of the dataset, as in 1_perf_results.jl. Replace with a literal list to
 # subset — but keep it a list from `trial_ids`' dataset (the lists are not interchangeable).
 ids = trial_ids(data_key)
@@ -53,7 +53,7 @@ ids = trial_ids(data_key)
 # need" is worth asking. Eight of ANG2's eleven walks are ~30 strides long, so there the
 # test window and the budgets both have to shrink; the axis is much shorter.
 N_TEST_STRIDES = Dict("DCSC" => 40, "ANG2" => 10)[data_key]
-BUDGETS = Dict("DCSC" => [5, 10, 20, 40, 80], "ANG2" => [3, 8, 16])[data_key]
+BUDGETS = Dict("DCSC" => [20, 30, 40, 50], "ANG2" => [3, 8, 16])[data_key]
 
 # Constructor keywords for the correctors. `noise_mode` is :split, :process_only
 # (σ_n as w) or :online_total (√γ₀ as w) — see StrideNoise in JointStrideEstimators.jl
@@ -62,7 +62,10 @@ estimator_kwargs = (noise_mode=:process_only,)
 
 # Set to a scores CSV under out/Results/1_Performance/LearningCurve/data/ to re-plot a
 # finished sweep instead of paying for it again.
-results_csv = nothing
+# DCSC : learning_curve_V4_DCSC_key42_ntest10_process_only_2026-09-24T10:17:18.182.csv
+# ANG2 : learning_curve_V4_ANG2_key42_ntest10_process_only_2026-09-23T12:22:07.749.csv
+results_csv = "learning_curve_V4_DCSC_key42_ntest60_process_only_2026-09-23T17:48:50.574.csv"
+
 
 ## 2. Filter and correctors
 filter_tag = "V4"
@@ -184,9 +187,27 @@ function print_change(paired::DataFrame, metric::Symbol, label::AbstractString)
     end
 end
 
+"""LaTeX table of the median change against the baseline: one row per corrector, one
+column per training budget."""
+function print_latex_median_table(paired::DataFrame, metric::Symbol)
+    levels = sort(unique(paired.train_strides))
+    println("\n% $metric: median change against $BASE_ESTIMATOR (%)")
+    println("\\begin{tabular}{l", "r"^length(levels), "}")
+    println("\\toprule")
+    println(" & ", join(["\$n_\\text{train} = $b\$" for b in levels], " & "), " \\\\")
+    println("\\midrule")
+    for est in unique(sort(paired, :estimator_order).estimator)
+        cells = [@sprintf("%+.1f\\%%", median(paired[(paired.estimator .== est) .& (paired.train_strides .== b), :rel_change_pct]))
+                 for b in levels]
+        println(est, " & ", join(cells, " & "), " \\\\")
+    end
+    println("\\bottomrule\n\\end{tabular}")
+end
+
 for metric in (:rmse, :rmse_yaw)
     paired = HybridZuptInsJl.learning_curve_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
+    print_latex_median_table(paired, metric)
 
     base = results_df[results_df.estimator .== BASE_ESTIMATOR, :]
     for b in budget_levels
