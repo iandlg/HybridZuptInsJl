@@ -109,7 +109,7 @@ function multi_track_training_analysis(
             # correction model. Everything else below mirrors the test path in the main
             # loop exactly -- same `gt_available` mask, same clean ground truth, same
             # scoring on the filter's own `step_seg`.
-            gt_available_base = [n <= max(1, floor(Int, test_tr_ratio * N)) for n in 1:N]
+            gt_available_base = [n <= max(0, floor(Int, test_tr_ratio * N)) for n in 1:N]
             estimator_base = BaseEstimator(300; params=params, corrected_channels=corrected_channels)
             _, step_seg, corr_traj, _, _ = correction_filter(
                 inertial_updated, sim_config_updated, gt_traj_aligned, estimator_base;
@@ -240,7 +240,7 @@ function multi_track_training_analysis(
 
                     inertial_test, sim_config_test, gt_traj_test, x_init_test, N_test = test_cache[test_id]
                     n_test_cutoff = max(1, floor(Int, test_tr_ratio * N_test))
-                    gt_available_test = [n <= n_test_cutoff for n in 1:N_test]
+                    gt_available_test = [n <= n_test_cutoff-1 for n in 1:N_test]
 
                     try
                         estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels, estimator_kwargs...)

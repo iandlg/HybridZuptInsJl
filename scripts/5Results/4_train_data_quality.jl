@@ -41,7 +41,7 @@ train_labels = OrderedDict(
     3 => "CCW Rectangle Long",
     4 => "Figure Eight Long",
     5 => "S Shape Long",
-    12 => "Mixed"
+    # 12 => "Mixed"
 )
 test_labels = OrderedDict(
     1 => "CW Rectangle Short",
@@ -70,7 +70,7 @@ if isnothing(results_csv)
     df = HybridZuptInsJl.training_data_quality_analysis(
         data_dir_path, estimators, train_labels, test_labels, params;
         frame=FRAME, feature_type=FEATURE_TYPE,
-        test_tr_ratio=0.0,# measures only the first footfall
+        test_tr_ratio=0.0,# no measurements; initialised from rigid alignment
         corrected_channels=output_channels,
         correction_filter=CORRECTION_FILTERS[filter_tag],
         estimator_kwargs=(noise_mode=noise_mode,))
