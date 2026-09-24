@@ -144,7 +144,7 @@ function training_data_quality_analysis(
 
                 inertial_updated, sim_config_updated, gt_traj_aligned, x_init, N = test_cache[test_id]
                 n_test_cutoff = max(1, floor(Int, test_tr_ratio * N))
-                gt_available_test = [n <= n_test_cutoff for n in 1:N]
+                gt_available_test = [n <= n_test_cutoff-1 for n in 1:N]
 
                 try
                     estimator_test = estimator_factory(300; params=params, corrected_channels=corrected_channels, estimator_kwargs...)
