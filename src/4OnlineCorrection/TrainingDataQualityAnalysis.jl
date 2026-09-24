@@ -16,6 +16,9 @@ For each estimator in `estimators`, and for each `train_id`, train a corrector o
 track, extract the resulting `(β, Σβ)` via `get_model`, then apply it frozen to each
 `test_id` and record horizontal RMSE / RMSE-rate.
 
+`test_tr_ratio=0` gives the test walks the mocap pose at k=1 only: the corrector starts on
+it and then propagates the frozen model with no test-walk updates.
+
 The input dictionaries are ordered by iteration. The returned `DataFrame` contains
 `estimator_order`, `train_order`, and `test_order` columns so plotting functions can
 respect the same order.
@@ -74,7 +77,7 @@ function training_data_quality_analysis(
 
             gt_step_traj = gt_traj_aligned[segs]
             N = length(gt_step_traj)
-            n_test_cutoff = floor(Int, test_tr_ratio * N)
+            n_test_cutoff = max(1, floor(Int, test_tr_ratio * N))
             _rmse = rmse(step_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]
             _rmse_rate = _rmse / total_distance(gt_step_traj[n_test_cutoff:end])
 
@@ -140,7 +143,7 @@ function training_data_quality_analysis(
                 haskey(test_cache, test_id) || continue
 
                 inertial_updated, sim_config_updated, gt_traj_aligned, x_init, N = test_cache[test_id]
-                n_test_cutoff = floor(Int, test_tr_ratio * N)
+                n_test_cutoff = max(1, floor(Int, test_tr_ratio * N))
                 gt_available_test = [n <= n_test_cutoff for n in 1:N]
 
                 try
@@ -155,7 +158,7 @@ function training_data_quality_analysis(
                     # Truncate the trajectories to get RMSE when gt is unavailable
                     gt_step_traj = gt_traj_aligned[step_seg]
                     N = length(gt_step_traj)
-                    n_test_cutoff = floor(Int, test_tr_ratio * N)
+                    n_test_cutoff = max(1, floor(Int, test_tr_ratio * N))
                     _rmse = rmse(corr_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]
                     _rmse_rate = _rmse / total_distance(gt_step_traj[n_test_cutoff:end])
 

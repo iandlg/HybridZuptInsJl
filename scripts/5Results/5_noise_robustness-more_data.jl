@@ -95,8 +95,12 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 20
+N_REPEATS = 2
 SEEDS = collect(1:N_REPEATS)
+
+# Share of each test walk with mocap. 0 = start on the mocap pose at k=1, then propagate
+# the frozen model with no test-walk training; 0.01 = the previous behaviour.
+test_tr_ratio = 0.0
 
 noise_specs = OrderedDict(
     "no_noise" => HybridZuptInsJl.NoiseSpec(; tag="No Noise"),
@@ -178,7 +182,7 @@ if isnothing(replot_csv)
             noise_spec=noise,
             order_seeds=SEEDS,
             train_tr_ratio=1.0,
-            test_tr_ratio=0.1,
+            test_tr_ratio=test_tr_ratio,
             estimator_kwargs=(noise_mode=mode,),
             correction_filter=CORRECTION_FILTERS[filter_tag],
         )
@@ -194,7 +198,7 @@ if isnothing(replot_csv)
         # One `stamped` call for both artifacts: the re-plot branch below finds a
         # figure by swapping the CSV's extension, which only works if the two carry
         # the same timestamp. Two calls gave them timestamps milliseconds apart.
-        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_$(mode)_matchedR_key$(hsgp_p_key)_$(data_key)_$(noise_label)")
+        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_$(mode)_matchedR_key$(hsgp_p_key)_$(data_key)_testgt$(test_tr_ratio)_$(noise_label)")
         results_figure() do
             HybridZuptInsJl.plot_multi_track_training_quality(
                 df_spec;
