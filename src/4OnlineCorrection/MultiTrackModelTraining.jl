@@ -46,6 +46,9 @@ order-independent: computed once per test track, carrying `seed === missing`. Th
 estimator name defaults to `"ZUPT only"` so it keys into `_METHOD_COLOR_INDICES`
 (`Plotting/OfflineCorrection.jl`) and matches the other Section 5 figures; rename it and
 the baseline silently drops to the fallback grey.
+
+`test_tr_ratio=0` gives the test walks the mocap pose at k=1 only: the corrector starts on
+it and then propagates the frozen model with no test-walk updates.
 """
 function multi_track_training_analysis(
     data_dir::AbstractString,
@@ -106,7 +109,7 @@ function multi_track_training_analysis(
             # correction model. Everything else below mirrors the test path in the main
             # loop exactly -- same `gt_available` mask, same clean ground truth, same
             # scoring on the filter's own `step_seg`.
-            gt_available_base = [n <= floor(Int, test_tr_ratio * N) for n in 1:N]
+            gt_available_base = [n <= max(1, floor(Int, test_tr_ratio * N)) for n in 1:N]
             estimator_base = BaseEstimator(300; params=params, corrected_channels=corrected_channels)
             _, step_seg, corr_traj, _, _ = correction_filter(
                 inertial_updated, sim_config_updated, gt_traj_aligned, estimator_base;
@@ -117,7 +120,7 @@ function multi_track_training_analysis(
             )
 
             gt_step_traj = gt_traj_aligned[step_seg]
-            n_test_cutoff = floor(Int, test_tr_ratio * length(gt_step_traj))
+            n_test_cutoff = max(1, floor(Int, test_tr_ratio * length(gt_step_traj)))
             _rmse = rmse(corr_traj[n_test_cutoff:end], gt_step_traj[n_test_cutoff:end])[end]
             _rmse_rate = _rmse / total_distance(gt_step_traj[n_test_cutoff:end])
 
@@ -236,7 +239,7 @@ function multi_track_training_analysis(
                     end
 
                     inertial_test, sim_config_test, gt_traj_test, x_init_test, N_test = test_cache[test_id]
-                    n_test_cutoff = floor(Int, test_tr_ratio * N_test)
+                    n_test_cutoff = max(1, floor(Int, test_tr_ratio * N_test))
                     gt_available_test = [n <= n_test_cutoff for n in 1:N_test]
 
                     try
@@ -253,7 +256,7 @@ function multi_track_training_analysis(
                         # Compute RMSE on the part where GT is not available
                         gt_step_traj = gt_traj_test[step_seg]
                         N = length(gt_step_traj)
-                        n_test_cutoff_local = floor(Int, test_tr_ratio * N)
+                        n_test_cutoff_local = max(1, floor(Int, test_tr_ratio * N))
                         _rmse = rmse(corr_traj[n_test_cutoff_local:end], gt_step_traj[n_test_cutoff_local:end])[end]
                         _rmse_rate = _rmse / total_distance(gt_step_traj[n_test_cutoff_local:end])
 

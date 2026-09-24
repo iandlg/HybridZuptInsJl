@@ -20,12 +20,13 @@ const SECTION = "5_NoiseRobustness/MoreData"
 const DATA_SECTION = "$(SECTION)/data"
 const METRIC = :rmse   # the per-spec CSVs carry rmse / rmse_rate only, no rmse_yaw
 
-# The run whose tables are stitched. These four must match the sibling script's settings:
+# The run whose tables are stitched. These five must match the sibling script's settings:
 # they are what its file stems are built from, and so what the panels are looked up by.
 filter_tag = "V4"
 noise_mode = :process_only
 hsgp_p_key = 42
 data_key = get(ENV, "DATA_KEY", "DCSC")
+test_tr_ratio = 0.0
 
 # Panel label => the `noise_label` the sibling wrote into its file stem, in panel order.
 # The noise spec is not a column in those tables -- one run is one spec -- so this is the
@@ -42,7 +43,7 @@ with the moment it ran, so the name cannot be known in advance; the stem is othe
 identical, which makes the lexicographic maximum the most recent run."""
 function latest_run_csv(noise_label::AbstractString)::String
     dir = joinpath(RESULTS_ROOT, DATA_SECTION)
-    prefix = "multi_track_training_$(filter_tag)_$(noise_mode)_matchedR_key$(hsgp_p_key)_$(data_key)_$(noise_label)_"
+    prefix = "multi_track_training_$(filter_tag)_$(noise_mode)_matchedR_key$(hsgp_p_key)_$(data_key)_testgt$(test_tr_ratio)_$(noise_label)_"
     matches = isdir(dir) ? filter(f -> startswith(f, prefix) && endswith(f, ".csv"), readdir(dir)) : String[]
     isempty(matches) && error("no $(prefix)*.csv in $dir -- run 5_noise_robustness-more_data.jl \
                                with DATA_KEY=$data_key first")
@@ -99,7 +100,7 @@ results_figure() do
         df, TEST_ID;
         metric=METRIC,
         save_path=stamped(SECTION,
-            "multi_track_training_noise_panels_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_$(test_name)"),
+            "multi_track_training_noise_panels_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_testgt$(test_tr_ratio)_$(test_name)"),
     )
 end
 
