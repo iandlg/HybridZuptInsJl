@@ -95,7 +95,7 @@ replot_csv = nothing
 # One repeat per seed, each a random accumulation order. Cost is
 # n_seeds x estimators x train_tracks x (1 train + n_test_tracks) filter runs:
 # 5 x 2 x 7 x 4 = 280 per noise spec, ~12 min.
-N_REPEATS = 2
+N_REPEATS = 10
 SEEDS = collect(1:N_REPEATS)
 
 # Share of each test walk with mocap. 0 = start on the mocap pose at k=1, then propagate

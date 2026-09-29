@@ -388,7 +388,7 @@ function plot_multi_track_training_noise_panels(
             title=string(spec),
             xlabel="Training tracks accumulated",
             ylabel=metric_label(metric),
-            yscale=log10,
+            # yscale=log10,
             xgridvisible=false)
         push!(axs, ax)
 

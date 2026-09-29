@@ -63,7 +63,7 @@ const RUN_STEM = "$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)"
 # finished sweep instead of recomputing it, e.g.
 # results_csv = "train_data_quality_V4_process_only_key42_DCSC_2026-09-24T12:32:06.567.csv"
 # `nothing` runs the sweep and writes a fresh CSV.
-results_csv = nothing
+results_csv = "train_data_quality_V4_process_only_key42_DCSC_2026-09-24T16:13:46.518.csv"
 
 ## Run the sweep and save the numbers, or read a finished run back
 if isnothing(results_csv)
