@@ -18,23 +18,13 @@ import CSV
 data_key = "DCSC"
 data_dir_path = data_dir(data_key)
 
-# estimators = OrderedDict(
-#     "DecoupledStatic" => HybridZuptInsJl.JointStaticEstimator,
-#     "DecoupledHsgp" => HybridZuptInsJl.DecoupledHsgpEstimator,
-# )
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
-# hyperparameters, no split and no online estimate. Both the training and the frozen
-# test corrector are built with it (`training_data_quality_analysis`).
-noise_mode = :process_only
 
 estimators = OrderedDict(
     "Static" => CORRECTORS[filter_tag].static,
-    # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
-    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 train_labels = OrderedDict(
     6 => "CW Rectangle Long",
@@ -57,13 +47,13 @@ params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 const SECTION = "4_TrainDataQuality"
 # Figure in the section directory, numbers in its data/ subdirectory.
 const DATA_SECTION = "$(SECTION)/data"
-const RUN_STEM = "$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)"
+const RUN_STEM = "$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)"
 
 # Set this to the file name of a CSV under out/Results/4_TrainDataQuality/data/ to re-plot a
 # finished sweep instead of recomputing it, e.g.
 # results_csv = "train_data_quality_V4_process_only_key42_DCSC_2026-09-24T12:32:06.567.csv"
 # `nothing` runs the sweep and writes a fresh CSV.
-results_csv = nothing
+results_csv = "train_data_quality_V4_process_only_key42_DCSC_2026-09-24T16:13:46.518.csv"
 
 ## Run the sweep and save the numbers, or read a finished run back
 if isnothing(results_csv)
@@ -72,8 +62,7 @@ if isnothing(results_csv)
         frame=FRAME, feature_type=FEATURE_TYPE,
         test_tr_ratio=0.0,# no measurements; initialised from rigid alignment
         corrected_channels=output_channels,
-        correction_filter=CORRECTION_FILTERS[filter_tag],
-        estimator_kwargs=(noise_mode=noise_mode,))
+        correction_filter=CORRECTION_FILTERS[filter_tag])
     # The baseline rows carry `nothing` in the train_* columns, which CSV writes as empty cells.
     csv_path = stamped(DATA_SECTION, "train_data_quality_$(RUN_STEM)"; ext="csv")
     CSV.write(csv_path,

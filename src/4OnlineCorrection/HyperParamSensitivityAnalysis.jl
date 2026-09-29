@@ -27,8 +27,6 @@ struct ParamSpec
     probe_unit::Function    # (HsgpParameters) -> Float64
 end
 
-const _PROBE_KINDS = (:multiplicative, :additive)
-
 # Scale parameters: multiplicative sweep, probe is the multiplier.
 function ParamSpec(name, type, get_current, set_new, value_generator)
     ParamSpec(name, type, get_current, set_new, value_generator, :multiplicative, _ -> 1.0)
@@ -123,17 +121,14 @@ function make_rmse_evaluator(
     ref_frame::ReferenceFrame, ;
     m::Union{Nothing,Int}=nothing,
     output_channel_idxs=[1, 2, 3, 4],
-    hsgp_estimator_factory::Type=JointHsgpEstimator,
+    hsgp_estimator_factory::Type=JointStrideHsgpEstimator,
     noise_spec::NoiseSpec=NoiseSpec(),
     pred_includes_noise::Bool=false,
-    # Extra constructor keywords for the estimator, e.g. `noise_mode=` on the V4 joint
-    # correctors. Every constructor ends in `kwargs...`, so one a corrector does not read
-    # is silently ignored rather than an error.
+    # Extra constructor keywords for the estimator. Every constructor ends in `kwargs...`,
+    # so one a corrector does not read is silently ignored rather than an error.
     estimator_kwargs::NamedTuple=(;),
     eval_test_half_only::Bool=true,
-    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
-    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
-    correction_filter::Function=hybrid_zupt_aided_insv2,
+    correction_filter::Function=hybrid_zupt_aided_insv4,
 )::Function
     p = length(output_channel_idxs)
     @assert p <= 4 && p>=1 "Wrong number of output channels, got $p"
@@ -469,7 +464,7 @@ function vary_hsgp_parameters(
         # reached the code under evaluation. Reporting it as a flat line in the
         # sensitivity figure is actively misleading, so say so loudly.
         # (This is exactly what happened to the `noise` hyperparameters: σ_n is
-        # loaded into DecoupledHsgpEstimator and then never read unless
+        # loaded into the (since removed) DecoupledHsgpEstimator and then never read unless
         # `pred_includes_noise=true`. See notes/004.)
         if length(spec_rmses) > 1 && length(unique(spec_rmses)) == 1
             push!(inert, spec.name)

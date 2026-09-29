@@ -44,12 +44,6 @@ results_csv = nothing
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`, ignored by the V2/V3 correctors): `:process_only`
-# is σ_w = σ_n fixed from the hyperparameters, with no split and no online estimate.
-# It goes into the file stems as well as the correctors, because a `:split` run and a
-# `:process_only` run of this script are different artifacts that the names alone would
-# otherwise distinguish by timestamp.
-noise_mode = :process_only
 
 # 2. Align INS / GT trajectories once per trial.
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
@@ -95,12 +89,11 @@ if isnothing(results_csv)
         output_channels;
         estimator_alloc=300,
         correction_filter=CORRECTION_FILTERS[filter_tag],
-        estimator_kwargs=(noise_mode=noise_mode,),
         # 11 trials x 7 ratios x 3 estimators is 231 rows, and the raw trajectory/model
         # objects cost ~2.5 MB each. Nothing below the scores table reads them.
         keep_artifacts=false,
     )
-    csv_path = stamped(DATA_SECTION, "results_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
+    csv_path = stamped(DATA_SECTION, "results_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)"; ext="csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path"
 else
@@ -139,7 +132,7 @@ for metric in (:rmse, :rmse_yaw)
             metric=metric,
             show_outliers=true,
             show_points=false,
-            save_path=stamped(SECTION, "train_ratio_paired_$(metric)_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)"),
+            save_path=stamped(SECTION, "train_ratio_paired_$(metric)_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)"),
         )
     end
 end

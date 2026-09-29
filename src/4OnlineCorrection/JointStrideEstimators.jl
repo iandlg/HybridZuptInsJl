@@ -20,97 +20,14 @@ _channel_mask(corrected_channels::Vector{Symbol})::Vector{Int} =
     [idx for (idx, sym) in enumerate([:pos_1, :pos_2, :pos_3, :yaw]) if sym in corrected_channels]
 
 """
-The stride residual the model does not explain, per channel of the 4-channel
-convention (corrected or not), as
+    stride_noise_std(params) -> σ_w
 
-    r_i = w_i + (j_{i+1} − j_i)
-
-a per-stride process noise `w` (σ_w²) and a per-footfall jitter `j` (σ_j²) that
-telescopes: whatever puts the mocap footfall pose off the INS footfall pose,
-including mocap noise. `j` is noise on each mocap fix, not on the stride, so it
-does not accumulate. Its moments `γ₀ = σ_w² + 2σ_j²`, `γ₁ = −σ_j²` are estimated
-online from the stride errors of the ground-truth half, around their running
-mean, with the GP noise hyperparameter as a prior worth `n₀` strides: `γ₀ = σ_n²`,
-and `γ₁ = ρ₀σ_n²` with the lag-1 autocorrelation measured across trials (yaw
-−0.35 ANG2 / −0.30 DCSC; position ≈0 or positive, so 0).
-
-The hyperparameter alone is not enough: key 42's σ_n is about twice the DCSC
-residual, and under mocap noise the jitter is the mocap noise, which nothing
-else tells the filter.
+Per-stride process noise on the stride residual the model does not explain, per
+channel of the 4-channel convention (corrected or not): the GP noise
+hyperparameter σ_n, in physical units.
 """
-mutable struct StrideNoise
-    noise_mode::Symbol          # :split, or :process_only / :online_total (ablation arms)
-    γ₀_prior::Vector{Float64}
-    γ₁_prior::Vector{Float64}
-    n₀::Int                     # prior weight, in strides
-    n::Int
-    S₁::Vector{Float64}
-    S₂::Vector{Float64}
-    S₁₂::Vector{Float64}
-    last::Vector{Float64}
-end
-
-const NOISE_PRIOR_LAG1 = [0.0, 0.0, 0.0, -0.33]
-const NOISE_PRIOR_STRIDES = 3
-
-"""
-    StrideNoise(params; noise_mode=:split)
-
-The two ablation arms of `scripts/5Results/8_noise_split_ablation.jl` both put no jitter on
-the mocap fix, so its noise falls back to `Σ_gt`, and both take `σ_w = √γ₀`; they differ in
-where `γ₀` comes from:
-
-- `:process_only` freezes it at the prior, i.e. `σ_w = σ_n` fixed — the model this replaced,
-  with neither half of `StrideNoise` (no split, no online estimate);
-- `:online_total` keeps the online estimate and drops only the split, which is what separates
-  the two things the `:split` arm changes at once (notes/018 §5).
-"""
-function StrideNoise(params::HsgpParameters; noise_mode::Symbol=:split)
-    noise_mode in (:split, :process_only, :online_total) ||
-        throw(ArgumentError("noise_mode must be :split, :process_only or :online_total, \
-                             got :$noise_mode"))
-    σ_n² = [(getfield(params.hp, Symbol(_OUTPUT_NAMES[j]))[1] * params.output_stats[2][j])^2 for j in 1:4]
-    return StrideNoise(noise_mode, σ_n², NOISE_PRIOR_LAG1 .* σ_n², NOISE_PRIOR_STRIDES, 0,
-        zeros(4), zeros(4), zeros(4), zeros(4))
-end
-
-"""
-    carry_over(ν) -> StrideNoise
-
-The estimate so far as the prior of the next track, weighted by every stride
-behind it. The running mean restarts, so a bias that differs between tracks
-does not inflate the next track's noise.
-"""
-function carry_over(ν::StrideNoise)::StrideNoise
-    γ₀, γ₁ = _moments(ν)
-    return StrideNoise(ν.noise_mode, γ₀, γ₁, ν.n₀ + ν.n, 0, zeros(4), zeros(4), zeros(4), zeros(4))
-end
-
-function update!(ν::StrideNoise, r::AbstractVector{Float64})
-    ν.noise_mode === :process_only && return ν
-    ν.n > 0 && (ν.S₁₂ .+= ν.last .* r)
-    ν.n += 1
-    ν.S₁ .+= r
-    ν.S₂ .+= r .^ 2
-    ν.last .= r
-    return ν
-end
-
-function _moments(ν::StrideNoise)
-    n₀, n = ν.n₀, ν.n
-    μ = n > 0 ? ν.S₁ ./ n : zeros(4)
-    γ₀ = (n₀ .* ν.γ₀_prior .+ (n > 0 ? ν.S₂ .- n .* μ .^ 2 : 0.0)) ./ (n₀ + n)
-    γ₁ = (n₀ .* ν.γ₁_prior .+ (n > 1 ? ν.S₁₂ .- (n - 1) .* μ .^ 2 : 0.0)) ./ (n₀ + max(n - 1, 0))
-    return γ₀, γ₁
-end
-
-"`(σ_w, σ_j)` per channel."
-function noise_split(ν::StrideNoise)
-    γ₀, γ₁ = _moments(ν)
-    ν.noise_mode === :split || return sqrt.(γ₀), zeros(4)
-    σ_j² = clamp.(-γ₁, 0.0, γ₀ ./ 2)
-    return sqrt.(max.(γ₀ .- 2σ_j², 0.0)), sqrt.(σ_j²)
-end
+stride_noise_std(params::HsgpParameters)::Vector{Float64} =
+    sqrt.([(getfield(params.hp, Symbol(_OUTPUT_NAMES[j]))[1] * params.output_stats[2][j])^2 for j in 1:4])
 
 mutable struct JointStrideStaticEstimator <: AbstractJointStrideEstimator
     t::Vector{Float64}
@@ -120,19 +37,18 @@ mutable struct JointStrideStaticEstimator <: AbstractJointStrideEstimator
     Σ::Matrix{Float64}
     i::Int
     β::Vector{Float64}          # per-channel stride bias, physical units
-    noise::StrideNoise
+    σ_w::Vector{Float64}
     params::HsgpParameters
     correction_mask::Vector{Int}
     p::Int
 end
 
 function JointStrideStaticEstimator(N::Int; params::HsgpParameters,
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
-    noise_mode::Symbol=:split, kwargs...)
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...)
     mask = _channel_mask(corrected_channels)
     p = length(mask)
     return JointStrideStaticEstimator(zeros(N), zeros(3, N), zeros(4, N),
-        zeros(6 + p), zeros(6 + p, 6 + p), 1, zeros(p), StrideNoise(params; noise_mode=noise_mode),
+        zeros(6 + p), zeros(6 + p, 6 + p), 1, zeros(p), stride_noise_std(params),
         params, mask, p)
 end
 
@@ -144,7 +60,7 @@ mutable struct JointStrideHsgpEstimator <: AbstractJointStrideEstimator
     Σ::Matrix{Float64}
     i::Int
     β::Vector{Float64}          # HSGP weights, normalised output, channel-major
-    noise::StrideNoise
+    σ_w::Vector{Float64}
     params::HsgpParameters
     per_dim_eigvals::Matrix{Float64}
     correction_mask::Vector{Int}
@@ -152,13 +68,12 @@ mutable struct JointStrideHsgpEstimator <: AbstractJointStrideEstimator
 end
 
 function JointStrideHsgpEstimator(N::Int; params::HsgpParameters,
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
-    noise_mode::Symbol=:split, kwargs...)
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...)
     mask = _channel_mask(corrected_channels)
     p = length(mask)
     nβ = p * params.m
     return JointStrideHsgpEstimator(zeros(N), zeros(3, N), zeros(4, N),
-        zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), StrideNoise(params; noise_mode=noise_mode),
+        zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), stride_noise_std(params),
         params, calc_eigenvalues(params.LL, params.m, params.d), mask, p)
 end
 
@@ -226,7 +141,6 @@ function initialize_corrector!(c::AbstractJointStrideEstimator;
     c.Σ .= 0.0
     c.Σ[1:6, 1:6] = Σpq_init
     _init_prior!(c, init_model)
-    isnothing(init_model) || length(init_model) < 3 || (c.noise = carry_over(init_model[3]))
 end
 
 """
@@ -300,7 +214,7 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     # Odometry noise (ε_p from the INS body frame through the local frame),
     # then the stride residual the model does not explain.
     G = [A_wl*R_bh' zeros(3, 3); zeros(3, 3) R⁺]
-    σ_w, _ = noise_split(c.noise)
+    σ_w = c.σ_w
     Σxx += G * Σpq * G' + B_all * Diagonal(σ_w .^ 2) * B_all'
 
     c.Σ[1:6, 1:6] = (Σxx + Σxx') / 2
@@ -314,16 +228,6 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     return y_full, Σy_full
 end
 
-"""
-    observe_stride_error!(c, stride_err)
-
-Feed one ground-truth stride error (both ends under mocap) to the corrector's
-noise estimate. A no-op for correctors without one.
-"""
-observe_stride_error!(c::AbstractEstimator, stride_err::AbstractVector{Float64}) = nothing
-observe_stride_error!(c::AbstractJointStrideEstimator, stride_err::AbstractVector{Float64}) =
-    update!(c.noise, stride_err)
-
 function posyaw_measurement_update!(c::AbstractJointStrideEstimator;
     curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)
     θ3 = matrix_to_euler(quat_to_matrix(c.quat[:, c.i]))[3]
@@ -332,13 +236,7 @@ function posyaw_measurement_update!(c::AbstractJointStrideEstimator;
     # H touches only [δp; δθ_z], so H Σ is four rows of Σ.
     rows = [1, 2, 3, 6]
     HΣ = c.Σ[rows, :]
-    # The fix's noise is the footfall jitter alone: the jitter is identified
-    # from stride errors that already contain the mocap noise, so adding Σy on
-    # top would count it twice. Σy is its floor. Horizontal jitter is taken
-    # isotropic, since the position channels are in the stride's local frame.
-    _, σ_j = noise_split(c.noise)
-    σ_h² = (σ_j[1]^2 + σ_j[2]^2) / 2
-    S = Symmetric(HΣ[:, rows] + Diagonal(max.([σ_h², σ_h², σ_j[3]^2, σ_j[4]^2], diag(Σy))))
+    S = Symmetric(HΣ[:, rows] + Σy)
     K = HΣ' / S
     c.δx .+= K * (r - c.δx[rows])
     c.Σ .-= K * HΣ
@@ -352,16 +250,14 @@ function relinearize!(c::AbstractJointStrideEstimator)
     c.δx .= 0.0
 end
 
-# The model is `(β, Σβ, noise)`: the stride noise is a property of the sensor
-# and the gait, like β, and a track with little mocap cannot re-estimate it.
-function get_model(c::JointStrideStaticEstimator)::Tuple{Vector{Float64},Matrix{Float64},StrideNoise}
+function get_model(c::JointStrideStaticEstimator)::Tuple{Vector{Float64},Matrix{Float64}}
     β, Σβ = zeros(4), zeros(4, 4)
     β[c.correction_mask] = c.β
     Σβ[c.correction_mask, c.correction_mask] = c.Σ[7:end, 7:end]
-    return β, Σβ, c.noise
+    return β, Σβ
 end
 
-function get_model(c::JointStrideHsgpEstimator)::Tuple{Vector{Float64},Matrix{Float64},StrideNoise}
+function get_model(c::JointStrideHsgpEstimator)::Tuple{Vector{Float64},Matrix{Float64}}
     m, mask = c.params.m, c.correction_mask
     rng(j) = ((j-1)*m+1):(j*m)
     β, Σβ = zeros(4m), zeros(4m, 4m)
@@ -371,5 +267,5 @@ function get_model(c::JointStrideHsgpEstimator)::Tuple{Vector{Float64},Matrix{Fl
             Σβ[_full_range(o1, m), _full_range(o2, m)] = c.Σ[6 .+ rng(j1), 6 .+ rng(j2)]
         end
     end
-    return β, Σβ, c.noise
+    return β, Σβ
 end

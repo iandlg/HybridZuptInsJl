@@ -54,33 +54,3 @@ function plot_step_lengths(
     return fig
 end
 
-function plot_inertialdata_and_stepsegm(
-    inertial::InertialData,
-    segs::Vector{Int};
-    zupt::Union{Nothing,BitVector}=nothing
-)
-    # Compute squared sum of the first three channels
-    y = vec(sum(inertial.u[1:3, :] .^ 2, dims=1))   # shape: (n_samples,)
-
-    # Create figure and axis
-    fig = Figure()
-    ax = Axis(fig[1, 1]; xlabel="Time", ylabel="Squared sum", title="Inertial Data")
-    ax.xgridvisible = true
-    ax.ygridvisible = true
-
-    # Plot the continuous signal
-    lines!(ax, inertial.t, y; linewidth=0.5)
-
-    # Overlay scatter markers at the given segment indices
-    if !isempty(segs)
-        scatter!(ax, inertial.t[segs], fill(100.0, length(segs));
-            marker=:x, color=:red, markersize=15)
-    end
-    if !isnothing(zupt)
-        scatter!(ax, inertial.t, zupt .* 50;
-            color=:green, markersize=5)
-    end
-
-    return fig
-end
-

@@ -45,12 +45,6 @@ const _METRIC_UNITS = Dict{Symbol,String}(
     :rmse_yaw => "rad",
 )
 
-const _METRIC_TITLES = Dict{Symbol,String}(
-    :rmse => "Horizontal position RMSE",
-    :rmse_rate => "Horizontal position RMSE per distance travelled",
-    :rmse_yaw => "Yaw RMSE",
-)
-
 """
     check_metric(metric::Symbol) -> Symbol
 
@@ -89,26 +83,3 @@ compose with `rich(...)` and [`metric_symbol`](@ref) instead.
 """
 metric_label(metric::Symbol) =
     rich(metric_symbol(metric), " [", _METRIC_UNITS[check_metric(metric)], "]")
-
-"""
-    metric_symbol_ascii(metric::Symbol) -> String
-
-Plain-text form of [`metric_symbol`](@ref) for terminal output: `"RMSE_p"`,
-`"RMSE_ψ"`.
-
-The subscript becomes an underscore because it has to: Unicode has no subscript
-ψ, so a printed table cannot show the figures' form. Derived from the same parts
-so the two cannot drift.
-"""
-function metric_symbol_ascii(metric::Symbol)::String
-    base, sub = _METRIC_SYMBOL_PARTS[check_metric(metric)]
-    return string(base, "_", sub, _METRIC_SUFFIX[metric])
-end
-
-"""
-    metric_title(metric::Symbol) -> String
-
-Human-readable description of `metric`, for figure titles. Spelled out in words,
-so it needs no subscript and stays a `String`.
-"""
-metric_title(metric::Symbol)::String = _METRIC_TITLES[check_metric(metric)]

@@ -20,7 +20,7 @@ data_dir_path = data_dir(data_key)
 # with the other scripts. Both are keyed by `data_key`: the test list used to be
 # hardcoded to [14] with the dataset-keyed dict below it discarded, so a DCSC run
 # silently tested on ANG2's trial 14.
-train_trial_ids = trial_ids(data_key)  #train_ids(data_key) 
+train_trial_ids = trial_ids(data_key)  # train_ids(data_key) 
 test_trial_ids = test_ids(data_key)
 all_trial_ids = vcat(train_trial_ids, test_trial_ids)
 FRAME = HybridZuptInsJl.HEADING
@@ -76,7 +76,7 @@ if !isnothing(outlier_removal_params["dims"])
         ax = Axis(fig_mahal[i, 1];
             xlabel="Mahalanobis D²", ylabel="count",
             title="$label (d=$d_mahal, n=$(length(sqd))): keep $keep_frac → D² < $(round(thr, digits=2)), " *
-                  "mean $(round(mean(sqd), digits=2)), median $(round(median(sqd), digits=2))")
+                "mean $(round(mean(sqd), digits=2)), median $(round(median(sqd), digits=2))")
         hist!(ax, sqd; bins=400)
         vlines!(ax, thr; color=:red)
     end
@@ -190,21 +190,17 @@ end
 
 pred = HybridZuptInsJl.CorrectionIO(test_out.t, pred_data, sqrt.(pred_var))
 
-# hyps["pos_1"] = hsgp_base.hp.pos_1
-# hyps["pos_2"] = hsgp_base.hp.pos_2
-# hyps["pos_3"] = hsgp_base.hp.pos_3
-
 hsgp_opt = HybridZuptInsJl.HsgpParameters(
     HybridZuptInsJl.SeHyperparams(hyps), d, m, inp.Lvec_norm;
     input_stats=[inp.μ, inp.σ],
     output_stats=[outp.μ, outp.σ],
     mid_norm=inp.mid_norm
 )
-
+GLMakie.activate!()
 fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
 trial_id = 14
-train_ratio = 0.3
+train_ratio = 0.35
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -231,54 +227,45 @@ true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
+alloc = round(Int, N / 60)
+corr_filter = CORRECTION_FILTERS["V4"]
 
-defaultEstimator = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Default"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, defaultEstimator;
+zupt, step_seg, def_corr_traj, io_data["Default"], _ = corr_filter(
+    inertial_updated, sim_config_updated, noisy_gt_traj, HybridZuptInsJl.BaseEstimator(alloc);
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-decoupledStatic = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels)
-_, _, stat_corr_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, decoupledStatic;
+static_est = CORRECTORS["V4"].static(alloc; params=hsgp_opt, corrected_channels=output_channels)
+_, _, stat_corr_traj, io_data["Static"], _ = corr_filter(
+    inertial_updated, sim_config_updated, noisy_gt_traj, static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-
-Hsgp_base = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_base, corrected_channels=output_channels)
-_, _, jointHsgp_base_traj, io_data["Decoupled HSGP Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, Hsgp_base;
+hsgp_base_est = CORRECTORS["V4"].hsgp(alloc; params=hsgp_base, corrected_channels=output_channels)
+_, _, hsgp_base_traj, io_data["HSGP Base"], _ = corr_filter(
+    inertial_updated, sim_config_updated, noisy_gt_traj, hsgp_base_est;
     x_init=x_init, gt_available=gt_available, ref_frame=base_FRAME, feature_type=base_FEATURE_TYPE)
 
-Hsgp_opt = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_opt, corrected_channels=output_channels)
-_, _, jointHsgp_opt_traj, io_data["Decoupled HSGP Opt"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-    inertial_updated, sim_config_updated, noisy_gt_traj, Hsgp_opt;
+hsgp_opt_est = CORRECTORS["V4"].hsgp(alloc; params=hsgp_opt, corrected_channels=output_channels)
+_, _, hsgp_opt_traj, io_data["HSGP Opt"], _ = corr_filter(
+    inertial_updated, sim_config_updated, noisy_gt_traj, hsgp_opt_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
-
-
-# splitHsgp_corr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60), hsgp_base)
-# _, _, hsgp1_corr_traj, io_data["SplitHsgp Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
-#     inertial_updated, sim_config_updated, gt_traj_aligned, splitHsgp_corr;
-#     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 input_data_norm = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-output_data_norm = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 residual_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
 
 for (method_name, io_dict) in io_data
     input_data["$method_name : Input"] = io_dict["input"]
     output_data["$method_name : Prediction"] = io_dict["prediction"]
     input_data_norm["$method_name : Input Norm"] = io_dict["input_norm"]
-    output_data_norm["$method_name : Prediction Norm"] = io_dict["prediction_norm"]
     residual_data["$method_name : Residual"] = io_dict["residual"]
 end
 
 trajs = OrderedDict(
     "Default" => def_corr_traj,
-    "Decoupled Static" => stat_corr_traj,
-    "Joint HSGP Base" => jointHsgp_base_traj,
-    "Joint HSGP Opt" => jointHsgp_opt_traj,
-    # "SPLIT Base" => hsgp1_corr_traj
+    "Static" => stat_corr_traj,
+    "HSGP Base" => hsgp_base_traj,
+    "HSGP Opt" => hsgp_opt_traj,
 )
 GLMakie.activate!()
 
@@ -294,12 +281,9 @@ fig_dist = with_theme(theme_ggplot2()) do
 end
 
 fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
-fig_out_norm = HybridZuptInsJl.plot_regression_results(output_data_norm, io_data["Decoupled HSGP Opt"]["target_norm"])
 
 fig_in = HybridZuptInsJl.plot_regression_results(input_data, io_data["Default"]["input"])
-# display(GLMakie.Screen(), fig_in)
-fig_in_norm = HybridZuptInsJl.plot_regression_results(input_data_norm, io_data["Default"]["input_norm"])
-# display(GLMakie.Screen(), fig_in_norm)
+fig_in_norm = HybridZuptInsJl.plot_regression_results(input_data_norm, io_data["HSGP Opt"]["input_norm"])
 fig_res = HybridZuptInsJl.plot_regression_results(residual_data)
 display(hsgp_opt.input_stats)
 display(hsgp_opt.output_stats)

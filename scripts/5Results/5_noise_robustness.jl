@@ -66,12 +66,8 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
-# hyperparameters, no split and no online estimate. Note what that removes from THIS
-# experiment specifically: the online re-sizing is how V4 discovers mocap noise it was
-# not told about (notes/016), so under `:process_only` the filters rely on the R they
-# are handed -- which `match_gt_sigma=true` below makes the true one.
-noise_mode = :process_only
+# The stride noise is σ_w = σ_n fixed from the hyperparameters, so the filters rely on
+# the R they are handed -- which `match_gt_sigma=true` below makes the true one.
 
 # The baseline runs through the SAME filter as the corrections: the sweep hands
 # `correction_filter` every estimator in this dict, `BaseEstimator` included, so
@@ -80,10 +76,8 @@ noise_mode = :process_only
 # baseline from a different filter is not the thing the corrections are adding to.
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
-    # "Joint static bias" => HybridZuptInsJl.JointStaticEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
-    # "Joint HSGP" => JointHsgpEstimator,
 )
 
 # Does every filter get told how noisy the mocap it is handed actually is?
@@ -161,7 +155,6 @@ if isnothing(results_csv)
         seeds=SEEDS,
         keep_artifacts=false,
         correction_filter=CORRECTION_FILTERS[filter_tag],
-        estimator_kwargs=(noise_mode=noise_mode,),
         match_gt_sigma=match_gt_sigma,
     )
 
@@ -187,7 +180,6 @@ if isnothing(results_csv)
         seeds=SEEDS[1:1],
         keep_artifacts=false,
         correction_filter=CORRECTION_FILTERS[filter_tag],
-        estimator_kwargs=(noise_mode=noise_mode,),
         match_gt_sigma=match_gt_sigma,
         posyaw_measurement_update=false,
     )
@@ -210,7 +202,7 @@ if isnothing(results_csv)
     # same dataset under key 47 and key 42 gives a different answer on the yaw
     # channel (47's yaw prior underflows, 014), and without the key in the name
     # the two files differ only by timestamp.
-    run_stem = "$(filter_tag)_$(noise_mode)_$(sigma_tag)_$(data_key)_key$(hsgp_p_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
+    run_stem = "$(filter_tag)_process_only_$(sigma_tag)_$(data_key)_key$(hsgp_p_key)_$(FRAME)_$(FEATURE_TYPE)_$(N_NOISE_DRAWS)draws_$(Dates.now())"
     csv_path = results_path(DATA_SECTION, "$(CSV_PREFIX)_$(run_stem).csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved results table: $csv_path" nrow(results_df)

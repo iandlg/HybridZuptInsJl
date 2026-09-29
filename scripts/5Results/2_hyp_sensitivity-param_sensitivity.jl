@@ -54,15 +54,11 @@ output_channel_idxs = [1, 2, 4]
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
-# hyperparameters, no split and no online estimate. In the file stem as well as the
-# estimator, so this sweep cannot be mistaken for a `:split` one.
-noise_mode = :process_only
 
 noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
 
 # `pred_includes_noise` controls whether the GP `noise` hyperparameter reaches
-# the estimator at all. With the default `false`, DecoupledHsgpEstimator loads
+# the estimator at all. With the default `false`, the (since removed) DecoupledHsgpEstimator loaded
 # sigma_n and never reads it, so every `noise` row would return a bit-identical
 # RMSE -- three flat lines that look like an insensitivity result but are a dead
 # knob. `sweep_noise` therefore tracks it, and `vary_hsgp_parameters` warns if
@@ -145,7 +141,7 @@ outdir = joinpath("out/Results", SECTION, "data")
 mkpath(outdir)
 
 time = string(Dates.now())
-base_name = "$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
+base_name = "$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
 ##
 make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
@@ -154,7 +150,6 @@ make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     noise_spec=noise_spec,
     pred_includes_noise=pred_includes_noise,
     correction_filter=CORRECTION_FILTERS[filter_tag],
-    estimator_kwargs=(noise_mode=noise_mode,),
 )
 
 df = HybridZuptInsJl.sweep_over_trials(
@@ -231,7 +226,7 @@ metadata = Dict(
     "train_ratio" => train_ratio,
     "noise_spec_tag" => noise_spec.tag,
     "pred_includes_noise" => pred_includes_noise,
-    "noise_mode" => string(noise_mode),
+    "noise_mode" => "process_only",
     "hsgp_p_key" => hsgp_p_key,
     "correction_filter" => filter_tag,
     "base_parameters_metadata" => meta

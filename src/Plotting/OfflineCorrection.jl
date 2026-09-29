@@ -159,68 +159,6 @@ function plot_regression_results(
     return plot_regression_results(pred_data, true_data; kwargs...)
 end
 """
-    plot_input_features(
-        features::Matrix{Float64}, t::Union{Vector{Float64},Nothing}=nothing;
-        labels::Union{Vector{String},Nothing}=nothing,
-        title::String="Input Features"
-    )
-
-Plot three-dimensional input features over time.
-
-# Arguments
-- `features`: Feature matrix of size `(3, N)`.
-- `t`: Optional time vector of length `N`. If `nothing`, uses sample indices.
-- `labels`: Optional legend labels for the three dimensions (default: `["x", "y", "z"]`).
-- `title`: Plot title.
-
-# Returns
-- A `Figure` object.
-"""
-function plot_input_features(
-    features::Matrix{Float64},
-    t::Union{Vector{Float64},Nothing}=nothing;
-    feature_std::Union{Nothing,Matrix{Float64}}=nothing,
-    labels::Union{Vector{String},Nothing}=nothing,
-    title::String="Input Features"
-)
-    N = size(features, 2)
-    n_channel = size(features, 1)
-    if t === nothing
-        t = 1:N
-    end
-    if labels === nothing
-        labels = ["Feature $i" for i in 1:n_channel]
-    end
-
-    palette = [:red, :blue, :green, :orange, :purple]
-    fig = Figure(size=(800, 400))
-    ax = Axis(fig[1, 1]; xlabel="Time [s]", ylabel="Value", title=title,
-        xgridvisible=true, ygridvisible=true)
-
-    # Plot every channel present. Previously hard-coded to 1:3, which silently
-    # dropped channels 4+ for TWOD_STEP_YAW / THREED_STEP_DT_YAW features.
-    for i in 1:n_channel
-        color = palette[mod1(i, length(palette))]
-        lines!(ax, t, features[i, :]; color=color, linewidth=1.2, label=labels[i])
-
-        if !isnothing(feature_std)
-            label = "Feature $i ±σ"
-            band!(ax, t, features[i, :] .- feature_std[i, :], features[i, :] .+ feature_std[i, :];
-                color=(color, 0.15), label=label)
-
-        end
-    end
-    axislegend(ax; position=:rt)
-    return fig
-end
-
-function plot_input_features(
-    features::CorrectionIO
-)
-    plot_input_features(features.data, features.t; feature_std=features.data_std)
-end
-
-"""
 Colour index into `Makie.wong_colors()` for each correction method, so a method keeps
 one colour across every figure instead of getting whatever its position in a
 `Dict` happened to earn. Wong 1-3 were already spoken for by these three by
@@ -249,25 +187,6 @@ Anything else gets a neutral grey rather than silently borrowing another method'
 function method_color(name::AbstractString)
     idx = get(_METHOD_COLOR_INDICES, String(name), nothing)
     return isnothing(idx) ? _METHOD_FALLBACK_COLOR : Makie.wong_colors()[idx]
-end
-
-"""
-    color_shades(base, n; spread=26) -> Vector
-
-`n` shades of `base`, varying lightness only. Hue and chroma are held fixed, so the
-shades read as "the same method, different setting" rather than as unrelated series --
-which is the point when the variants being compared are one estimator at several
-hyperparameter values.
-
-Lightness is clamped into [15, 95]: outside that a shade is either black or invisible
-against a light background, and two clamped shades would be indistinguishable.
-"""
-function color_shades(base, n::Int; spread::Real=26)
-    n <= 0 && return Makie.RGBAf[]
-    c = convert(LCHab, convert(RGB, Makie.to_color(base)))
-    n == 1 && return [Makie.RGBAf(convert(RGB, c))]
-    ls = range(clamp(c.l - spread, 15, 95), clamp(c.l + spread, 15, 95); length=n)
-    return [Makie.RGBAf(convert(RGB, LCHab(l, c.c, c.h))) for l in ls]
 end
 
 """
@@ -496,11 +415,6 @@ const _REGRESSION_PANELS = [
 ]
 
 const _REGRESSION_TARGET_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
-
-"""
-Heading is the one channel of `_REGRESSION_PANELS` carrying large isolated spikes, so it is
-"""
-const _REGRESSION_HEADING_CHANNEL = 4
 
 """
 Wong index per series: yellow for the static corrector, green for the HSGP one. Distinct

@@ -1,12 +1,3 @@
-function rolling_mean(arr::Vector{T}, n::Int) where T<:Real
-    length(arr) >= n || throw(ArgumentError("n must be ≤ length(arr), got n=$n, length=$(length(arr))"))
-    # Causal moving sum: conv with ones(n) produces length = length(arr) + n - 1
-    sums = conv(arr, ones(n))[1:length(arr)]
-    # For each sample i (1-based), the number of averaged points = min(i, n)
-    divisors = min.(1:length(arr), n)
-    return sums ./ divisors
-end
-
 function log_around(base::Float64, exp_range::Tuple{Float64,Float64}, n_steps::Int)
     lo, hi = exp_range
     exps = range(lo, hi, length=n_steps)

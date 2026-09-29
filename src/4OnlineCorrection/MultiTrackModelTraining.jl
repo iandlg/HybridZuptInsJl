@@ -65,9 +65,7 @@ function multi_track_training_analysis(
     order_seeds::AbstractVector{Int}=[1],
     base_estimator_name::AbstractString="ZUPT only",
     estimator_kwargs::NamedTuple=(;),
-    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
-    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
-    correction_filter::Function=hybrid_zupt_aided_insv2,
+    correction_filter::Function=hybrid_zupt_aided_insv4,
 )::DataFrame
 
     isempty(order_seeds) && throw(ArgumentError("order_seeds must not be empty"))
