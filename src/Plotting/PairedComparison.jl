@@ -265,3 +265,68 @@ function plot_learning_curve_relative_change(
     end
     return fig
 end
+
+"""
+    plot_learning_curve_absolute(df, dataset_name; metric=:rmse,
+        reference_estimator="ZUPT only", series_colors=nothing, save_path=nothing,
+        show_outliers=true, show_points=false)
+
+The learning curve on the metric's own scale: budget 0 (started on mocap at the split,
+open loop over the test window) with every estimator, then one group per budget > 0 with
+every estimator but `reference_estimator` side by side.
+
+Takes the sweep frame from `run_online_learning_curve`, not the paired one. Unpaired, so
+the spread of each box is mostly walk-to-walk difficulty; `plot_learning_curve_relative_change`
+is the view that cancels it.
+"""
+function plot_learning_curve_absolute(
+    df::DataFrame,
+    dataset_name::AbstractString;
+    metric::Symbol=:rmse,
+    reference_estimator::AbstractString="ZUPT only",
+    series_colors::Union{Nothing,AbstractDict}=nothing,
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=false,
+)
+    check_metric(metric)
+    sub = df[df.dataset_name .== dataset_name, :]
+    isempty(sub) && error("No rows found for dataset_name = $dataset_name")
+
+    is_ref = sub.estimator .== reference_estimator
+    any(is_ref .& (sub.train_strides .== 0)) || throw(ArgumentError(
+        "plot_learning_curve_absolute: no \"$reference_estimator\" rows at budget 0. \
+         Include 0 in the sweep's budgets."))
+
+    groups = sub[(sub.train_strides .== 0) .| .!is_ref, :]
+    groups.group = string.(groups.train_strides)
+    groups.group_order = groups.train_strides_order
+
+    fig = Figure(size=(900, 600))
+    ax = Axis(fig[1, 1],
+        xlabel="Online training strides",
+        ylabel=metric_label(metric),
+        xticklabelsize=14,
+    )
+    labeled = _grouped_boxplot!(ax, groups, metric;
+        group_col=:group, group_order_col=:group_order,
+        series_colors=series_colors,
+        show_outliers=show_outliers, show_points=show_points)
+
+    # As in `plot_learning_curve_relative_change`: the wide budgets can rest on fewer trials.
+    order = Dict(r.group => r.group_order for r in eachrow(groups))
+    labels = sort(unique(groups.group), by=g -> order[g])
+    n_trials = Dict(g => length(unique(groups[groups.group .== g, :trial_id])) for g in labels)
+    ax.xticks = (1:length(labels), ["$g\n(n=$(n_trials[g]))" for g in labels])
+
+    if !isempty(labeled)
+        Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
+    end
+
+    if !isnothing(save_path)
+        mkpath(dirname(save_path))
+        save(save_path, fig)
+        @info "Saved figure: $save_path"
+    end
+    return fig
+end

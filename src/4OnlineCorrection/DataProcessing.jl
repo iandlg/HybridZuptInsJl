@@ -761,29 +761,48 @@ end
 # the scored strides are both held fixed, and only the amount of mocap varies.
 #
 #   stride:  1 ............ ks-b .... ks | ks+1 ...... N
-#   mocap:   .  no mocap  . [==== b ====] |   none (test)
+#   run:     .   not run   . [start on mocap ...................]
+#   mocap:                  [==== b ====] |   none (test)
 #   score:                                 [=== n_test ==]
+#
+# Each run starts at `ks-b` on the mocap pose rather than at stride 1. Run from stride 1,
+# the open-loop prefix leaks into the test window twice: the "ZUPT only" filter's yaw
+# fixes remove only part of the prefix heading error (its attitude covariance is
+# overconfident), and the correctors put the whole prefix drift into `β` at the first
+# fix. Either way the budget would be "the prefix plus b strides", not b strides.
 #
 # V4 has no separate train/anchor switch: `β` lives in the corrector's error state and
 # the mocap pose update is what learns it (JointStrideEstimators.jl), so the budget IS
-# the mocap. The pose entering the test window is pinned by the last fix whatever `b`
-# is, but the covariance is not, so the `"ZUPT only"` reference is re-run at every
-# budget and `learning_curve_contrast` pairs within a budget rather than assuming one
-# reference per trial.
+# the mocap. Budget 0 starts on mocap at the split and never sees another fix: the
+# open-loop reference over exactly the scored strides. The heading entering the test
+# window still depends on `b`, so the `"ZUPT only"` reference is re-run at every budget
+# and `learning_curve_contrast` pairs within a budget rather than assuming one reference
+# per trial.
+
+"The part of an aligned trial from sample `s0` on, started from the INS state there."
+function _trial_from(res::NamedTuple, s0::Int)::NamedTuple
+    return (;
+        inertial_updated=res.inertial_updated[s0:end],
+        gt_traj_aligned=res.gt_traj_aligned[s0:end],
+        sim_config_updated=res.sim_config_updated,
+        x_init=initial_state(res.ins_traj_aligned, s0),
+    )
+end
 
 """
     run_online_learning_curve(aligned, frame, feature_type, hsgp_params, budgets,
                               estimators, output_channels; n_test_strides, ...) -> DataFrame
 
 For every `(dataset_name, trial_id)` in `aligned`, every budget in `budgets` and every
-estimator in `estimators`, run `correction_filter` with mocap available only over the
-`budget` strides before the split and score the result on the last `n_test_strides`
-strides.
+estimator in `estimators`, run `correction_filter` from the start of the `budget` strides
+before the split, with mocap over exactly those strides, and score the result on the last
+`n_test_strides` strides.
 
-`budgets` are stride counts: budget `b` marks the closed sample range
-`[step_seg[k_split - b], step_seg[k_split]]`, i.e. `b+1` footfall fixes bounding exactly
-`b` ground-truth strides. A budget larger than a trial's pre-split prefix is skipped for
-that trial rather than clamped, so the wide end of the axis can rest on fewer trials.
+`budgets` are stride counts: budget `b` starts the run at `step_seg[k_split - b]` on the
+mocap pose and marks the closed sample range up to `step_seg[k_split]`, i.e. `b+1`
+footfall fixes bounding exactly `b` ground-truth strides. Budget 0 starts at the split
+and runs open loop. A budget larger than a trial's pre-split prefix is skipped for that
+trial rather than clamped, so the wide end of the axis can rest on fewer trials.
 
 `estimator_kwargs` are extra constructor keywords, the same for every estimator — one
 call is one setting, as in [`run_online_correction_sweep`](@ref).
@@ -806,7 +825,7 @@ function run_online_learning_curve(
 
     isempty(budgets) && throw(ArgumentError("budgets must not be empty"))
     allunique(budgets) || throw(ArgumentError("budgets must be unique, got $budgets"))
-    all(>(0), budgets) || throw(ArgumentError("budgets must be positive, got $budgets"))
+    all(>=(0), budgets) || throw(ArgumentError("budgets must be non-negative, got $budgets"))
     n_test_strides > 0 ||
         throw(ArgumentError("n_test_strides must be positive, got $n_test_strides"))
 
@@ -878,10 +897,12 @@ function run_online_learning_curve(
                            budget $budget skipped"
                     continue
                 end
-                # Ground truth is read only at footfall samples, so marking the closed
-                # sample range [step_seg_ref[first_k], split_sample] gives exactly
-                # `budget` strides with mocap at both ends.
-                gt_available = [step_seg_ref[first_k] <= n <= split_sample for n in 1:N]
+                # The run starts at the window, on mocap. Ground truth is read only at
+                # footfall samples, so marking the closed sample range
+                # [s0, split_sample] gives exactly `budget` strides with mocap at both ends.
+                s0 = step_seg_ref[first_k]
+                sub = _trial_from(res, s0)
+                gt_available = [n <= split_sample - s0 + 1 for n in 1:(N-s0+1)]
 
                 for (estimator_order, (est_name, est_type)) in enumerate(estimators)
                     # Only the filter run is guarded: a trial that diverges should cost one
@@ -897,12 +918,12 @@ function run_online_learning_curve(
                         )
 
                         result = correction_filter(
-                            res.inertial_updated,
-                            res.sim_config_updated,
-                            res.gt_traj_aligned,
+                            sub.inertial_updated,
+                            sub.sim_config_updated,
+                            sub.gt_traj_aligned,
                             estimator;
                             step_detector=step_detector_factory(),
-                            x_init=res.x_init,
+                            x_init=sub.x_init,
                             gt_available=gt_available,
                             ref_frame=frame,
                             feature_type=feature_type,
@@ -915,13 +936,15 @@ function run_online_learning_curve(
                     isnothing(result) && continue
 
                     zupt, step_seg, corr_traj, io_data, model = result
-                    step_seg == step_seg_ref || error(
+                    step_seg .+ (s0 - 1) == step_seg_ref[first_k:end] || error(
                         "segmentation moved between runs of trial $trial_id \
-                         ($(length(step_seg)) strides against $n_strides): the fixed \
-                          evaluation window is not the same window in every cell.")
+                         (budget $budget: $(length(step_seg)) strides from stride $first_k, \
+                          against $(n_strides - first_k + 1)): the fixed evaluation \
+                          window is not the same window in every cell.")
 
-                    _rmse = rmse(corr_traj[test_ks], gt_step[test_ks])[end]
-                    _rmse_yaw = rmse_yaw(corr_traj[test_ks], gt_step[test_ks])[end]
+                    test_ks_run = test_ks .- (first_k - 1)
+                    _rmse = rmse(corr_traj[test_ks_run], gt_step[test_ks])[end]
+                    _rmse_yaw = rmse_yaw(corr_traj[test_ks_run], gt_step[test_ks])[end]
                     _final = norm(corr_traj.pos[1:2, end] .- gt_step.pos[1:2, end])
 
                     push!(df, (

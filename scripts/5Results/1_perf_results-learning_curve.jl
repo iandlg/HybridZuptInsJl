@@ -13,16 +13,18 @@
 ### budget is the window of ground-truth strides immediately before it:
 ###
 ###   stride:  1 ............ ks-b .... ks | ks+1 ...... N
-###   mocap:   .  no mocap  . [==== b ====] |   none (test)
+###   run:     .   not run   . [start on mocap ...................]
+###   mocap:                  [==== b ====] |   none (test)
 ###   score:                                 [=== n_test ==]
 ###
-### The prefix cannot stay anchored while only the training budget moves: `β`
-### lives in the corrector's error state and the mocap pose update is what learns it
-### (JointStrideEstimators.jl) — so the budget IS the mocap, and the prefix before the
-### window runs open loop. What that costs: the pose entering the test window is pinned
-### by the last fix whatever the budget is, but the covariance is not. Hence the
-### "ZUPT only" baseline is re-run at every budget and the pairing is within a budget;
-### `learning_curve_contrast` prints how much that baseline actually moved.
+### `β` lives in the corrector's error state and the mocap pose update is what learns it
+### (JointStrideEstimators.jl), so the budget IS the mocap. Each run starts at `ks-b` on
+### the mocap pose: run from stride 1, the open-loop prefix leaked into the test window
+### (the correctors put the whole prefix drift into `β` at the first fix, and the "ZUPT
+### only" filter kept part of the prefix heading error). Budget 0 starts at the split and
+### runs open loop: the absolute figure's leftmost group, every estimator. The heading entering the
+### test window still depends on the budget, so the relative figures pair "ZUPT only"
+### within a budget; `learning_curve_contrast` prints how much that baseline moved.
 ###
 ### What it does NOT answer: what happens when ground truth is lost mid-walk and the
 ### walk continues for a variable distance. That is 1_perf_results.jl's.
@@ -47,14 +49,14 @@ ids = trial_ids(data_key)
 # test window is taken off the end, which is the range where "how many footfalls does it
 # need" is worth asking. Eight of ANG2's eleven walks are ~30 strides long, so there the
 # test window and the budgets both have to shrink; the axis is much shorter.
-N_TEST_STRIDES = Dict("DCSC" => 40, "ANG2" => 10)[data_key]
-BUDGETS = Dict("DCSC" => [20, 30, 40, 50], "ANG2" => [3, 8, 16])[data_key]
+N_TEST_STRIDES = Dict("DCSC" => 10, "ANG2" => 10)[data_key]
+BUDGETS = Dict("DCSC" => [3, 8, 16], "ANG2" => [3, 8, 16])[data_key] # [20, 30, 40, 50]
 
 # Set to a scores CSV under out/Results/1_Performance/LearningCurve/data/ to re-plot a
 # finished sweep instead of paying for it again.
-# DCSC : learning_curve_V4_DCSC_key42_ntest10_process_only_2026-09-24T10:17:18.182.csv
-# ANG2 : learning_curve_V4_ANG2_key42_ntest10_process_only_2026-09-23T12:22:07.749.csv
-results_csv = "learning_curve_V4_DCSC_key42_ntest60_process_only_2026-09-23T17:48:50.574.csv"
+# CSVs up to 2026-09-24 ran every budget from stride 1 (open-loop prefix leaking into the
+# test window) and have no budget 0: re-run rather than re-plot them.
+results_csv = nothing
 
 
 ## 2. Filter and correctors
@@ -88,7 +90,7 @@ if isnothing(results_csv)
         OrderedDict{String,Tuple{String,Vector{Int}}}(data_key => (data_dir(data_key), ids)))
 
     results_df = HybridZuptInsJl.run_online_learning_curve(
-        aligned, FRAME, FEATURE_TYPE, hsgp_p, BUDGETS, estimators, output_channels;
+        aligned, FRAME, FEATURE_TYPE, hsgp_p, vcat(0, BUDGETS), estimators, output_channels;
         n_test_strides=N_TEST_STRIDES,
         estimator_alloc=300,
         correction_filter=CORRECTION_FILTERS[filter_tag],
@@ -127,9 +129,10 @@ println()
 # Trials that reach every budget. The wide end of the axis drops the short walks, so the
 # all-trials medians change the trial mix along with the budget; these are the rows to
 # quote a trend from.
-budget_levels = sort(unique(results_df.train_strides))
+# Budget 0 only feeds the absolute figure: the paired views and tables are over b > 0.
+budget_levels = sort(filter(>(0), unique(results_df.train_strides)))
 full_trials = [t for t in sort(unique(results_df.trial_id))
-                     if length(unique(results_df[results_df.trial_id .== t, :train_strides])) == length(budget_levels)]
+                     if budget_levels ⊆ results_df[results_df.trial_id .== t, :train_strides]]
 @info "Trials reaching every budget: $full_trials of $(length(unique(results_df.trial_id)))"
 
 """Median change per budget, and how many of the trials present at EVERY budget improve
@@ -189,10 +192,11 @@ end
 for metric in (:rmse, :rmse_yaw)
     paired = HybridZuptInsJl.learning_curve_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
+    paired = paired[paired.train_strides .> 0, :]
     print_latex_median_table(paired, metric)
 
     base = results_df[results_df.estimator .== BASE_ESTIMATOR, :]
-    for b in budget_levels
+    for b in vcat(0, budget_levels)
         v = base[base.train_strides .== b, metric]
         @printf("%s %s %4d strides: median %.3f over %d trials\n", BASE_ESTIMATOR, metric, b, median(v), length(v))
     end
@@ -208,6 +212,17 @@ for metric in (:rmse, :rmse_yaw)
             show_outliers=true,
             show_points=true,
             save_path=results_path(SECTION, "$(CSV_PREFIX)_$(metric)_$(run_stem).pdf"),
+        )
+    end
+
+    results_figure() do
+        HybridZuptInsJl.plot_learning_curve_absolute(
+            results_df, DATASET;
+            metric=metric,
+            reference_estimator=BASE_ESTIMATOR,
+            show_outliers=true,
+            show_points=true,
+            save_path=results_path(SECTION, "$(CSV_PREFIX)_$(metric)_absolute_$(run_stem).pdf"),
         )
     end
 end

@@ -248,6 +248,10 @@ function compute_aligned_ins_trajectory(
     return ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated
 end
 
+"The INS state `[pos; vel; euler]` at sample `n` of `traj`, as the filters take it for `x_init`."
+initial_state(traj::Trajectory, n::Int=1)::Vector{Float64} =
+    vcat(traj.pos[:, n], traj.vel[:, n], matrix_to_euler(traj.R_nb[:, :, n]))
+
 """
     collect_aligned_trajectories(
         data_dict::AbstractDict{<:AbstractString,<:AbstractVector{Int}};
@@ -286,11 +290,7 @@ function collect_aligned_trajectories(
                 inertial_updated, sim_config_updated =
                     compute_aligned_ins_trajectory(data_path, trial_id; kwargs...)
 
-                x_init = vcat(
-                    ins_traj_aligned.pos[:, 1],
-                    ins_traj_aligned.vel[:, 1],
-                    matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
-                )
+                x_init = initial_state(ins_traj_aligned)
 
                 trial_results[trial_id] = (;
                     ins_traj_aligned=ins_traj_aligned,

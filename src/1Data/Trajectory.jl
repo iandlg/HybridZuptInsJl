@@ -23,7 +23,6 @@ Base.getindex(tr::Trajectory, mask) = Trajectory(
     tr.R_nb[:, :, mask],
     tr.vel === nothing ? nothing : tr.vel[:, mask]
 )
-Base.lastindex(tr::Trajectory) = length(tr)
 
 function Trajectory(dir::AbstractString, id::Int, kwargs...)
     src = resolve_source(dir)
