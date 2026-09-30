@@ -299,10 +299,8 @@ multiplicative probe can move; leave `include_output_params=false` unless it is
 given an additive spec too.
 
 Group names double as the `type` column, so each family gets its own symbol and
-colour in the figures ([`_STAT_PARAM_INFO`](@ref)). The centering family was
-typed `mid_norm` (the field it writes) while being *named* `input_center[d]`;
-it is now typed `input_center` to match, and the plotting layer aliases the old
-spelling so previously saved CSVs still resolve.
+colour in the figures ([`_PARAM_KINDS`](@ref)). Output families have no label
+entry and render under their raw names if swept.
 """
 function make_stats_param_grid(base_params::HsgpParameters;
     output_channel_idxs::Vector{Int}=[1, 2, 3, 4],
@@ -414,12 +412,15 @@ function make_stats_param_grid(base_params::HsgpParameters;
 end
 
 """
-    vary_hsgp_parameters(base_params, rmse_func, param_specs; include_baseline=true)
+    vary_hsgp_parameters(base_params, rmse_func, param_specs; reference_rmse, include_baseline=true)
 
-Sweep every spec one at a time against a single baseline evaluation.
+Sweep every spec one at a time, scoring each probe against `reference_rmse` --
+the trial's ZUPT-only (`BaseEstimator`) RMSE. The `"baseline"` row is the
+trained parameters, scored against the same reference.
 
-Columns: `parameter`, `type`, `base_value`, `tested_value`, `rmse`, `rmse_ratio`,
-`relative_change` (a *fraction*, not a percent), plus `probe` and `probe_kind`.
+Columns: `parameter`, `type`, `base_value`, `tested_value`, `rmse`,
+`reference_rmse`, `rmse_ratio`, `relative_change` (a *fraction*, not a percent;
+negative means the corrector beat ZUPT only), plus `probe` and `probe_kind`.
 
 `probe` is the parameter's position on its own natural axis --
 [`probe_coordinate`](@ref) -- computed here, where the generator that produced
@@ -431,11 +432,12 @@ function vary_hsgp_parameters(
     base_params::HsgpParameters,
     rmse_func::Function,
     param_specs::Vector{ParamSpec};
+    reference_rmse::Float64,
     include_baseline::Bool=true
 )::DataFrame
     results = []
     baseline_rmse = rmse_func(base_params)
-    @info "Baseline RMSE: $baseline_rmse"
+    @info "Trained RMSE: $baseline_rmse, reference (ZUPT only) RMSE: $reference_rmse"
 
     inert = String[]
     for spec in param_specs
@@ -454,8 +456,9 @@ function vary_hsgp_parameters(
                 probe=probe_coordinate(spec, base_params, current_val, new_val),
                 probe_kind=String(spec.probe_kind),
                 rmse=rmse_val,
-                rmse_ratio=rmse_val / baseline_rmse,
-                relative_change=(rmse_val - baseline_rmse) / baseline_rmse
+                reference_rmse=reference_rmse,
+                rmse_ratio=rmse_val / reference_rmse,
+                relative_change=(rmse_val - reference_rmse) / reference_rmse
             ))
         end
 
@@ -488,8 +491,9 @@ function vary_hsgp_parameters(
             probe=NaN,
             probe_kind="none",
             rmse=baseline_rmse,
-            rmse_ratio=1.0,
-            relative_change=0.0
+            reference_rmse=reference_rmse,
+            rmse_ratio=baseline_rmse / reference_rmse,
+            relative_change=(baseline_rmse - reference_rmse) / reference_rmse
         ))
     end
     return DataFrame(results)
@@ -652,21 +656,21 @@ function box_exit_points(box_df::DataFrame)::DataFrame
 end
 
 """
-    sweep_over_trials(base_params, param_specs, make_evaluator, trial_ids;
+    sweep_over_trials(base_params, param_specs, make_evaluator, reference_rmse, trial_ids;
                       include_baseline=true, checkpoint_dir=nothing) -> DataFrame
 
 Repeat [`vary_hsgp_parameters`](@ref) once per trial and stack the frames with a
 `trial_id` column.
 
-`make_evaluator(trial_id)` builds that trial's RMSE closure. Each trial is scored
-against **its own** baseline, so `relative_change` is a within-trial contrast and
-the design is paired
+`make_evaluator(trial_id)` builds that trial's RMSE closure and
+`reference_rmse(trial_id)` returns that trial's ZUPT-only RMSE. Each trial is
+scored against **its own** ZUPT-only run, so `relative_change` is a within-trial
+contrast and the design is paired: 0 is "no better than ZUPT only", and the
+unperturbed probe sits at the trained corrector's own improvement.
 
-What the repetition buys is a reference *band*, not a noise floor. The pipeline
-is deterministic under a fixed seed, so the unperturbed point is exactly 0 in
-every trial by construction. The usable reading is the across-trial spread at
-each probe: a parameter whose band contains 0 everywhere has no demonstrated
-effect, and one whose band stays clear of 0 with a consistent sign does.
+The across-trial spread at each probe is the usable reading: a probe whose band
+stays below 0 still beats ZUPT only in every trial, and the distance from the
+identity probe is what the perturbation cost.
 
 `checkpoint_dir` writes each trial's frame as it completes, so a long run
 survives a crash and can be replotted without recomputing.
@@ -675,6 +679,7 @@ function sweep_over_trials(
     base_params::HsgpParameters,
     param_specs::Vector{ParamSpec},
     make_evaluator::Function,
+    reference_rmse::Function,
     trial_ids::AbstractVector{Int};
     include_baseline::Bool=true,
     checkpoint_dir::Optional{String}=nothing
@@ -686,7 +691,7 @@ function sweep_over_trials(
     for (i, tid) in enumerate(trial_ids)
         @info "Sensitivity sweep: trial $tid ($i/$(length(trial_ids)))"
         df = vary_hsgp_parameters(base_params, make_evaluator(tid), param_specs;
-            include_baseline=include_baseline)
+            reference_rmse=reference_rmse(tid), include_baseline=include_baseline)
         df.trial_id = fill(tid, nrow(df))
         isnothing(checkpoint_dir) ||
             CSV.write(joinpath(checkpoint_dir, "trial_$(tid).csv"), df)
@@ -719,16 +724,14 @@ Reduce a [`sweep_over_trials`](@ref) frame to one row per parameter: how far the
 across-trial median moved, and whether the trials agreed about it.
 
 Columns: `parameter`, `type`, `probe_kind`, `span` (range of the across-trial
-median curve), `worst_probe` (the non-identity probe with the largest |median|),
-`median_pct`, `q25`, `q75` (across trials at `worst_probe`), `n_agree`,
-`n_trials`, `p_value`.
+median curve), `worst_probe` (the non-identity probe with the highest median,
+i.e. the most damaging setting), `median_pct`, `q25`, `q75` (across trials at
+`worst_probe`), `n_agree`, `n_trials`, `p_value`.
 
-`n_agree` is the majority count `max(k, n-k)` over the sign of the change, and
-`p_value` is [`sign_test_p`](@ref) on it. This is the statistic that separates a
-parameter that moved RMSE from one whose wide range is a handful of trials
-disagreeing: with the pipeline deterministic under a fixed seed there is no
-run-to-run noise floor to test against, so agreement across trials is the
-reference the design does provide.
+`n_agree` is the majority count `max(k, n-k)` over the sign of the change
+against ZUPT only, and `p_value` is [`sign_test_p`](@ref) on it: whether the
+trials agree that the most damaging setting still beats (or no longer beats)
+ZUPT only.
 
 All percentages, matching the plotting layer and `relative_change * 100`.
 """
@@ -746,7 +749,7 @@ function probe_agreement(df::DataFrame)::DataFrame
 
         moved = by_probe[abs.(by_probe.probe .- identity_probe) .> 1e-9, :]
         nrow(moved) == 0 && continue
-        worst = moved.probe[argmax(abs.(moved.med))]
+        worst = moved.probe[argmax(moved.med)]
 
         vals = sub[isapprox.(sub.probe, worst; atol=1e-9), :pct]
         n = length(vals)
@@ -848,14 +851,11 @@ For each parameter and each trial, the two extremes of that trial's sweep:
 Columns: `parameter`, `type`, `trial_id`, `best`, `worst`, as percentages.
 
 Both are the same kind of number -- a per-trial extreme in percent of that
-trial's own baseline -- which is what lets the ranking figure draw them as two
-box plots on one signed axis. The previous figure mixed a range taken over
-*probes* with an inter-quartile range taken over *trials*, two perpendicular
-slices of the same grid shown as the same kind of mark.
+trial's ZUPT-only RMSE -- which is what lets the ranking figure draw them as two
+box plots on one signed axis.
 
-`best` is 0 exactly when no tested setting beat the trained value, since the
-identity probe reproduces the baseline: a degenerate box on zero is the
-statement that the trained value was optimal in that trial.
+The identity probe reproduces the trained corrector, so `best <= trained <= worst`
+per trial; `best` equals the trained value exactly when no tested setting beat it.
 """
 function probe_extremes_by_trial(df::DataFrame)::DataFrame
     work = df[df.parameter .!= "baseline", :]

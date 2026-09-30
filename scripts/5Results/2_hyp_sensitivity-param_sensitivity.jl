@@ -14,12 +14,11 @@
 # scale rows: their span was partly just a reading of mu/sigma.
 #
 # The sweep is repeated over several trials and each trial is scored against its
-# OWN baseline, so the design is paired and every curve carries an across-trial
-# band. That band is the reference distribution -- a parameter whose band
-# contains zero at every probe has not been shown to matter. It is NOT a noise
-# floor: the pipeline is deterministic under a fixed seed, so the unperturbed
-# point is exactly zero in every trial by construction. Interactions are still
-# untested; this is still one-at-a-time.
+# OWN ZUPT-only run (BaseEstimator through the same filter), so the design is
+# paired and every curve carries an across-trial band. Zero is "no better than
+# ZUPT only"; the unperturbed probe sits at the trained corrector's improvement,
+# and how far a probe moves from it is what the perturbation cost. Interactions
+# are still untested; this is still one-at-a-time.
 
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
@@ -68,7 +67,7 @@ sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 5 : 9
+n_steps = smoke_test ? 3 : 5
 log_range = (-1.0, 1.0)     # scale families: decades
 delta_range = (-3.0, 3.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 
@@ -138,10 +137,12 @@ end
 
 const SECTION = "2_HypSensitivity/SensitivityAnalysis"
 outdir = joinpath("out/Results", SECTION, "data")
-mkpath(outdir)
 
 time = string(Dates.now())
-base_name = "$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
+base_name = "$(filter_tag)_process_only_refBase_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
+# Everything a run saves lives in its own folder, named like its files.
+run_dir = joinpath(outdir, base_name)
+mkpath(run_dir)
 ##
 make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
@@ -152,10 +153,20 @@ make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     correction_filter=CORRECTION_FILTERS[filter_tag],
 )
 
+# The reference every probe is scored against: the same trial through the same
+# filter with no correction (BaseEstimator ignores the HSGP parameters).
+reference_rmse(tid) = HybridZuptInsJl.make_rmse_evaluator(
+    data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
+    m=m, output_channel_idxs=output_channel_idxs,
+    hsgp_estimator_factory=HybridZuptInsJl.BaseEstimator,
+    noise_spec=noise_spec,
+    correction_filter=CORRECTION_FILTERS[filter_tag],
+)(hsgp_p)
+
 df = HybridZuptInsJl.sweep_over_trials(
-    hsgp_p, specs, make_evaluator, sweep_trial_ids;
+    hsgp_p, specs, make_evaluator, reference_rmse, sweep_trial_ids;
     include_baseline=true,
-    checkpoint_dir=joinpath(outdir, base_name),
+    checkpoint_dir=joinpath(run_dir, "trials"),
 )
 
 ## ----- Box occupancy -------------------------------------------------------
@@ -186,12 +197,12 @@ end
 
 ## ----- Save ----------------------------------------------------------------
 
-csv_path = joinpath(outdir, "$base_name.csv")
-json_path = joinpath(outdir, "$base_name.json")
-box_path = joinpath(outdir, "$(base_name)_box.csv")
-exit_path = joinpath(outdir, "$(base_name)_box_exit.csv")
-agree_path = joinpath(outdir, "$(base_name)_agreement.csv")
-rank_path = joinpath(outdir, "$(base_name)_ranking.csv")
+csv_path = joinpath(run_dir, "$base_name.csv")
+json_path = joinpath(run_dir, "$base_name.json")
+box_path = joinpath(run_dir, "$(base_name)_box.csv")
+exit_path = joinpath(run_dir, "$(base_name)_box_exit.csv")
+agree_path = joinpath(run_dir, "$(base_name)_agreement.csv")
+rank_path = joinpath(run_dir, "$(base_name)_ranking.csv")
 
 CSV.write(csv_path, df)
 CSV.write(box_path, box_df)
@@ -227,6 +238,7 @@ metadata = Dict(
     "noise_spec_tag" => noise_spec.tag,
     "pred_includes_noise" => pred_includes_noise,
     "noise_mode" => "process_only",
+    "reference" => "BaseEstimator",
     "hsgp_p_key" => hsgp_p_key,
     "correction_filter" => filter_tag,
     "base_parameters_metadata" => meta
@@ -250,17 +262,18 @@ println()
 ## ----- Plot ----------------------------------------------------------------
 # Set `replot_basename` to re-plot a previously saved sweep, or leave it
 # `nothing` to plot the sweep just computed above.
-# replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"   # V2
-replot_basename = "V4_process_only_key42_ANG2_HEADING_TWOD_STEP_YAW_2026-09-21T23:37:28.017"
+# Artifacts without `refBase` in the name were scored against the trained
+# corrector, not ZUPT only, and would be mislabelled by these figures.
+replot_basename = "V4_process_only_refBase_key42_ANG2_HEADING_TWOD_STEP_YAW_2026-09-30T11:47:28.835"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
 # typed input either way.
 plot_name = isnothing(replot_basename) ? base_name : replot_basename
 plot_df, plot_meta = HybridZuptInsJl.load_hp_variation_results(
-    joinpath(outdir, "$plot_name.csv"),
-    joinpath(outdir, "$plot_name.json"))
-plot_box = CSV.read(joinpath(outdir, "$(plot_name)_box.csv"), DataFrame)
+    joinpath(outdir, plot_name, "$plot_name.csv"),
+    joinpath(outdir, plot_name, "$plot_name.json"))
+plot_box = CSV.read(joinpath(outdir, plot_name, "$(plot_name)_box.csv"), DataFrame)
 
 grid = HybridZuptInsJl.grid_from_dict(plot_meta["grid"])
 stats_grid_meta = get(plot_meta, "stats_grid", nothing)
@@ -305,8 +318,9 @@ end
 # data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
     HybridZuptInsJl.plot_probe_ranking(plot_df;
-        xlims=(-50.0, 200.0),
+        xlims=(-100.0, 50.0),
         log_scale=false,
+        sides=(:worst,),
         save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"),
         figsize=(900, 475))
 end
@@ -328,6 +342,6 @@ for focus_param in focus_params
         HybridZuptInsJl.plot_param_closeup(plot_df, focus_param;
             box_df=plot_box,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"),
-            _ylims=(-50.0, 200.0))
+            _ylims=nothing)
     end
 end

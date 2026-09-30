@@ -162,7 +162,7 @@ end
 Colour index into `Makie.wong_colors()` for each correction method, so a method keeps
 one colour across every figure instead of getting whatever its position in a
 `Dict` happened to earn. Wong 1-3 were already spoken for by these three by
-convention (see `_HP_COLOR_INDICES` in `Plotting/OnlineHpSensitivity.jl`, which
+convention (see `_PARAM_KINDS` in `Plotting/OnlineHpSensitivity.jl`, which
 avoids them for exactly this reason); this states the convention rather than
 leaving it to iteration order.
 """

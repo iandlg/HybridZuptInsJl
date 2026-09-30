@@ -3,7 +3,7 @@
 #
 # WHY THIS EXISTS. Two results from neighbouring sections sit awkwardly together:
 #
-#   * 2_hyp_sensitivity-param_sensitivity.jl finds the yaw length scale ℓ_s to be
+#   * 2_hyp_sensitivity-param_sensitivity.jl finds the yaw length scale ℓ_SE to be
 #     the most consequential hyperparameter in the sweep, and finds the trained
 #     value sitting on a local minimum -- perturbing it either way moves RMSE.
 #   * 3_yaw_channel-cst_v_hsgp_yaw_correction.jl finds that, at the trained
@@ -13,7 +13,7 @@
 # Taken together those read as a contradiction: how can the most sensitive
 # parameter be sitting at a value where the model it parameterises is worth no
 # more than a constant? This figure is the hint at the answer -- it shows the
-# regressed yaw output itself at ℓ_s below, at, and above the trained value,
+# regressed yaw output itself at ℓ_SE below, at, and above the trained value,
 # with the static correction on the same axes for reference.
 #
 # SCOPE. One trial, one noise realisation, three length scales. This is an
@@ -47,12 +47,12 @@ output_channels = [:pos_1, :pos_2, :yaw]
 
 ## 3. Length scales to compare
 # Index 2 of a channel's hyperparameter vector is the length scale
-# (1 = σ_n, 2 = ℓ_s, 3 = σ_f; see _HP_SYMBOL_PARTS in Plotting/OnlineHpSensitivity.jl).
+# (1 = σ_n, 2 = ℓ_SE, 3 = σ_SE; see _PARAM_KINDS in Plotting/OnlineHpSensitivity.jl).
 const LENGTH_SCALE_IDX = 2
 
 # Decades either side of the trained value. The same ±1 decade the sensitivity
 # sweep used (`log_range = (-1.0, 1.0)`), so the three points here are the
-# endpoints and centre of that sweep's yaw ℓ_s axis.
+# endpoints and centre of that sweep's yaw ℓ_SE axis.
 log10_offsets = [-1.0, 0.0, 1.0]
 
 base_ls = hsgp_p.hp.yaw[LENGTH_SCALE_IDX]
@@ -91,7 +91,7 @@ series_labels = Dict{String,Any}("Static" => "Static")
 
 # Every HSGP variant is the SAME estimator at a different setting, so they share one
 # colour and are told apart by linestyle. Three shades of green could not do this job:
-# at the trained ℓ_s and above, the corrections collapse onto nearly the same flat line,
+# at the trained ℓ_SE and above, the corrections collapse onto nearly the same flat line,
 # and no colour separates two curves drawn on top of each other. Linestyle does, and it
 # still works when the figure is printed in greyscale.
 #
@@ -147,7 +147,7 @@ const SECTION = "2_HypSensitivity/YawLengthScaleRegression"
 
 # The test segment is the one the argument is about: on the training half every
 # variant reproduces the data it was fitted to, so nothing distinguishes them there.
-# clip_quantile scales the y-axis to the target's full range plus a 10% margin: at ℓ_s = base/10
+# clip_quantile scales the y-axis to the target's full range plus a 10% margin: at ℓ_SE = base/10
 # the GP extrapolates to tens of radians, and left to autoscale that one series
 # flattens the other three onto the zero line -- the exact comparison this figure
 # exists to show. The target is what the corrections are trying to reproduce, so its

@@ -1,47 +1,40 @@
 """
-Hyperparameter sensitivity curves.
+Label and colour vocabulary for the sensitivity figures (`OnlineHpProbe.jl`),
+plus the multiplier-axis ticks they share.
 
-NOTE: for a sweep carrying `probe`/`probe_kind` columns, use `OnlineHpProbe.jl`
-instead. The multiplier axis these functions recover as `tested_value /
-base_value` is only meaningful for a scale parameter; a location parameter swept
-additively needs the offset axis it was swept on. This file is kept for the
-sweeps and saved CSVs that predate that distinction.
+Every swept parameter is labelled `[symbol]_k`: the symbol of its kind in
+brackets, subscripted by which one it is. For a GP hyperparameter `k` is the
+channel's position among the swept channels (pos_1, pos_2, yaw -> 1, 2, 3); for
+a normalisation statistic it is the feature dimension. So `yaw[2]` renders as
+`[ℓ_SE]_3` and `input_std[3]` as `[σ_x]_3`.
 
-Both the full grid ([`plot_hp_sensitivity`](@ref)) and the single-parameter
-close-up ([`plot_hp_param_sensitivity`](@ref)) draw the same curve through
-`_draw_hp_panel!`, so a panel of the grid and the close-up of the same parameter
-cannot disagree about axes or units.
-
-Two conventions, shared by both:
-
-* **x is the multiplier applied to the tested hyperparameter**, on a log-scaled
-  axis with a tick at each value actually swept. `vary_hsgp_parameters` samples
-  geometrically around the base value (`log_around`), so the spacing is the
-  sweep's own spacing; only the labels change, from exponents to `×0.32`, `×1`,
-  `×3.16`. The axis previously read `log₁₀(relative change)`, which was doubly
-  misleading: the quantity plotted was `log10(tested/base)`, a multiplier, and
-  `relative_change` is the name of a different column entirely.
-* **y is the RMSE change against the baseline, in percent** -- the
-  `relative_change` column scaled by 100, so 0% is the untouched hyperparameter
-  and −60% means the perturbation cut RMSE by well over half. The grid used to
-  plot `rmse_ratio` (1.0 = baseline), which is the same information on a scale
-  that has to be translated before it can be quoted.
+The parameter *names* in a sweep frame (`yaw[2]`, `input_std[3]`) are not
+touched here; see [`hp_param_name`](@ref) and [`stat_param_name`](@ref).
 """
 
 """
-Math symbols for the three hyperparameters, keyed by their position in a
-channel's parameter vector (the same index `_HYPERPARAM_TYPES` is keyed by, and
-the one that appears in a parameter name like `yaw[2]`).
+Every kind a sweep can contain, in legend order: `type => (symbol, subscript,
+colour)`. The key is the `type` column the sweep writes. The three GP
+hyperparameters come first, then the input normalisation statistics.
 
-Written as `(base, subscript)` pairs rather than plain strings because Unicode
-has no subscript `f`, so `σ_f` cannot be spelled with combining characters the
-way `σₙ` can. Makie's `rich`/`subscript` renders all three consistently.
+Symbols are stored as `(base, subscript)` pairs rather than strings because
+Unicode has no subscript `f` or `S`, so they are rendered with Makie's
+`rich`/`subscript`.
+
+Colours: the hyperparameters take Wong 4-6, because Wong 1-3 are what the
+estimator figures in `scripts/5Results/` give to the correction types (ZUPT only
+/ Static / HSGP) and Wong 7 (yellow) is too light for a thin line. The
+statistics take Tol muted, so no two kinds share a colour.
 """
-const _HP_SYMBOL_PARTS = Dict{Int,Tuple{String,String}}(
-    1 => ("σ", "n"),   # noise
-    2 => ("ℓ", "s"),   # length scale
-    3 => ("σ", "f"),   # signal variance
-)
+const _PARAM_KINDS = [
+    "noise" => ("σ", "n", Makie.wong_colors()[4]),
+    "length_scale" => ("ℓ", "SE", Makie.wong_colors()[5]),
+    "signal_variance" => ("σ", "SE", Makie.wong_colors()[6]),
+    "input_mean" => ("μ", "z", Makie.RGBAf(Makie.to_color("#332288"))),
+    "input_std" => ("σ", "z", Makie.RGBAf(Makie.to_color("#44AA99"))),
+    "input_center" => ("c", "z", Makie.RGBAf(Makie.to_color("#999933"))),
+]
+const _PARAM_KIND_INFO = Dict(_PARAM_KINDS)
 
 """
 Hyperparameter type name -> its index in a channel's parameter vector. The
@@ -49,120 +42,13 @@ inverse of `_HYPERPARAM_TYPES`, so the mapping is stated once.
 """
 const _HP_TYPE_INDEX = Dict{String,Int}(v => k for (k, v) in _HYPERPARAM_TYPES)
 
-"""
-One colour per hyperparameter type, fixed by type rather than by plotting order,
-so ℓ_s is the same colour in every sensitivity figure regardless of which
-parameters a given sweep happened to contain. Keyed by the index in a channel's
-parameter vector (1 = σ_n, 2 = ℓ_s, 3 = σ_f).
-
-These are Wong 4-6. Wong 1-3 are spoken for: they are what the estimator figures
-in `scripts/5Results/` give to the three correction types (ZUPT only / Static /
-HSGP), and reusing them here would put the same colour on a correction method in
-one figure and a hyperparameter in the next. Wong 7 is the yellow, which is too
-light to read as a thin line on the light background these figures use.
-"""
-const _HP_COLOR_INDICES = Dict{Int,Int}(
-    1 => 4,   # σ_n  -> Wong 4, #CC79A7
-    2 => 5,   # ℓ_s  -> Wong 5, #56B4E9
-    3 => 6,   # σ_f  -> Wong 6, #D55E00
-)
-
 const _HP_FALLBACK_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
 
 """
-Display data for the normalisation statistics `make_stats_param_grid` sweeps
-alongside the GP hyperparameters: the input mean and std that standardise a
-feature before it reaches the kernel, the centering offset (`mid_norm`) that
-places the HSGP domain around it, and the output mean/std that scale the
-prediction back.
-
-These are swept in the same units and against the same baseline as the
-hyperparameters, so a sweep can contain both families and the signed-range
-figure can rank them against each other. Without an entry here they fall back to
-their raw name in a neutral grey -- readable, but three grey rows called
-`input_mean[1]`, `input_std[1]`, `input_center[1]` cannot be told apart at a
-glance, which is the whole point of that figure.
-
-Keyed by the *name prefix* the sweep emits (`input_mean[2]` -> `"input_mean"`),
-which is also the `type` column for every family except the centering term; see
-`_STAT_TYPE_ALIASES`.
-
-Colours are Tol muted, not more of the Wong palette: Wong 1-3 belong to the
-correction methods in `scripts/5Results/`, 4-6 to the three hyperparameters
-above, and 7 (yellow) is too light to read. A figure holding both families
-therefore carries eight series with no two sharing a colour.
-"""
-const _STAT_PARAM_INFO = Dict{String,@NamedTuple{sym::String,sub::String,words::String,color::String}}(
-    "input_mean" => (sym="μ", sub="x", words="input mean", color="#332288"),
-    "input_std" => (sym="σ", sub="x", words="input std", color="#44AA99"),
-    "input_center" => (sym="c", sub="x", words="input centering", color="#999933"),
-    "output_mean" => (sym="μ", sub="y", words="output mean", color="#882255"),
-    "output_std" => (sym="σ", sub="y", words="output std", color="#AA4499"),
-)
-
-"""
-`type` strings that name the same family as a different `_STAT_PARAM_INFO` key.
-
-The centering sweep is *named* `input_center[d]` but *typed* `mid_norm`, after
-the field it writes (`HsgpParameters.mid_norm`). Both spellings appear in saved
-CSVs, so both resolve here rather than one of them dropping to grey.
-"""
-const _STAT_TYPE_ALIASES = Dict{String,String}("mid_norm" => "input_center")
-
-"""
-    _stat_info(key) -> NamedTuple or nothing
-
-Look up a statistics family by its name prefix or `type` string, resolving
-[`_STAT_TYPE_ALIASES`](@ref). `nothing` for anything that is not one.
-"""
-function _stat_info(key::AbstractString)
-    k = String(key)
-    k = get(_STAT_TYPE_ALIASES, k, k)
-    return get(_STAT_PARAM_INFO, k, nothing)
-end
-
-"""
-    hp_type_color(idx_or_type)
-
-Colour for a swept parameter type, given either a hyperparameter's index (1/2/3)
-or a type name -- `"noise"` / `"length_scale"` / `"signal_variance"` for the GP
-hyperparameters, or one of the [`_STAT_PARAM_INFO`](@ref) families for the
-normalisation statistics. Anything else gets a neutral grey rather than silently
-borrowing another type's colour.
-"""
-hp_type_color(idx::Int) =
-    haskey(_HP_COLOR_INDICES, idx) ? Makie.wong_colors()[_HP_COLOR_INDICES[idx]] : _HP_FALLBACK_COLOR
-function hp_type_color(type::AbstractString)
-    info = _stat_info(type)
-    isnothing(info) || return Makie.RGBAf(Makie.to_color(info.color))
-    return hp_type_color(get(_HP_TYPE_INDEX, String(type), 0))
-end
-
-"""
-    hp_param_color(name)
-
-Colour for a sweep parameter such as `"yaw[2]"` or `"input_std[3]"`, resolved
-through its type so that every figure agrees. Same channel guard as
-[`hp_param_label`](@ref).
-"""
-function hp_param_color(name::AbstractString)
-    parsed = _parse_hp_param(name)
-    isnothing(parsed) && return _HP_FALLBACK_COLOR
-    channel, idx = parsed
-    isnothing(_stat_info(channel)) || return hp_type_color(channel)
-    channel in _OUTPUT_NAMES || return _HP_FALLBACK_COLOR
-    return hp_type_color(idx)
-end
-
-"""
-    _parse_hp_param(name) -> (channel, idx) or nothing
+    _parse_hp_param(name) -> (prefix, idx) or nothing
 
 Split a parameter name such as `"yaw[2]"` or `"input_mean[3]"` into its prefix
-and bracketed index. What the index *means* depends on the prefix -- a
-hyperparameter kind for an output channel, a feature dimension for a statistics
-family -- so callers must resolve the prefix before using it. Returns `nothing`
-for anything not of that shape (`"baseline"`), so callers can fall back to
-showing the raw name.
+and bracketed index. `nothing` for anything not of that shape (`"baseline"`).
 """
 function _parse_hp_param(name::AbstractString)
     mt = match(r"^(.*)\[(\d+)\]$", name)
@@ -171,98 +57,97 @@ function _parse_hp_param(name::AbstractString)
 end
 
 """
-    hp_param_label(name; with_channel=true) -> rich text
+    _param_kind(name) -> (type, key) or nothing
 
-Display label for a sweep parameter: the parameter's math symbol with what it
-belongs to -- `yaw[2]` renders as `ℓ_s (yaw)` (hyperparameter, output channel),
-`input_std[3]` as `σ_x [3]` (normalisation statistic, feature dimension). Falls
-back to the raw name for anything outside both schemes.
-
-`make_stats_param_grid` emits names of the same *shape* -- `input_mean[1]`,
-`output_std[2]` -- where the bracketed number is a feature dimension, not a
-hyperparameter kind. They are resolved through [`_STAT_PARAM_INFO`](@ref) first
-for exactly that reason: matched against `_HP_SYMBOL_PARTS` instead, `input_mean[1]`
-would be relabelled σ_n, which is wrong rather than merely ugly. A channel that
-is neither a statistics family nor one of `_OUTPUT_NAMES` keeps its raw name.
+What a parameter name refers to. A statistics name gives `(family, dim)`; a
+hyperparameter name gives `(kind, channel)`, since its bracketed index is the
+kind (`yaw[2]` is the yaw length scale). `nothing` for anything else.
 """
-function hp_param_label(name::AbstractString; with_channel::Bool=true)
+function _param_kind(name::AbstractString)
     parsed = _parse_hp_param(name)
-    isnothing(parsed) && return rich(String(name))
-    channel, idx = parsed
-    # Statistics first: their names have the same `prefix[idx]` shape, but the
-    # bracketed number is a feature dimension, so it stays in the label instead
-    # of selecting a hyperparameter symbol.
-    info = _stat_info(channel)
-    isnothing(info) || return with_channel ?
-                              rich(info.sym, subscript(info.sub), " [$idx]") :
-                              rich(info.sym, subscript(info.sub))
-    (channel in _OUTPUT_NAMES && haskey(_HP_SYMBOL_PARTS, idx)) || return rich(String(name))
-    base, sub = _HP_SYMBOL_PARTS[idx]
-    return with_channel ?
-           rich(base, subscript(sub), " ($channel)") :
-           rich(base, subscript(sub))
+    isnothing(parsed) && return nothing
+    prefix, idx = parsed
+    haskey(_PARAM_KIND_INFO, prefix) && !haskey(_HP_TYPE_INDEX, prefix) && return (prefix, idx)
+    (prefix in _OUTPUT_NAMES && haskey(_HYPERPARAM_TYPES, idx)) || return nothing
+    return (_HYPERPARAM_TYPES[idx], prefix)
 end
 
 """
-    _hp_type_label(type) -> rich text
+    swept_channels(df) -> Vector{String}
 
-Legend label for a swept `type` (`"length_scale"`, `"input_std"`, ...): the math
-symbol followed by the name in words, e.g. `ℓ_s  length scale` or
-`σ_x  input std`. Unknown types pass through unchanged.
+The output channels whose hyperparameters `df` sweeps, in `_OUTPUT_NAMES` order.
+That is the order they were swept in, since `make_rmse_evaluator` requires
+ascending `output_channel_idxs`, so a channel's position here is the `k` in its
+`[symbol]_k` label.
 """
-function _hp_type_label(type::AbstractString)
-    info = _stat_info(type)
-    isnothing(info) || return rich(info.sym, subscript(info.sub), "  ", info.words)
-    key = get(_HP_TYPE_INDEX, String(type), 0)
-    haskey(_HP_SYMBOL_PARTS, key) || return rich(String(type))
-    base, sub = _HP_SYMBOL_PARTS[key]
-    return rich(base, subscript(sub), "  ", replace(String(type), "_" => " "))
+function swept_channels(df::AbstractDataFrame)::Vector{String}
+    chans = Set{String}()
+    for name in unique(df.parameter)
+        kind = _param_kind(name)
+        isnothing(kind) || !(kind[2] isa String) || push!(chans, kind[2])
+    end
+    return filter(in(chans), _OUTPUT_NAMES)
 end
 
 """
-Display order for the normalisation statistics: inputs before outputs, and within
-each the mean, the spread, then the domain offset. `_STAT_PARAM_INFO` is a `Dict`
-and so carries no order of its own.
-"""
-const _STAT_TYPE_ORDER = String[
-    "input_mean", "input_std", "input_center", "output_mean", "output_std",
-]
+    param_symbol(type) -> rich text
 
+The symbol of a swept kind, e.g. `ℓ_SE` or `σ_x`. Unknown types pass through as
+their raw name.
 """
-    _hp_type_rank(type) -> (family, position)
-
-Sort key putting the two swept families in a fixed order rather than in whatever
-order the bars happened to land in: the GP hyperparameters first (σ_n, ℓ_s, σ_f,
-by their index in a channel's parameter vector), then the normalisation
-statistics in [`_STAT_TYPE_ORDER`](@ref), then anything unrecognised.
-
-A sweep holds both families and `plot_signed_relative_change` sorts its rows by
-span, so the `type`s appear interleaved down the axis. Reading the legend in that
-order means reading a hyperparameter, a statistic, another hyperparameter -- the
-legend is the one place the two families are named, so it is the place to keep
-them apart.
-"""
-function _hp_type_rank(type::AbstractString)
-    key = String(type)
-    key = get(_STAT_TYPE_ALIASES, key, key)
-    hp_idx = get(_HP_TYPE_INDEX, key, nothing)
-    isnothing(hp_idx) || return (1, hp_idx)
-    stat_pos = findfirst(==(key), _STAT_TYPE_ORDER)
-    isnothing(stat_pos) || return (2, stat_pos)
-    return (3, 0)
+function param_symbol(type::AbstractString)
+    info = get(_PARAM_KIND_INFO, String(type), nothing)
+    isnothing(info) && return rich(String(type))
+    return rich(info[1], subscript(info[2]))
 end
 
 """
-    _hp_ordered_types(types) -> Vector
+    param_label(name, channels) -> rich text
 
-`types` in [`_hp_type_rank`](@ref) order. Ties keep their relative input order --
-the position is carried in the sort key rather than left to the algorithm's
-stability -- so a sweep carrying a type this file has never heard of still gets
-one legend entry per type rather than losing or reordering it silently.
+`[symbol]_k` for a sweep parameter: `yaw[2]` -> `[ℓ_SE]_3` when `channels` is
+`["pos_1", "pos_2", "yaw"]`, and `input_std[3]` -> `[σ_x]_3`. `channels` is
+[`swept_channels`](@ref) of the frame being plotted. Anything else, e.g.
+`"baseline"`, keeps its raw name.
 """
-function _hp_ordered_types(types)
-    ts = collect(types)
-    return ts[sortperm(eachindex(ts); by=i -> (_hp_type_rank(ts[i]), i))]
+function param_label(name::AbstractString, channels::AbstractVector{<:AbstractString})
+    kind = _param_kind(name)
+    isnothing(kind) && return rich(String(name))
+    type, key = kind
+    k = key isa Int ? key : findfirst(==(key), channels)
+    isnothing(k) && throw(ArgumentError("param_label: channel \"$key\" is not in $channels"))
+    sym, sub, _ = _PARAM_KIND_INFO[type]
+    return rich("[", sym, subscript(sub), "]", subscript(string(k)))
+end
+
+"""
+    type_color(type)
+
+Colour of a swept kind, fixed by kind so every figure agrees. Grey for anything
+unknown rather than silently borrowing another kind's colour.
+"""
+type_color(type::AbstractString) =
+    haskey(_PARAM_KIND_INFO, type) ? _PARAM_KIND_INFO[type][3] : _HP_FALLBACK_COLOR
+
+"""
+    param_color(name)
+
+Colour of a sweep parameter such as `"yaw[2]"` or `"input_std[3]"`, through its kind.
+"""
+function param_color(name::AbstractString)
+    kind = _param_kind(name)
+    return isnothing(kind) ? _HP_FALLBACK_COLOR : type_color(kind[1])
+end
+
+"""
+    ordered_types(types) -> Vector{String}
+
+`types` in legend order (the order of [`_PARAM_KINDS`](@ref)), followed by any
+unknown type in its input order, so nothing is dropped from a legend.
+"""
+function ordered_types(types)
+    ts = String.(collect(types))
+    known = filter(in(ts), first.(_PARAM_KINDS))
+    return vcat(known, filter(!in(known), unique(ts)))
 end
 
 """
@@ -359,18 +244,14 @@ counterpart to [`hp_param_name`](@ref) for the other family
 `make_stats_param_grid` sweeps, so a script naming a focus parameter never has
 to hard-code a bracketed index whose meaning differs between the two families.
 
-`family` is one of the [`_STAT_PARAM_INFO`](@ref) keys -- `:input_mean`,
-`:input_std`, `:input_center`, `:output_mean`, `:output_std` -- or an alias of
-one (`:mid_norm` resolves to `:input_center`, matching the `type` string older
-CSVs carry). `dim` is a *feature dimension* for the input families and an output
-channel index for the output ones; unlike `hp_param_name`'s index it selects
-which quantity is perturbed, not which kind of parameter it is.
+`family` is `:input_mean`, `:input_std` or `:input_center`; `dim` is a feature
+dimension.
 """
 function stat_param_name(family::Union{Symbol,AbstractString}, dim::Integer)::String
     key = String(family)
-    key = get(_STAT_TYPE_ALIASES, key, key)
-    haskey(_STAT_PARAM_INFO, key) || throw(ArgumentError(
-        "unknown statistics family \"$(family)\"; have $(sort(collect(keys(_STAT_PARAM_INFO))))"))
+    stats = filter(!in(keys(_HP_TYPE_INDEX)), first.(_PARAM_KINDS))
+    key in stats || throw(ArgumentError(
+        "unknown statistics family \"$(family)\"; have $stats"))
     dim >= 1 || throw(ArgumentError("dim must be >= 1, got $dim"))
     return "$key[$dim]"
 end
