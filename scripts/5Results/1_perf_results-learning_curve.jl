@@ -16,9 +16,7 @@
 ###   mocap:   .  no mocap  . [==== b ====] |   none (test)
 ###   score:                                 [=== n_test ==]
 ###
-### V4 only, and that is not a packaging choice: V2 could separate the two roles of
-### ground truth (`gp_train_available` fed the GP, `gt_available` anchored the state) so
-### the prefix could stay anchored while only the training budget moved. V4 cannot — `β`
+### The prefix cannot stay anchored while only the training budget moves: `β`
 ### lives in the corrector's error state and the mocap pose update is what learns it
 ### (JointStrideEstimators.jl) — so the budget IS the mocap, and the prefix before the
 ### window runs open loop. What that costs: the pose entering the test window is pinned
@@ -28,9 +26,6 @@
 ###
 ### What it does NOT answer: what happens when ground truth is lost mid-walk and the
 ### walk continues for a variable distance. That is 1_perf_results.jl's.
-###
-### One run is one `estimator_kwargs` setting, named in the output stem. Two settings in
-### one figure is 8_noise_split_ablation.jl's job, on the train_ratio axis.
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("_common.jl")
@@ -55,11 +50,6 @@ ids = trial_ids(data_key)
 N_TEST_STRIDES = Dict("DCSC" => 40, "ANG2" => 10)[data_key]
 BUDGETS = Dict("DCSC" => [20, 30, 40, 50], "ANG2" => [3, 8, 16])[data_key]
 
-# Constructor keywords for the correctors. `noise_mode` is :split, :process_only
-# (σ_n as w) or :online_total (√γ₀ as w) — see StrideNoise in JointStrideEstimators.jl
-# and the arms of 8_noise_split_ablation.jl.
-estimator_kwargs = (noise_mode=:process_only,)
-
 # Set to a scores CSV under out/Results/1_Performance/LearningCurve/data/ to re-plot a
 # finished sweep instead of paying for it again.
 # DCSC : learning_curve_V4_DCSC_key42_ntest10_process_only_2026-09-24T10:17:18.182.csv
@@ -69,11 +59,6 @@ results_csv = "learning_curve_V4_DCSC_key42_ntest60_process_only_2026-09-23T17:4
 
 ## 2. Filter and correctors
 filter_tag = "V4"
-# `noise_mode` reaches the corrector through the constructor, and every estimator
-# swallows unknown keywords via `kwargs...`. Under V2/V3 it would be swallowed silently
-# and the setting above would be a no-op.
-@assert CORRECTION_FILTERS[filter_tag] === HybridZuptInsJl.hybrid_zupt_aided_insv4 "\
-    this script is V4 only; filter_tag=$filter_tag has no `noise_mode`."
 
 const BASE_ESTIMATOR = "ZUPT only"
 estimators = OrderedDict(
@@ -106,14 +91,11 @@ if isnothing(results_csv)
         aligned, FRAME, FEATURE_TYPE, hsgp_p, BUDGETS, estimators, output_channels;
         n_test_strides=N_TEST_STRIDES,
         estimator_alloc=300,
-        estimator_kwargs=estimator_kwargs,
         correction_filter=CORRECTION_FILTERS[filter_tag],
     )
 
-    # The setting is part of a run's identity: two `noise_mode` values differ only by
-    # timestamp otherwise, and the re-plot branch picks a file by name.
     run_stem = "$(filter_tag)_$(data_key)_key$(hsgp_p_key)_ntest$(N_TEST_STRIDES)_" *
-        "$(estimator_kwargs.noise_mode)_$(Dates.now())"
+        "process_only_$(Dates.now())"
     csv_path = results_path(DATA_SECTION, "$(CSV_PREFIX)_$(run_stem).csv")
     CSV.write(csv_path, results_df[:, score_cols])
     @info "Saved scores table: $csv_path" nrow(results_df)

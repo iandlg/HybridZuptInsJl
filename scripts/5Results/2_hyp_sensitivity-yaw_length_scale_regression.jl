@@ -80,16 +80,12 @@ window = round(Int, N / 60)
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
-# hyperparameters, no split and no online estimate — the setting the rest of the
-# chapter is run at, so this illustration is drawn at it too.
-noise_mode = :process_only
 
 # Static first so it reads as the reference the HSGP variants are compared against.
 # Keys stay plain ASCII -- they index the colour and label maps below; the rendered
 # names live in `series_labels`.
 estimators = OrderedDict{String,HybridZuptInsJl.AbstractEstimator}(
-    "Static" => CORRECTORS[filter_tag].static(window; params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode),
+    "Static" => CORRECTORS[filter_tag].static(window; params=hsgp_p, corrected_channels=output_channels),
 )
 series_labels = Dict{String,Any}("Static" => "Static")
 
@@ -118,8 +114,7 @@ for offset in log10_offsets
     trained = offset == 0
 
     estimators[key] = CORRECTORS[filter_tag].hsgp(window;
-        params=params_with_yaw_length_scale(hsgp_p, ls), corrected_channels=output_channels,
-        noise_mode=noise_mode)
+        params=params_with_yaw_length_scale(hsgp_p, ls), corrected_channels=output_channels)
 
     # Spelled with hp_multiplier_label, the same helper that labels the multiplier axis
     # in the sensitivity sweep figure, so "×0.1" here and "×0.1" there are the same point
@@ -164,7 +159,7 @@ results_figure() do
         colors=series_colors, labels=series_labels,
         linestyles=series_styles, linewidths=series_widths, clip_quantile=1.1,
         dataset=data_key, trial_id=trial_id,
-        save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)$(trial_id)"))
+        save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)$(trial_id)"))
 end
 
 # Companion: unclipped, with the predictive bands and the numbers, so the figure
@@ -176,7 +171,7 @@ end
 #         linestyles=series_styles, linewidths=series_widths,
 #         show_std=true, show_rmse=true, show_mean_std=true,
 #         dataset=data_key, trial_id=trial_id,
-#         save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)$(trial_id)_unclipped"))
+#         save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)$(trial_id)_unclipped"))
 # end
 
 # Zoomed view: 40 s of the test segment, enough strides to see the shape of each
@@ -189,7 +184,7 @@ results_figure() do
         # time_window=(400.0, 440.0),
         figsize=(900, 300),
         dataset=data_key, trial_id=trial_id, show_std=false,
-        save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)$(trial_id)_zoom"))
+        save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)$(trial_id)_zoom"))
 end
 GLMakie.activate!()
 

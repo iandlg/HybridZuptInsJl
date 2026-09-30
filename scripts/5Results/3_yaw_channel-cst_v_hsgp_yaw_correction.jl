@@ -28,14 +28,8 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Correction methods to compare
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into every
-# output file name, and picks the correctors below (CORRECTORS): V4 needs the
-# JointStride ones, and running it with V2's Decoupled correctors silently corrects
-# nothing. WAS: the Decoupled correctors under V2's default filter, which is why the
-# figures in this section were not comparable with the rest of the chapter.
+# output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
-# hyperparameters, no split and no online estimate.
-noise_mode = :process_only
 
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
@@ -56,14 +50,13 @@ results_df = HybridZuptInsJl.run_online_correction_sweep(
     estimators,
     output_channels;
     correction_filter=CORRECTION_FILTERS[filter_tag],
-    estimator_kwargs=(noise_mode=noise_mode,),
 )
 
 ## 6. Plot
 const SECTION = "3_yaw_channel/Const_v_Hsgp_yaw_correction"
 # Figures in the section directory, scores table in its data/ subdirectory.
 const DATA_SECTION = "$(SECTION)/data"
-const RUN_STEM = "$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)"
+const RUN_STEM = "$(filter_tag)_process_only_key$(hsgp_p_key)"
 
 # Persist the numbers behind the figures. WAS: nothing was written at all, so every
 # statement this section makes had to be re-run to be checked. Only the scalar columns:

@@ -297,31 +297,6 @@ function total_distance(tr::Trajectory; dims=2)::Float64
     return total
 end
 
-# Step vectors in body frame
-function step_vectors_body(tr::Trajectory, seg::Vector{Int})
-    steps = zeros(3, length(seg) - 1)
-    for k in 2:length(seg)
-        Δp = tr.pos[:, seg[k]] - tr.pos[:, seg[k-1]]
-        steps[:, k-1] = tr.R_nb[:, :, seg[k-1]]' * Δp   # R at k-1, not k
-    end
-    return steps
-end
-
-# Step vectors in heading frame (yaw-only rotation)
-function step_vectors_heading(tr::Trajectory, step_seg::Vector{Int})
-    seg = step_seg
-    N = length(seg) - 1
-    eu = matrix_to_euler(tr.R_nb)[:, seg[1:(end-1)]]      # (3, N_steps)
-    Δpos = tr.pos[:, seg[2:end]] .- tr.pos[:, seg[1:(end-1)]]
-    steps = similar(Δpos)
-    for k in 1:N
-        eu_nh = [0, 0, eu[3, k]]
-        R_hn = euler_to_matrix(eu_nh)'
-        steps[:, k] = R_hn * Δpos[:, k]
-    end
-    return steps
-end
-
 # Helper to compute step lengths from a trajectory and segment indices
 function step_lengths(traj::Trajectory, segs::Vector{Int})
     n_steps = length(segs) - 1

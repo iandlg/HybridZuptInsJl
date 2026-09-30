@@ -38,23 +38,17 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
-# hyperparameters, no split and no online estimate. It goes into every file stem here
-# for the same reason `filter_tag` does.
-noise_mode = :process_only
 
 estimators = OrderedDict(
     "ZUPT only" => HybridZuptInsJl.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
-    # "Joint Static" => HybridZuptInsJl.JointStaticEstimator,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
-    # "Joint HSGP" => HybridZuptInsJl.JointHsgpEstimator,
 )
 
 output_channels = [:pos_1, :pos_2, :yaw]
 train_ratios = [0.4]
 
-const RUN_STEM = "$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)"
+const RUN_STEM = "$(filter_tag)_process_only_key$(hsgp_p_key)"
 
 ## 5. Run the sweep and save the scores, or read a finished run back
 score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_ratio_order,
@@ -71,7 +65,6 @@ if isnothing(results_csv)
         estimators,
         output_channels;
         correction_filter=CORRECTION_FILTERS[filter_tag],
-        estimator_kwargs=(noise_mode=noise_mode,),
     )
     csv_path = stamped(DATA_SECTION, "results_$(RUN_STEM)"; ext="csv")
     CSV.write(csv_path, results_df[:, score_cols])

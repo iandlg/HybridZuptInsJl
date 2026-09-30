@@ -35,14 +35,9 @@ function training_data_quality_analysis(
     test_tr_ratio::Float64=0.1,
     train_tr_ratio::Float64=1.0,
     base_estimator::Tuple{<:AbstractString,<:Any}=("ZUPT only", BaseEstimator),
-    # Extra constructor keywords, the same for train and test, e.g. `noise_mode=` on the
-    # V4 joint correctors. Both estimators below get them: the test corrector inherits the
-    # noise state through `init_model`, but the mode it is built with should say the same
-    # thing rather than relying on that.
+    # Extra constructor keywords, the same for train and test.
     estimator_kwargs::NamedTuple=(;),
-    # Filter that runs the correction: `hybrid_zupt_aided_insv2` (absolute-state
-    # update) or `hybrid_zupt_aided_insv3` (stride-level, notes/013-014).
-    correction_filter::Function=hybrid_zupt_aided_insv2,
+    correction_filter::Function=hybrid_zupt_aided_insv4,
 )::DataFrame
 
     results = DataFrame(

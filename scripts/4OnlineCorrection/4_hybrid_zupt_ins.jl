@@ -46,22 +46,12 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
-# Filter used for the Static/HSGP corrections, with its correctors (see
-# CORRECTION_FILTERS / CORRECTORS in scripts/5Results/_common.jl). The two go
-# together: V4 needs the JointStride correctors, and running it with V2's
-# Decoupled ones silently corrects nothing, since `propagate_stride!` falls back
-# to the uncorrected `dynamic_update!` for any other estimator.
-# "ZUPT only" runs through the SAME filter: it has no learned model, but the
-# filter still sets where the corrector starts (V4 starts it on the mocap pose
-# when ground truth is available at k=1, V2 on `x_init`) and how the mocap fixes
-# are weighted, so running it through V2 left its training half offset from the
-# corrected runs it is the baseline for.
+# Filter used for all three runs, with its correctors (see CORRECTION_FILTERS /
+# CORRECTORS in scripts/5Results/_common.jl). "ZUPT only" runs through the SAME
+# filter: it has no learned model, but the filter still sets where the corrector
+# starts (on the mocap pose when ground truth is available at k=1) and how the
+# mocap fixes are weighted.
 filter_tag = "V4"
-# V4 stride-noise arm (`StrideNoise`, ignored by V2/V3 correctors): `:split`
-# estimates γ₀/γ₁ online and splits them into process noise and mocap jitter,
-# `:process_only` is the model this replaced — no split, σ_w = σ_n fixed from the
-# hyperparameters — and `:online_total` drops only the split.
-noise_mode = :process_only
 corr_filter = CORRECTION_FILTERS[filter_tag]
 
 trial_id = 14 # meta["trial_id"]
@@ -93,18 +83,18 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 # Run online correction
 io_data = OrderedDict()
 
-default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[], noise_mode=noise_mode)
+default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[])
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME,
     feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
 zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode)
+decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
@@ -215,17 +205,17 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
 
-default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[], noise_mode=noise_mode)
+default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[])
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
 zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=decoup_stat_model, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode)
+decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
 zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)

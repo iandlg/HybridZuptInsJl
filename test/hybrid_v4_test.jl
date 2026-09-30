@@ -15,7 +15,6 @@ const SECONDS = 40
 # 6 locks onto a wrong peak at 40 s; 4 and 8 re-estimate it to within one sample.
 const MOCK_IDS = OrderedDict("ANG2" => [1, 2], "DCSC" => [4, 8])
 const CHANNELS = [:pos_1, :pos_2, :yaw]
-const NOISE_MODE = :process_only
 const ALLOC = 300
 
 hsgp_p, FRAME, FEATURE_TYPE, _ = load_hsgp_params(42; m=200)
@@ -25,7 +24,7 @@ aligned = H.collect_aligned_trajectories(
 n_trials = sum(length, values(aligned))
 
 corrector(kind::Symbol) = CORRECTORS["V4"][kind](ALLOC;
-    params=hsgp_p, corrected_channels=CHANNELS, noise_mode=NOISE_MODE)
+    params=hsgp_p, corrected_channels=CHANNELS)
 
 function run_v4(res, c; train_ratio::Real, kwargs...)
     N = length(res.inertial_updated)
@@ -53,16 +52,11 @@ end
         end
     end
 
-    @testset "StrideNoise, :process_only" begin
-        ν = H.StrideNoise(hsgp_p; noise_mode=:process_only)
+    @testset "stride noise σ_w = σ_n" begin
         σ_n = [getfield(hsgp_p.hp, Symbol(name))[1] * hsgp_p.output_stats[2][j]
                for (j, name) in enumerate(H._OUTPUT_NAMES)]
-        H.update!(ν, ones(4))
-        @test ν.n == 0 && all(iszero, ν.S₁)
-        σ_w, σ_j = H.noise_split(ν)
-        @test σ_w ≈ σ_n
-        @test all(iszero, σ_j)
-        @test H.noise_split(H.carry_over(ν)) == (σ_w, σ_j)
+        @test H.stride_noise_std(hsgp_p) ≈ σ_n
+        @test corrector(:static).σ_w == corrector(:hsgp).σ_w == H.stride_noise_std(hsgp_p)
     end
 
     # A real stride feature, from the INS of the first mock trial.
@@ -76,7 +70,7 @@ end
 
         H.initialize_corrector!(c; t=0.0, pos_init=zeros(3), quat_init=[1.0, 0.0, 0.0, 0.0],
             Σpq_init=Matrix(1e-4I, 6, 6))
-        β, Σβ, _ = H.get_model(c)
+        β, Σβ = H.get_model(c)
         pos_3 = kind === :static ? (3:3) : H._full_range(3, m)
         @test length(β) == (kind === :static ? 4 : 4m)
         @test all(iszero, β)
@@ -117,8 +111,8 @@ end
         @test all(isfinite, traj_base.pos)
 
         for kind in (:static, :hsgp)
-            _, _, _, _, (_, Σβ_prior, _) = run_v4(res, corrector(kind); train_ratio=0.0)
-            zupt, step_seg, traj, io, (β, Σβ, ν) = run_v4(res, corrector(kind); train_ratio=0.5)
+            _, _, _, _, (_, Σβ_prior) = run_v4(res, corrector(kind); train_ratio=0.0)
+            zupt, step_seg, traj, io, (β, Σβ) = run_v4(res, corrector(kind); train_ratio=0.5)
 
             @test length(zupt) == length(res.inertial_updated)
             @test step_seg == seg_base
@@ -129,7 +123,6 @@ end
             @test isfinite(H.rmse(traj, res.gt_traj_aligned[step_seg])[end])
             @test any(!iszero, β)
             @test tr(Σβ) < tr(Σβ_prior)
-            @test ν.n == 0
         end
 
         @test_throws ArgumentError CORRECTION_FILTERS["V4"](res.inertial_updated, res.sim_config_updated,
@@ -142,7 +135,6 @@ end
         model2 = run_v4(res2, corrector(kind); train_ratio=0.0, init_model=model1)[5]
         @test model2[1] == model1[1]
         @test model2[2] == model1[2]
-        @test H.noise_split(model2[3]) == H.noise_split(model1[3])
     end
 
     @testset "corrector diagnostics: $key $id" for (key, ids) in MOCK_IDS, id in ids
@@ -173,7 +165,6 @@ end
             estimators, CHANNELS;
             estimator_alloc=ALLOC,
             correction_filter=CORRECTION_FILTERS["V4"],
-            estimator_kwargs=(noise_mode=NOISE_MODE,),
             noise_specs=specs,
             match_gt_sigma=true,
             keep_artifacts=false)
@@ -193,7 +184,6 @@ end
             estimators, CHANNELS;
             n_test_strides=10,
             estimator_alloc=ALLOC,
-            estimator_kwargs=(noise_mode=NOISE_MODE,),
             correction_filter=CORRECTION_FILTERS["V4"])
         @test nrow(lc) == n_trials * length(budgets) * length(estimators)
         @test all(isfinite, lc.rmse) && all(isfinite, lc.rmse_yaw)

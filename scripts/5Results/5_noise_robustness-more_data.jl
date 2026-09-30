@@ -29,7 +29,7 @@ estimators = OrderedDict(
 # The baseline row is produced inside `multi_track_training_analysis` by running
 # `BaseEstimator` through `correction_filter`, so it is whichever filter `filter_tag`
 # selects. Assert the pairing rather than trusting the tag to have been edited in step
-# with the correctors -- the analysis function still defaults to V2 if nothing is passed.
+# with the correctors.
 @assert CORRECTION_FILTERS[filter_tag] === HybridZuptInsJl.hybrid_zupt_aided_insv4
 @assert estimators["Static"] === CORRECTORS[filter_tag].static
 @assert estimators["HSGP"] === CORRECTORS[filter_tag].hsgp
@@ -67,7 +67,6 @@ test_labels = Dict(
 # Choose Parameters file
 hsgp_p_key = 42
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-mode = :process_only
 params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 
 # Hand-tuned override of the loaded hyperparameters. Set `use_hand_tuned=false`
@@ -183,7 +182,6 @@ if isnothing(replot_csv)
             order_seeds=SEEDS,
             train_tr_ratio=1.0,
             test_tr_ratio=test_tr_ratio,
-            estimator_kwargs=(noise_mode=mode,),
             correction_filter=CORRECTION_FILTERS[filter_tag],
         )
         results[noise_label] = df_spec
@@ -198,7 +196,7 @@ if isnothing(replot_csv)
         # One `stamped` call for both artifacts: the re-plot branch below finds a
         # figure by swapping the CSV's extension, which only works if the two carry
         # the same timestamp. Two calls gave them timestamps milliseconds apart.
-        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_$(mode)_matchedR_key$(hsgp_p_key)_$(data_key)_testgt$(test_tr_ratio)_$(noise_label)")
+        fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_process_only_matchedR_key$(hsgp_p_key)_$(data_key)_testgt$(test_tr_ratio)_$(noise_label)")
         results_figure() do
             HybridZuptInsJl.plot_multi_track_training_quality(
                 df_spec;

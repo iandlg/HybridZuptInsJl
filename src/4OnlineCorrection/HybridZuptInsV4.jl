@@ -1,12 +1,8 @@
 """
     hybrid_zupt_aided_insv4(inertial, simdata, gt_traj, corrector; ...)
 
-`hybrid_zupt_aided_insv3` with the stride model moved into the corrector's
-state (notes/015). Same signature, same return tuple, same `io_data` keys.
-
-V3 learns the stride error in a separate filter and hands its prediction to the
-corrector as per-stride process noise, so the model's uncertainty is white from
-one stride to the next. Here `β` is part of the corrector's error state and the
+ZUPT-aided INS whose strides propagate a corrector carrying the stride model
+in its own state (notes/015). `β` is part of the corrector's error state and the
 correction `y = y₀ + Φ(z) β` is a term of the propagation, so:
 
 - there is one model and it is the same in both halves; ground truth only adds
@@ -17,7 +13,7 @@ correction `y = y₀ + Φ(z) β` is a term of the propagation, so:
 
 `corrector` is a `AbstractJointStrideEstimator`, or any other estimator, which
 then propagates the raw stride (the "ZUPT only" baseline). The target and the
-feature are built from the inner INS only, as in V3 (notes/014).
+feature are built from the inner INS only (notes/014).
 """
 function hybrid_zupt_aided_insv4(
     inertial::InertialData,
@@ -224,10 +220,8 @@ function hybrid_zupt_aided_insv4(
 
         if gt_available[curr_step] && posyaw_measurement_update
             # The pseudo-stride from k=1 is not a stride: skip it.
-            if gt_available[prev_step] && prev_step != 1
-                observe_stride_error!(corrector, stride_err)
-                isnothing(predicted) ||
-                    append_io!(io_data["residual"], inertial.t[prev_step], stride_err - predicted[1])
+            if gt_available[prev_step] && prev_step != 1 && !isnothing(predicted)
+                append_io!(io_data["residual"], inertial.t[prev_step], stride_err - predicted[1])
             end
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],

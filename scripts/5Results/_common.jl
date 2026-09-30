@@ -105,29 +105,20 @@ end
 # ---------------------------------------------------------------------------
 
 """
-The online-correction filters, keyed by the tag scripts put in their output file
-names. V2 applies the GP prediction as a measurement on the absolute state; V3
-corrects the stride and propagates it (notes/013, stride built in the INS frame
-per notes/014). A script picks one with `filter_tag` and passes
-`CORRECTION_FILTERS[filter_tag]` as `correction_filter=`, so figures from the two
-never share a name.
+The online-correction filter, keyed by the tag scripts put in their output file
+names. V4 carries the stride model in the corrector's own state (notes/015). A
+script picks it with `filter_tag` and passes `CORRECTION_FILTERS[filter_tag]` as
+`correction_filter=`.
 """
 const CORRECTION_FILTERS = Dict{String,Function}(
-    "V2" => HybridZuptInsJl.hybrid_zupt_aided_insv2,
-    "V3" => HybridZuptInsJl.hybrid_zupt_aided_insv3,
     "V4" => HybridZuptInsJl.hybrid_zupt_aided_insv4,
 )
 
 """
-The correctors each filter runs, keyed by the same tag as `CORRECTION_FILTERS`.
-V4 carries the stride model in the corrector's own state (notes/015), so it
-needs its own joint correctors; V2 and V3 share the decoupled ones. Scripts
-build their estimator tables from `CORRECTORS[filter_tag]` so a tag switch
-changes both at once.
+The correctors the filter runs, keyed by the same tag as `CORRECTION_FILTERS`.
+Scripts build their estimator tables from `CORRECTORS[filter_tag]`.
 """
 const CORRECTORS = Dict{String,NamedTuple{(:static, :hsgp),Tuple{Type,Type}}}(
-    "V2" => (static=HybridZuptInsJl.DecoupledStaticEstimator, hsgp=HybridZuptInsJl.DecoupledHsgpEstimator),
-    "V3" => (static=HybridZuptInsJl.DecoupledStaticEstimator, hsgp=HybridZuptInsJl.DecoupledHsgpEstimator),
     "V4" => (static=HybridZuptInsJl.JointStrideStaticEstimator, hsgp=HybridZuptInsJl.JointStrideHsgpEstimator),
 )
 

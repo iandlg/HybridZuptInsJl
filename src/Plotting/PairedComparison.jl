@@ -21,29 +21,6 @@ figure is built to let you write exactly that sentence.
 using Random
 
 """
-    median_bootstrap_ci(x; level=0.95, n_boot=10_000, rng) -> (lo, hi)
-
-Percentile bootstrap interval for the median of `x`. Returns `(NaN, NaN)` for
-fewer than 3 samples, where an interval would be theatre rather than
-information.
-"""
-function median_bootstrap_ci(x::AbstractVector{<:Real};
-    level::Real=0.95, n_boot::Int=10_000,
-    rng::Random.AbstractRNG=Random.Xoshiro(0xC0FFEE))
-    n = length(x)
-    n < 3 && return (NaN, NaN)
-    boot = Vector{Float64}(undef, n_boot)
-    idx = Vector{Int}(undef, n)
-    for b in 1:n_boot
-        rand!(rng, idx, 1:n)
-        boot[b] = median(@view x[idx])
-    end
-    α = (1 - level) / 2
-    return (quantile(boot, α), quantile(boot, 1 - α))
-end
-
-
-"""
     function plot_train_ratio_paired_relative_change(
         paired::DataFrame,
         dataset_name::AbstractString;

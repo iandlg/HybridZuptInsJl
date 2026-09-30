@@ -3,7 +3,7 @@ Consistency diagnostics for the ZUPT-aided INS + HSGP correction filter.
 
 Provides:
   * `StepDiagnostics`  – per-step record filled inside the V1 filter loop
-  * `CorrectorDiagnostics` – per-footfall record of a V2 corrector's own state and Σ,
+  * `CorrectorDiagnostics` – per-footfall record of a V4 corrector's own state and Σ,
     with `corrector_nees_series` / `pos_cov_trace` reading it
   * `nees_series`      – post-hoc NEES per state block, with chi-square bounds
   * `autocorr`         – innovation whiteness test with significance bands
@@ -105,15 +105,15 @@ function record_step!(diagnostics::StepDiagnostics;
 end
 
 # =====================================================================
-# Per-footfall record, decoupled corrector (V2)
+# Per-footfall record, V4 corrector
 # =====================================================================
 
 """
 Per-footfall record of an `AbstractEstimator`'s own state and covariance, filled
-by `hybrid_zupt_aided_insv2` when it is handed one.
+by `hybrid_zupt_aided_insv4` when it is handed one.
 
-The V2 correctors keep `Σ` as a *single* 6×6 matrix over `[pos(1:3); att(4:6)]`
-and overwrite it every footfall, so after a run only the final value survives.
+The correctors keep `Σ` as a single matrix whose leading 6×6 block is over
+`[pos(1:3); att(4:6)]`, and overwrite it every footfall, so after a run only the final value survives.
 Anything that wants the series -- NEES, the covariance trace -- has to be
 recorded while the filter runs, which is what this is for.
 
@@ -152,7 +152,7 @@ end
 """
     corrector_nees_series(d, gt_traj; att_convention, include_vel)
 
-NEES of a decoupled corrector against ground truth, per footfall. An adapter
+NEES of a corrector against ground truth, per footfall. An adapter
 onto [`nees_series`](@ref) rather than a second implementation of it: the 6×6
 `[pos; att]` covariance is embedded into the 9-state layout that function
 expects (position 1:3, attitude 7:9, velocity block left at zero and never
@@ -162,7 +162,7 @@ The returned `k` is relabelled to the IMU sample indices, so the result drops
 straight into `plot_nees_comparison` alongside a `split_k` divider.
 
 `att_convention` defaults to `:left` here, NOT to `nees_series`'s `:right`:
-`relinearize!` on the decoupled correctors applies `quat_exp(δθ) * q`, a left
+`relinearize!` on the correctors applies `quat_exp(δθ) * q`, a left
 perturbation, so the attitude error matching their `Σ[4:6,4:6]` is
 `logmap(R_gt * R_est')`. Position NEES is unaffected either way.
 """
@@ -170,7 +170,7 @@ function corrector_nees_series(d::CorrectorDiagnostics, gt_traj;
     att_convention::Symbol=:left, include_vel::Bool=false)
 
     n = length(d)
-    n == 0 && error("No footfalls recorded; pass `diagnostics=` to hybrid_zupt_aided_insv2.")
+    n == 0 && error("No footfalls recorded; pass `diagnostics=` to hybrid_zupt_aided_insv4.")
 
     x = zeros(9, n)
     P = zeros(9, 9, n)
@@ -216,17 +216,6 @@ function nees_yaw_series(d::CorrectorDiagnostics, gt_traj; att_convention::Symbo
     lo, hi = quantile(Chisq(1), 0.025), quantile(Chisq(1), 0.975)
     return (k=copy(d.k), yaw=nyaw, lower=lo, upper=hi, dof=1)
 end
-
-"""
-    pos_cov_trace(d)
-
-`tr(Σ[1:3,1:3])` per footfall -- the position uncertainty the corrector reports,
-and the matrix `corrector_nees_series` scores its position error against. Read
-the two together: a trace that falls while NEES rises is a shrink the estimator
-has not earned.
-"""
-pos_cov_trace(d::CorrectorDiagnostics) =
-    (k=copy(d.k), trace=[tr(S[1:3, 1:3]) for S in d.Σ])
 
 # =====================================================================
 # 1. NEES  (state consistency)
@@ -276,21 +265,6 @@ function nees_series(x::AbstractMatrix, P::AbstractArray{<:Real,3},
         lower=lo, upper=hi, dof=3)
 end
 
-"""
-    anees(nees_runs; dof)
-
-Average NEES over independent Monte-Carlo runs. `nees_runs` is a vector of
-equal-length NEES vectors (one per run). Bounds tighten as 1/sqrt(N), which is
-what makes this far more convincing than a single-run plot.
-"""
-function anees(nees_runs::Vector{<:AbstractVector}; dof::Int=3)
-    N = length(nees_runs)
-    m = mean(hcat(nees_runs...), dims=2)[:]
-    lo = quantile(Chisq(dof * N), 0.025) / N
-    hi = quantile(Chisq(dof * N), 0.975) / N
-    return (anees=m, lower=lo, upper=hi, n_runs=N, dof=dof)
-end
-
 """Fraction of samples falling inside the 95% NEES envelope. 0.95 == consistent."""
 consistency_ratio(nees::AbstractVector, lo::Real, hi::Real) =
     count(v -> lo <= v <= hi, nees) / length(nees)
@@ -298,67 +272,6 @@ consistency_ratio(nees::AbstractVector, lo::Real, hi::Real) =
 # =====================================================================
 # 2. Whiteness of the innovation sequence
 # =====================================================================
-
-"""
-    autocorr(v, maxlag)
-
-Normalised sample autocorrelation, lags 0..maxlag. For a correctly specified
-Kalman update the innovation sequence is white, so lags >= 1 sit inside
-+/- 1.96/sqrt(n). Persistent positive correlation is the signature of a
-measurement that carries state error.
-"""
-function autocorr(v::AbstractVector{<:Real}, maxlag::Int)
-    n = length(v)
-    mu = mean(v)
-    d = v .- mu
-    c0 = sum(abs2, d) / n
-    c0 == 0 && return zeros(maxlag + 1)
-    return [sum(d[1:(n-l)] .* d[(1+l):n]) / (n * c0) for l in 0:maxlag]
-end
-
-"""
-    whiteness_test(diagnostics; maxlag, component)
-
-`component = 0` uses the scalar NIS sequence; `component = i` uses the i-th
-normalised innovation. Returns the ACF, the significance band, and a
-Ljung-Box p-value (small p == reject whiteness).
-"""
-function whiteness_test(diagnostics::StepDiagnostics; maxlag::Int=15, component::Int=0)
-    v = component == 0 ? diagnostics.nis : [nu[component] for nu in diagnostics.innov_norm]
-    n = length(v)
-    n <= maxlag + 2 && error("Not enough steps ($n) for maxlag=$maxlag.")
-
-    rho = autocorr(v, maxlag)
-    band = 1.96 / sqrt(n)
-    Q = n * (n + 2) * sum(rho[l+1]^2 / (n - l) for l in 1:maxlag)
-    pval = ccdf(Chisq(maxlag), Q)
-
-    return (lags=0:maxlag, acf=rho, band=band,
-        ljung_box=Q, pvalue=pval, n=n)
-end
-
-"""
-    zupt_consistency(diagnostics)
-
-Velocity consistency without a velocity reference. At a ZUPT epoch the true
-velocity is zero by assumption, so the ZUPT innovation is a measurement whose
-expected value is known exactly. Mean NIS should sit near 3.
-
-Well above 3 means the velocity block of P is over-confident by the time ZUPTs
-arrive -- which is what you would expect if a correlated position/yaw update
-has already shrunk P too far and the coupling has propagated. Well below 3
-means R_meas is set too loose. Either way this substitutes for the velocity
-NEES when OptiTrack gives you no velocity.
-"""
-function zupt_consistency(diagnostics::StepDiagnostics)
-    n = length(diagnostics.zupt_nis)
-    n == 0 && error("No ZUPT epochs recorded; add the record hook to the ZUPT branch.")
-    m = mean(diagnostics.zupt_nis)
-    lo = quantile(Chisq(3 * n), 0.025) / n
-    hi = quantile(Chisq(3 * n), 0.975) / n
-    return (mean_nis=m, expected=3.0, lower=lo, upper=hi,
-        consistent=lo <= m <= hi, n=n)
-end
 
 """
     zupt_gain_series(diagnostics; from_k, to_k)
@@ -403,44 +316,9 @@ function zupt_gain_series(diagnostics::StepDiagnostics; from_k::Int=1,
         total_dpos=sum(dpos), n=length(sel))
 end
 
-"""
-    nis_summary(diagnostics; dof)
-
-Mean NIS with its expected value and 95% interval. Mean NIS >> dof means the
-innovation covariance S is understated, i.e. the correction is over-trusted.
-"""
-function nis_summary(diagnostics::StepDiagnostics; dof::Int=4)
-    n = length(diagnostics.nis)
-    m = mean(diagnostics.nis)
-    lo = quantile(Chisq(dof * n), 0.025) / n
-    hi = quantile(Chisq(dof * n), 0.975) / n
-    return (mean_nis=m, expected=float(dof), lower=lo, upper=hi,
-        consistent=lo <= m <= hi, n=n)
-end
-
 # =====================================================================
 # 3. Independence assumption, measured directly
 # =====================================================================
-
-"""
-    noise_state_correlation(diagnostics)
-
-The Kalman update assumes E[v * dx'] = 0, where v is the measurement noise and
-dx the state error. Here v is approximated by the prediction error and dx by
-the true state error, both in measurement space. A per-component correlation
-significantly different from zero is direct evidence the assumption is violated.
-
-`band` is the ~95% significance threshold for zero correlation.
-"""
-function noise_state_correlation(diagnostics::StepDiagnostics)
-    n = length(diagnostics)
-    E = hcat(diagnostics.pred_err_state...)     # p x n
-    X = hcat(diagnostics.state_err...)          # p x n
-    p = size(E, 1)
-    rho = [cor(E[i, :], X[i, :]) for i in 1:p]
-    return (rho=rho, band=1.96 / sqrt(n), n=n,
-        significant=abs.(rho) .> 1.96 / sqrt(n))
-end
 
 # =====================================================================
 # 4. Error summaries
@@ -460,60 +338,3 @@ end
 # =====================================================================
 # 5. Measurement-noise inflation sweep
 # =====================================================================
-
-"""
-    inflation_sweep(inertial, simdata, gt_traj, params; factors, kwargs...)
-
-Runs the single-filter configuration with y_cov scaled by each factor and
-reports RMSE + consistency. Monotone improvement toward the two-filter result
-as the factor grows shows the degradation is an over-confidence effect, and
-that the two-filter design is the factor -> infinity limit taken exactly rather
-than by tuning.
-
-Pass `kwargs` straight through to `hybrid_zupt_aided_ins` (ref_frame,
-feature_type, gt_available, ...).
-"""
-function inflation_sweep(inertial, simdata, gt_traj, params;
-    factors=[1.0, 1e1, 1e2, 1e3, 1e4], kwargs...)
-
-    rows = NamedTuple[]
-
-    # reference: two-filter (correction applied, covariance untouched)
-    _, traj2, _, _, _, _, _, _, _, d2, q2, x2, P2 = hybrid_zupt_aided_ins(
-        inertial, simdata, gt_traj, params; cov_update=false, kwargs...)
-    r2 = rmse_summary(x2, q2, gt_traj)
-    nd = nees_series(x2, P2, q2, gt_traj)
-    push!(rows, (factor=NaN, mode="two-filter",
-        rmse_pos=r2.pos, rmse_yaw=r2.yaw,
-        mean_nees_pos=mean(nd.pos),
-        inside_95=consistency_ratio(nd.pos, nd.lower, nd.upper),
-        mean_nis=length(d2) > 0 ? mean(d2.nis) : NaN))
-
-    for f in factors
-        _, _, _, _, _, _, _, _, _, dg, qq, xx, PP = hybrid_zupt_aided_ins(
-            inertial, simdata, gt_traj, params;
-            cov_update=true, R_inflation=f, kwargs...)
-        r = rmse_summary(xx, qq, gt_traj)
-        nn = nees_series(xx, PP, qq, gt_traj)
-        push!(rows, (factor=f, mode="single-filter",
-            rmse_pos=r.pos, rmse_yaw=r.yaw,
-            mean_nees_pos=mean(nn.pos),
-            inside_95=consistency_ratio(nn.pos, nn.lower, nn.upper),
-            mean_nis=length(dg) > 0 ? mean(dg.nis) : NaN))
-    end
-    return rows
-end
-
-"""Pretty-print the sweep table."""
-function print_sweep(rows)
-    # metric_symbol_ascii, not metric_symbol: this is terminal output and there
-    # is no subscript ψ in Unicode, so the figures' form cannot be printed.
-    @printf("%-14s %10s %10s %10s %12s %10s\n",
-        "mode", "factor", metric_symbol_ascii(:rmse), metric_symbol_ascii(:rmse_yaw),
-        "mean NEES", "in 95%")
-    for r in rows
-        @printf("%-14s %10.1e %10.4f %10.4f %12.2f %9.1f%%\n",
-            r.mode, r.factor, r.rmse_pos, r.rmse_yaw,
-            r.mean_nees_pos, 100 * r.inside_95)
-    end
-end
