@@ -1,45 +1,28 @@
 """
 Probe-aware sensitivity figures.
 
-Companion to `OnlineHpSensitivity.jl`, which draws the same sweep against a
-multiplier axis recovered as `tested_value / base_value`. That axis is only
-meaningful for a *scale* parameter. This file reads the `probe` / `probe_kind`
-columns `vary_hsgp_parameters` now emits, so a location parameter is drawn on the
-additive axis it was actually swept on, and it draws the across-trial band that
-`sweep_over_trials` produces.
+Reads the `probe` / `probe_kind` columns `vary_hsgp_parameters` emits, so a
+location parameter is drawn on the additive axis it was actually swept on, and
+draws the across-trial band that `sweep_over_trials` produces.
 
-The older file is left in place: `2_hyp_sensitivity-dataset_comparison.jl` and
-`2_hyp_sensitivity-yaw_length_scale_regression.jl` still use it, and a
-probe-aware panel is a different function rather than a flag on the old one.
-
-Shared vocabulary -- colours, labels, percent tick format, multiplier ticks --
-comes from `OnlineHpSensitivity.jl` rather than being restated here.
+Shared vocabulary -- the `[symbol]_k` labels, colours, percent tick format,
+multiplier ticks -- comes from `OnlineHpSensitivity.jl` rather than being
+restated here.
 """
+
+# Same wording as the paired-comparison figures; the reference is ZUPT only.
+_rmse_change_label() = rich("relative change in ", metric_symbol(:rmse), " [%]")
 
 """
 X-axis label per probe kind and family. A multiplier needs no unit; an offset is
 only interpretable with the scale it is quoted in, which is the whole point of
 the additive probe.
 """
-const _PROBE_XLABELS = Dict{String,String}(
-    "input_mean" => "offset [σₓ]",
-    "input_center" => "offset [z]",
-)
-"""
-Axis label shared by every figure in this file: the percent change in position
-RMSE against the unperturbed baseline. Composed once so the four axes cannot
-drift, and built from [`metric_symbol`](@ref) so renaming the metric is still a
-one-line edit in `MetricLabels.jl`.
-"""
-_rmse_change_label() = rich(metric_symbol(:rmse), " relative change [%]")
-
-const _PROBE_MULT_XLABEL = "multiplier"
-const _PROBE_OFFSET_XLABEL = "offset"
-
-function _probe_xlabel(probe_kind::AbstractString, type::AbstractString)::String
-    probe_kind == "multiplicative" && return _PROBE_MULT_XLABEL
-    key = get(_STAT_TYPE_ALIASES, String(type), String(type))
-    return get(_PROBE_XLABELS, key, _PROBE_OFFSET_XLABEL)
+function _probe_xlabel(probe_kind::AbstractString, type::AbstractString)
+    probe_kind == "multiplicative" && return rich("multiplier")
+    type == "input_mean" && return rich("offset [", param_symbol("input_std"), "]")
+    type == "input_center" && return rich("offset [z]")
+    return rich("offset")
 end
 
 # The probe value that means "unperturbed": ×1 for a multiplier, 0 for an offset.
@@ -139,6 +122,7 @@ function plot_probe_sensitivity(
     max_ticks::Int=5)
 
     n_rows, n_cols = size(grid.specs)
+    chans = swept_channels(df)
     fig = Figure(size=(400 * n_cols, 400 * n_rows))
 
     for row in 1:n_rows, col in 1:n_cols
@@ -154,9 +138,9 @@ function plot_probe_sensitivity(
             xlabel=_probe_xlabel(kind, first(sub.type)),
             xscale=(kind == "multiplicative" ? log10 : identity),
             ytickformat=_HP_PCT_TICKFORMAT,
-            title=hp_param_label(spec.name),
+            title=param_label(spec.name, chans),
             xgridstyle=:dash, ygridstyle=:dash)
-        _draw_probe_panel!(ax, sub; color=hp_param_color(spec.name), max_ticks=max_ticks)
+        _draw_probe_panel!(ax, sub; color=param_color(spec.name), max_ticks=max_ticks)
     end
 
     Label(fig[1:n_rows, 0], _rmse_change_label(), rotation=π / 2, fontsize=14)
@@ -197,6 +181,7 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
     n_rows = cld(length(params), n_cols)
     fig = Figure(size=(420 * n_cols, 380 * n_rows))
     exits = box_exit_points(box_df)
+    chans = swept_channels(df)
 
     for (i, pname) in enumerate(params)
         row, col = fldmod1(i, n_cols)
@@ -204,13 +189,13 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
         rsub = df[df.parameter .== pname, :]
         kind = first(bsub.probe_kind)
         scale = kind == "multiplicative" ? log10 : identity
-        color = hp_param_color(pname)
+        color = param_color(pname)
 
         ax = Axis(fig[row, col];
             xlabel=_probe_xlabel(kind, first(bsub.type)),
-            ylabel=rich(metric_symbol(:rmse), " change [%]"),
+            ylabel=_rmse_change_label(),
             xscale=scale, ytickformat=_HP_PCT_TICKFORMAT,
-            title=hp_param_label(pname), xgridstyle=:dash, ygridstyle=:dash)
+            title=param_label(pname, chans), xgridstyle=:dash, ygridstyle=:dash)
         ax_box = Axis(fig[row, col];
             ylabel="strides outside box", yaxisposition=:right,
             xscale=scale, ygridvisible=false, xgridvisible=false)
@@ -287,7 +272,11 @@ function _clip_marks!(ax::Axis, y::Real, lo_val::Real, hi_val::Real;
 end
 
 """
-    plot_probe_ranking(df; xlims=nothing, save_path=nothing, log_scale=false, figsize=(940, 560))
+    plot_probe_ranking(df; xlims=nothing, save_path=nothing, log_scale=false,
+                       sides=(:best, :worst), figsize=(940, 560))
+
+`sides` picks which boxes to draw: `(:best, :worst)`, `(:worst,)` or `(:best,)`.
+Row order is always by the worst-side median.
 
 Which parameters move RMSE, by how much, and in which direction. The overview
 figure, and the one to read first.
@@ -301,20 +290,12 @@ much does getting this one wrong cost". (The sort key is `worst_med` in
 [`probe_extremes_summary`](@ref); the earlier best-to-worst `gap` ranked a
 parameter with a large upside above one that is merely dangerous.)
 
-Nothing marks best from worst because nothing needs to: `best` is the minimum
-over probes and `worst` the maximum, and the identity probe contributes exactly
-`0.0` to every trial, so `best <= 0 <= worst` holds by construction. The zero
-line separates them, and the axis says which side is which.
-
-Showing one quantity twice is the point. The previous version put a range taken
-over *probes* (the median curve's extent) and an inter-quartile range taken over
-*trials* on the same row as the same kind of mark -- perpendicular slices of the
-same grid, with nothing in the figure to say so.
-
-What the pairing buys over a single bar: whether **any** tested setting beat the
-trained one. On the 11-trial ANG2 sweep 13 of 15 parameters have a best-case box
-below zero; `yaw[2]` is one of the two that do not, and its best-case box is
-identically zero -- in every trial the optimum was the trained value.
+Changes are against each trial's ZUPT-only RMSE, so the dashed zero line is
+"no correction". `best` is the minimum over probes and `worst` the maximum, and
+the identity probe is the trained corrector, so `best <= trained <= worst` per
+trial. The dotted line is the across-trial median of the trained corrector (the
+`"baseline"` rows), and separates the two sides; a worst-case box crossing zero
+is a setting that makes the correction worse than none.
 
 **X limits come from the box medians, not from the boxes or whiskers.** The input
 std rows carry a q75 near +100 while every median fits inside -6% to +41%, so
@@ -337,22 +318,29 @@ function plot_probe_ranking(df::DataFrame;
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     log_scale::Bool=false,
+    sides::Tuple{Vararg{Symbol}}=(:best, :worst),
     figsize::Tuple{Int,Int}=(750, 600))
+
+    !isempty(sides) && all(in((:best, :worst)), sides) || throw(ArgumentError(
+        "sides must be a non-empty subset of (:best, :worst), got $sides"))
 
     g = probe_extremes_summary(df)          # sorted by the worst-side median, descending
     ext = probe_extremes_by_trial(df)       # the per-trial values the boxes reduce
     params = unique(g.parameter)
     n = length(params)
+    trained = 100 * median(df[df.parameter .== "baseline", :relative_change])
+    shown_med = g.med[in(String.(sides)).(g.side)]
 
     if isnothing(xlims)
-        lo = min(0.0, minimum(g.med))
-        hi = max(0.0, maximum(g.med))
+        lo = min(0.0, trained, minimum(shown_med))
+        hi = max(0.0, trained, maximum(shown_med))
         pad = 0.18 * max(hi - lo, eps())
         xlo, xhi = lo - pad, hi + pad
     else
         xlo, xhi = xlims
     end
 
+    chans = swept_channels(df)
     fig = Figure(size=figsize)
     # Worst worst-case at the top: Makie's y increases upward.
     ypos(i) = n - i + 1
@@ -361,21 +349,21 @@ function plot_probe_ranking(df::DataFrame;
         # pseudolog10, not log10: the axis crosses zero into negative changes.
         xscale=log_scale ? Makie.pseudolog10 : identity,
         xtickformat=_HP_PCT_TICKFORMAT,
-        yticks=(1:n, [hp_param_label(params[ypos(i)]) for i in 1:n]),
+        yticks=(1:n, [param_label(params[ypos(i)], chans) for i in 1:n]),
         ygridvisible=false)
     vlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
+    vlines!(ax, trained; color=:black, linestyle=:dot, linewidth=1.5)
 
     # One row per parameter, so the boxes can be as tall as the paired figures' are
     # wide without colliding.
     box_width = 0.44
     for (i, pname) in enumerate(params)
         y = float(ypos(i))
-        c = hp_param_color(pname)
+        c = param_color(pname)
         sub = ext[ext.parameter .== pname, :]
-        # Both sides on one row: `best <= 0 <= worst` holds per trial by
-        # construction, so they cannot overlap and the zero line does the work that
-        # a vertical offset and two fill alphas used to.
-        for side in (:best, :worst)
+        # Both sides on one row: `best <= trained <= worst` holds per trial by
+        # construction, so the trained line separates them.
+        for side in sides
             vals = Float64.(sub[!, side])
             boxplot!(ax, fill(y, length(vals)), vals;
                 orientation=:horizontal, width=box_width, color=c,
@@ -383,29 +371,33 @@ function plot_probe_ranking(df::DataFrame;
         end
         # The outermost mark actually drawn on this row, which is what the clip
         # arrows are about: the raw extreme when outliers are shown, the whisker
-        # otherwise. Leftmost can only come from `best` and rightmost from `worst`.
-        srow(side) = only(eachrow(g[(g.parameter .== pname) .& (g.side .== side), :]))
-        lo_drawn = show_outliers ? minimum(sub.best) :
-                   min(srow("best").whisker_lo, srow("best").q25)
-        hi_drawn = show_outliers ? maximum(sub.worst) :
-                   max(srow("worst").whisker_hi, srow("worst").q75)
+        # otherwise, over the sides drawn.
+        srow(side) = only(eachrow(g[(g.parameter .== pname) .& (g.side .== String(side)), :]))
+        lo_drawn = minimum(show_outliers ? minimum(sub[!, s]) :
+                           min(srow(s).whisker_lo, srow(s).q25) for s in sides)
+        hi_drawn = maximum(show_outliers ? maximum(sub[!, s]) :
+                           max(srow(s).whisker_hi, srow(s).q75) for s in sides)
         _clip_marks!(ax, y, lo_drawn, hi_drawn; color=c, xlo=xlo, xhi=xhi)
     end
     xlims!(ax, xlo, xhi)
     # A row of headroom above the top parameter for the two axis annotations.
     ylims!(ax, 0.5, n + 1.1)
-    # Placed in data space, anchored either side of zero, so they stay on the
-    # zero line whatever the x limits are -- relative placement would drift the
+    # Placed in data space, anchored either side of the trained line, so they
+    # stay on it whatever the x limits are -- relative placement would drift the
     # moment `xlims` is passed.
-    text!(ax, -1.0, n + 0.8; text="← best setting", align=(:right, :center),
-        fontsize=11, color=(:black, 0.6))
-    text!(ax, 1.0, n + 0.8; text="worst setting →", align=(:left, :center),
-        fontsize=11, color=(:black, 0.6))
+    :best in sides && text!(ax, trained - 1.0, n + 0.8; text="← best setting",
+        align=(:right, :center), fontsize=11, color=(:black, 0.6))
+    :worst in sides && text!(ax, trained + 1.0, n + 0.8; text="worst setting →",
+        align=(:left, :center), fontsize=11, color=(:black, 0.6))
+    text!(ax, trained, n + 0.35; text="trained", align=(:center, :center),
+        fontsize=10, color=(:black, 0.6))
+    text!(ax, 0.0, n + 0.35; text="ZUPT only", align=(:center, :center),
+        fontsize=10, color=(:gray, 0.9))
 
-    types = _hp_ordered_types(unique(g.type))
+    types = ordered_types(unique(g.type))
     Legend(fig[1, 2],
-        [PolyElement(color=hp_type_color(t)) for t in types],
-        [_hp_type_label(t) for t in types];
+        [PolyElement(color=type_color(t)) for t in types],
+        [param_symbol(t) for t in types];
         tellheight=false)
 
     if !isnothing(save_path)
@@ -450,7 +442,7 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
             join(sort(unique(df.parameter[df.parameter .!= "baseline"])), ", ")))
 
     kind = first(sub.probe_kind)
-    color = hp_param_color(parameter)
+    color = param_color(parameter)
     probes, med, qlo, qhi, n_trials = _probe_summary(sub)
 
     fig = Figure(size=figsize)

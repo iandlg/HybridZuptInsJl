@@ -13,7 +13,7 @@ separately.
 """
 
 """
-`(base, subscript)` per metric. Same shape as `_HP_SYMBOL_PARTS`
+`(base, subscript)` per metric. Same shape as the symbols in `_PARAM_KINDS`
 ([`OnlineHpSensitivity.jl`](@ref)), which stores the hyperparameter symbols for
 the same reason.
 

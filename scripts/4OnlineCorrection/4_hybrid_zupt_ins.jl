@@ -152,7 +152,7 @@ fig_dist = results_figure() do
     f
 end
 fig_rmse_hybrid = results_figure() do
-    f = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=false)
+    f = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=false)
     save(stamped(section, "rmse_$(data_key)_trial$(trial_id)"), f)
     f
 end
@@ -179,7 +179,7 @@ GLMakie.activate!()
 # fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])
 
 ## Test on second track
-trial_id = 14
+trial_id = 16
 train_ratio = 0.1
 posyaw_measurement_update = true
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
