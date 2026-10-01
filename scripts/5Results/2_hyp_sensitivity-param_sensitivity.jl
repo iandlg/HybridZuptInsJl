@@ -47,7 +47,7 @@ data_dir_path = data_dir(data_key)
 # `trial_ids(data_key)` to sweep everything, knowing that.
 sweep_trial_ids = trial_ids(data_key)
 
-train_ratio = 0.4
+train_ratio = 0.35
 output_channel_idxs = [1, 2, 4]
 
 # Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
@@ -67,7 +67,7 @@ sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 3 : 5
+n_steps = smoke_test ? 3 : 9
 log_range = (-1.0, 1.0)     # scale families: decades
 delta_range = (-3.0, 3.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 
@@ -264,7 +264,7 @@ println()
 # `nothing` to plot the sweep just computed above.
 # Artifacts without `refBase` in the name were scored against the trained
 # corrector, not ZUPT only, and would be mislabelled by these figures.
-replot_basename = "V4_process_only_refBase_key42_ANG2_HEADING_TWOD_STEP_YAW_2026-09-30T11:47:28.835"
+replot_basename = nothing
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically

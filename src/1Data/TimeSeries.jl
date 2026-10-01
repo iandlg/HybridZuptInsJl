@@ -11,6 +11,7 @@ struct TimeSeries <: AbstractTimeSeries
 end
 
 Base.length(ts::AbstractTimeSeries) = length(ts.t)
+Base.lastindex(ts::AbstractTimeSeries) = length(ts)
 
 # ── Truncate several series to their overlapping interval ───────────
 function truncate_to_overlap(series::AbstractTimeSeries...)

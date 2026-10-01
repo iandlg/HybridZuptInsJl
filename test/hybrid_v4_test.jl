@@ -227,7 +227,7 @@ end
     end
 
     @testset "run_online_learning_curve" begin
-        budgets = [3, 6]
+        budgets = [0, 3, 6]
         lc = H.run_online_learning_curve(aligned, FRAME, FEATURE_TYPE, hsgp_p, budgets,
             estimators, CHANNELS;
             n_test_strides=10,
@@ -239,5 +239,7 @@ end
 
         contrast = H.learning_curve_contrast(lc; metric=:rmse, reference_estimator="ZUPT only")
         @test nrow(contrast) == count(lc.estimator .!= "ZUPT only")
+        @test H.plot_learning_curve_absolute(lc, first(keys(aligned)); metric=:rmse,
+            reference_estimator="ZUPT only") isa H.Figure
     end
 end
