@@ -38,7 +38,7 @@ const DATA_SECTION = "$(SECTION)/data"
 ## 1. Dataset / trials / budgets — the knobs.
 # `DATA_KEY` in the environment overrides the default, which is how one unattended run
 # covers both datasets without editing the file; a bare REPL include behaves as before.
-data_key = get(ENV, "DATA_KEY", "DCSC")
+data_key = get(ENV, "DATA_KEY", "ANG2")
 # Every trial of the dataset, as in 1_perf_results.jl. Replace with a literal list to
 # subset — but keep it a list from `trial_ids`' dataset (the lists are not interchangeable).
 ids = trial_ids(data_key)
@@ -54,7 +54,7 @@ BUDGETS = Dict("DCSC" => [20, 30, 40, 50], "ANG2" => [3, 8, 16])[data_key]
 # finished sweep instead of paying for it again.
 # DCSC : learning_curve_V4_DCSC_key42_ntest10_process_only_2026-09-24T10:17:18.182.csv
 # ANG2 : learning_curve_V4_ANG2_key42_ntest10_process_only_2026-09-23T12:22:07.749.csv
-results_csv = "learning_curve_V4_DCSC_key42_ntest60_process_only_2026-09-23T17:48:50.574.csv"
+results_csv = nothing
 
 
 ## 2. Filter and correctors

@@ -27,7 +27,7 @@ if use_hand_tuned
     hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_hp=new_hp)
 end
 
-data_key = "ANG2" # meta["data_key"]
+data_key = "DCSC" # meta["data_key"]
 data_dir_path = data_dir(data_key)
 # Saved figures go to out/Results/<section>/, the same tree scripts/5Results/ writes to.
 # Plain variable, not `const`: this script gets re-included in a live REPL.
@@ -55,7 +55,7 @@ posyaw_measurement_update=true
 filter_tag = "V4"
 corr_filter = CORRECTION_FILTERS[filter_tag]
 
-trial_id = 14 # meta["trial_id"]
+trial_id = 5 # meta["trial_id"]
 train_ratio = 0.35
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
