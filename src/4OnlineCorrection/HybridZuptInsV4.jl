@@ -88,7 +88,7 @@ function hybrid_zupt_aided_insv4(
     step_seg = Int[1]
     name = split(string(typeof(corrector)), ".")[end]
 
-    @info " ##### Processing $name #####"
+    # @info " ##### Processing $name #####"
     has_params = hasfield(typeof(corrector), :params)
 
     io_data = Dict{String,CorrectionIO}(
@@ -144,7 +144,7 @@ function hybrid_zupt_aided_insv4(
             A = P[:, :, n] * F_store[:, :, n]' / P_timeupd[:, :, n+1]
             dx_smooth[:, n] = dx[:, n] + A * (dx_smooth[:, n+1] - dx_timeupd[:, n+1])
             P_smooth[:, :, n] = P[:, :, n] +
-                                A * (P_smooth[:, :, n+1] - P_timeupd[:, :, n+1]) * A'
+                A * (P_smooth[:, :, n+1] - P_timeupd[:, :, n+1]) * A'
             P_smooth[:, :, n] = (P_smooth[:, :, n] + P_smooth[:, :, n]') / 2
         end
 
