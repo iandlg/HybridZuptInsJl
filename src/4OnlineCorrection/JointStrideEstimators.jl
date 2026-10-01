@@ -65,16 +65,18 @@ mutable struct JointStrideHsgpEstimator <: AbstractJointStrideEstimator
     per_dim_eigvals::Matrix{Float64}
     correction_mask::Vector{Int}
     p::Int
+    propagate_input::Bool       # add the feature's uncertainty through ∂y/∂z
 end
 
 function JointStrideHsgpEstimator(N::Int; params::HsgpParameters,
-    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw], kwargs...)
+    corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
+    propagate_input::Bool=false, kwargs...)
     mask = _channel_mask(corrected_channels)
     p = length(mask)
     nβ = p * params.m
     return JointStrideHsgpEstimator(zeros(N), zeros(3, N), zeros(4, N),
         zeros(6 + nβ), zeros(6 + nβ, 6 + nβ), 1, zeros(nβ), stride_noise_std(params),
-        params, calc_eigenvalues(params.LL, params.m, params.d), mask, p)
+        params, calc_eigenvalues(params.LL, params.m, params.d), mask, p, propagate_input)
 end
 
 """
@@ -93,6 +95,30 @@ function stride_model(c::JointStrideHsgpEstimator, feature_type::FeatureType, fe
         input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)[1]
     ϕ = calc_eigenvectors(reshape(z, 1, c.params.d), c.params.LL, c.per_dim_eigvals)
     return c.params.output_stats[1][mask], kron(Diagonal(c.params.output_stats[2][mask]), ϕ)
+end
+
+"""
+    input_noise(c, feature_type, feature, Σ_feature) -> Σ_in
+
+The feature's uncertainty on the corrected channels, `J Σ_z J'` with
+`J = ∂y/∂z`, in physical units.
+"""
+input_noise(c::AbstractJointStrideEstimator, ::FeatureType, ::AbstractVector{Float64},
+    ::AbstractMatrix{Float64}) = zeros(c.p, c.p)
+
+function input_noise(c::JointStrideHsgpEstimator, feature_type::FeatureType,
+    feature::AbstractVector{Float64}, Σ_feature::AbstractMatrix{Float64})
+    c.propagate_input || return zeros(c.p, c.p)
+    m, d = c.params.m, c.params.d
+    z, Σz = normalize_feature!(feature_type; feature=copy(feature), Σ_feature=copy(Σ_feature),
+        input_stats=c.params.input_stats, mid_norm=c.params.mid_norm)
+    B = reshape(c.β, m, c.p)
+    J = zeros(c.p, d)
+    for di in 1:d
+        J[:, di] = vec(calc_eigenvectors_dx(reshape(z, 1, d), c.params.LL, c.per_dim_eigvals, di) * B)
+    end
+    J = Diagonal(c.params.output_stats[2][c.correction_mask]) * J
+    return J * Σz * J'
 end
 
 function _init_prior!(c::JointStrideStaticEstimator, init_model)
@@ -144,7 +170,7 @@ function initialize_corrector!(c::AbstractJointStrideEstimator;
 end
 
 """
-    propagate_stride!(c; t, Δp, Δq, Σpq, R_bh, ins_stride, ref_frame, feature_type, feature) -> (y, Σ_y)
+    propagate_stride!(c; t, Δp, Δq, Σpq, R_bh, ins_stride, ref_frame, feature_type, feature, Σ_feature) -> (y, Σ_y)
 
 One stride of the corrector's dynamics. `Δp`, `Δq`, `Σpq` are the raw INS
 increment as `dynamic_update!` takes it (`Δp` in the INS body frame at the
@@ -152,7 +178,7 @@ previous footfall, `Σpq` over `[ε_p^{b_i}; ε_q^{b_{i+1}}]`), `ins_stride` the
 same stride in its local frame, and `R_bh` maps that local frame into the INS
 body frame. Returns the
 applied correction in the 4-channel convention and its predictive covariance
-(`ΦΣββΦ' + σ_w²`), or `nothing` for a corrector without a stride model.
+(`ΦΣββΦ' + σ_w² + Σ_in`, see `input_noise`), or `nothing` for a corrector without a stride model.
 
 For a plain `AbstractEstimator` this is the uncorrected `dynamic_update!`.
 """
@@ -165,11 +191,13 @@ end
 function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, R_bh::AbstractMatrix{Float64},
     ins_stride::AbstractVector{Float64}, ref_frame::ReferenceFrame,
-    feature_type::FeatureType, feature::AbstractVector{Float64}, kwargs...)
+    feature_type::FeatureType, feature::AbstractVector{Float64},
+    Σ_feature::AbstractMatrix{Float64}, kwargs...)
 
     mask, p = c.correction_mask, c.p
     y₀, Φ = stride_model(c, feature_type, feature)
     y = y₀ + Φ * c.β
+    Σ_in = input_noise(c, feature_type, feature, Σ_feature)
 
     # Channel selectors: position channels into R³ (S_p), yaw channel (s_ψ).
     S_p = zeros(3, p)
@@ -212,10 +240,11 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
     Σxx = T[:, 1:6] * A' + Σxβ * Bβ'
 
     # Odometry noise (ε_p from the INS body frame through the local frame),
-    # then the stride residual the model does not explain.
+    # then the stride residual the model does not explain, then the feature's
+    # own uncertainty through the model.
     G = [A_wl*R_bh' zeros(3, 3); zeros(3, 3) R⁺]
     σ_w = c.σ_w
-    Σxx += G * Σpq * G' + B_all * Diagonal(σ_w .^ 2) * B_all'
+    Σxx += G * Σpq * G' + B_all * Diagonal(σ_w .^ 2) * B_all' + B_y * Σ_in * B_y'
 
     c.Σ[1:6, 1:6] = (Σxx + Σxx') / 2
     c.Σ[1:6, 7:end] = Σxβ
@@ -224,7 +253,7 @@ function propagate_stride!(c::AbstractJointStrideEstimator; t::Float64,
 
     y_full, Σy_full = zeros(4), zeros(4, 4)
     y_full[mask] = y
-    Σy_full[mask, mask] = Φ * c.Σ[7:end, 7:end] * Φ' + Diagonal(σ_w[mask] .^ 2)
+    Σy_full[mask, mask] = Φ * c.Σ[7:end, 7:end] * Φ' + Diagonal(σ_w[mask] .^ 2) + Σ_in
     return y_full, Σy_full
 end
 

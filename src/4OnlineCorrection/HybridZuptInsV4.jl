@@ -216,7 +216,7 @@ function hybrid_zupt_aided_insv4(
         predicted = propagate_stride!(corrector;
             t=inertial.t[curr_step], Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride,
             R_bh=R_bh, ins_stride=ins_stride, ref_frame=ref_frame,
-            feature_type=feature_type, feature=feature)
+            feature_type=feature_type, feature=feature, Σ_feature=Σ_feature)
 
         if gt_available[curr_step] && posyaw_measurement_update
             # The pseudo-stride from k=1 is not a stride: skip it.

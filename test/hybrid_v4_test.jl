@@ -61,6 +61,7 @@ end
 
     # A real stride feature, from the INS of the first mock trial.
     feature = run_v4(first(values(aligned["ANG2"])), H.BaseEstimator(ALLOC); train_ratio=0.0)[4]["input"].data[:, 1]
+    Σ_feature = Matrix(1e-4I, hsgp_p.d, hsgp_p.d)
 
     @testset "joint corrector, $kind" for kind in (:static, :hsgp)
         m = hsgp_p.m
@@ -82,7 +83,7 @@ end
         Σββ = c.Σ[7:end, 7:end]
         y, Σy = H.propagate_stride!(c; t=1.0, Δp=[0.7, 0.0, 0.0], Δq=H.quat_exp([0.0, 0.0, 0.05]),
             Σpq=Matrix(1e-4I, 6, 6), R_bh=Matrix(1.0I, 3, 3), ins_stride=[0.7, 0.0, 0.0, 0.05],
-            ref_frame=FRAME, feature_type=FEATURE_TYPE, feature=feature)
+            ref_frame=FRAME, feature_type=FEATURE_TYPE, feature=feature, Σ_feature=Σ_feature)
         @test c.i == 2
         @test c.Σ ≈ c.Σ'
         @test c.Σ[7:end, 7:end] == Σββ
@@ -103,6 +104,29 @@ end
         H.relinearize!(c)
         @test all(iszero, c.δx)
         @test c.pos[1, 2] > x_before
+    end
+
+    @testset "input uncertainty propagation" begin
+        m = hsgp_p.m
+        β = 0.1 .* randn(H.Random.Xoshiro(1), 4m)
+        function stride(propagate_input, Σf)
+            c = CORRECTORS["V4"].hsgp(ALLOC; params=hsgp_p, corrected_channels=CHANNELS,
+                propagate_input=propagate_input)
+            H.initialize_corrector!(c; t=0.0, pos_init=zeros(3), quat_init=[1.0, 0.0, 0.0, 0.0],
+                Σpq_init=Matrix(1e-4I, 6, 6), init_model=(β, Matrix(1e-2I, 4m, 4m)))
+            y, Σy = H.propagate_stride!(c; t=1.0, Δp=[0.7, 0.0, 0.0], Δq=H.quat_exp([0.0, 0.0, 0.05]),
+                Σpq=Matrix(1e-4I, 6, 6), R_bh=Matrix(1.0I, 3, 3), ins_stride=[0.7, 0.0, 0.0, 0.05],
+                ref_frame=FRAME, feature_type=FEATURE_TYPE, feature=feature, Σ_feature=Σf)
+            return y, Σy, c.Σ[1:6, 1:6]
+        end
+        y_off, Σy_off, Σx_off = stride(false, Σ_feature)
+        y_on, Σy_on, Σx_on = stride(true, Σ_feature)
+        idx = H._channel_mask(CHANNELS)
+        @test y_on == y_off
+        @test all(>(-1e-12), eigvals(Symmetric(Σy_on - Σy_off)))
+        @test all(>(0), diag(Σy_on - Σy_off)[idx])
+        @test tr(Σx_on) > tr(Σx_off)
+        @test stride(true, zeros(hsgp_p.d, hsgp_p.d))[2] ≈ Σy_off
     end
 
     @testset "hybrid_zupt_aided_insv4: $key $id" for (key, ids) in MOCK_IDS, id in ids
