@@ -268,12 +268,11 @@ end
 
 """
     plot_learning_curve_absolute(df, dataset_name; metric=:rmse,
-        reference_estimator="ZUPT only", series_colors=nothing, save_path=nothing,
-        show_outliers=true, show_points=false)
+        series_colors=nothing, save_path=nothing, show_outliers=true, show_points=false)
 
-The learning curve on the metric's own scale: budget 0 (started on mocap at the split,
-open loop over the test window) with every estimator, then one group per budget > 0 with
-every estimator but `reference_estimator` side by side.
+The learning curve on the metric's own scale: one group per budget, every estimator side
+by side in each, "ZUPT only" included — it is re-run at every budget, since the budget is
+also the mocap it gets.
 
 Takes the sweep frame from `run_online_learning_curve`, not the paired one. Unpaired, so
 the spread of each box is mostly walk-to-walk difficulty; `plot_learning_curve_relative_change`
@@ -283,22 +282,15 @@ function plot_learning_curve_absolute(
     df::DataFrame,
     dataset_name::AbstractString;
     metric::Symbol=:rmse,
-    reference_estimator::AbstractString="ZUPT only",
     series_colors::Union{Nothing,AbstractDict}=nothing,
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
 )
     check_metric(metric)
-    sub = df[df.dataset_name .== dataset_name, :]
-    isempty(sub) && error("No rows found for dataset_name = $dataset_name")
+    groups = df[df.dataset_name .== dataset_name, :]
+    isempty(groups) && error("No rows found for dataset_name = $dataset_name")
 
-    is_ref = sub.estimator .== reference_estimator
-    any(is_ref .& (sub.train_strides .== 0)) || throw(ArgumentError(
-        "plot_learning_curve_absolute: no \"$reference_estimator\" rows at budget 0. \
-         Include 0 in the sweep's budgets."))
-
-    groups = sub[(sub.train_strides .== 0) .| .!is_ref, :]
     groups.group = string.(groups.train_strides)
     groups.group_order = groups.train_strides_order
 
