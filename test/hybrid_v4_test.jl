@@ -240,7 +240,6 @@ end
 
         contrast = H.learning_curve_contrast(lc; metric=:rmse, reference_estimator="ZUPT only")
         @test nrow(contrast) == count(lc.estimator .!= "ZUPT only")
-        @test H.plot_learning_curve_absolute(lc, first(keys(aligned)); metric=:rmse,
-            reference_estimator="ZUPT only") isa H.Figure
+        @test H.plot_learning_curve_absolute(lc, first(keys(aligned)); metric=:rmse) isa H.Figure
     end
 end
