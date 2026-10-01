@@ -33,7 +33,7 @@ datasets cannot be mixed up: these lists are NOT interchangeable, and using the
 DCSC list against ANG2 silently selects different walks rather than erroring.
 """
 const TRIAL_IDS = Dict{String,Vector{Int}}(
-    "ANG2" => [1, 2, 3, 4, 6, 10, 11, 13, 14, 15, 16],
+    "ANG2" => [1, 2, 3, 4, 5, 6, 10, 11, 13, 14, 15, 16],
     "DCSC" => [1, 2, 3, 4, 5, 6, 8, 10, 12, 14],
 )
 
@@ -99,6 +99,37 @@ function load_hsgp_params(key::Int; m::Int=200)
     feature = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
     return params, frame, feature, meta
 end
+
+# ---------------------------------------------------------------------------
+# Correction filters
+# ---------------------------------------------------------------------------
+
+"""
+The online-correction filters, keyed by the tag scripts put in their output file
+names. V2 applies the GP prediction as a measurement on the absolute state; V3
+corrects the stride and propagates it (notes/013, stride built in the INS frame
+per notes/014). A script picks one with `filter_tag` and passes
+`CORRECTION_FILTERS[filter_tag]` as `correction_filter=`, so figures from the two
+never share a name.
+"""
+const CORRECTION_FILTERS = Dict{String,Function}(
+    "V2" => HybridZuptInsJl.hybrid_zupt_aided_insv2,
+    "V3" => HybridZuptInsJl.hybrid_zupt_aided_insv3,
+    "V4" => HybridZuptInsJl.hybrid_zupt_aided_insv4,
+)
+
+"""
+The correctors each filter runs, keyed by the same tag as `CORRECTION_FILTERS`.
+V4 carries the stride model in the corrector's own state (notes/015), so it
+needs its own joint correctors; V2 and V3 share the decoupled ones. Scripts
+build their estimator tables from `CORRECTORS[filter_tag]` so a tag switch
+changes both at once.
+"""
+const CORRECTORS = Dict{String,NamedTuple{(:static, :hsgp),Tuple{Type,Type}}}(
+    "V2" => (static=HybridZuptInsJl.DecoupledStaticEstimator, hsgp=HybridZuptInsJl.DecoupledHsgpEstimator),
+    "V3" => (static=HybridZuptInsJl.DecoupledStaticEstimator, hsgp=HybridZuptInsJl.DecoupledHsgpEstimator),
+    "V4" => (static=HybridZuptInsJl.JointStrideStaticEstimator, hsgp=HybridZuptInsJl.JointStrideHsgpEstimator),
+)
 
 # ---------------------------------------------------------------------------
 # Output paths

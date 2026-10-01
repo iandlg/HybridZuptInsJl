@@ -132,6 +132,8 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
     input_labels::Vector{String},
     output_labels::Vector{String};
     figsize::Tuple{Int,Int}=(600, 500),
+    xlabel::String="Input features",
+    ylabel::String="Output corrections",
     title::String="Input-Output Correlation Heatmap")
 
     n_in, n_out = size(corr_mat)   # rows: input features, cols: outputs
@@ -147,8 +149,8 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
         xticklabelrotation=0,          # no rotation
         yreversed=true,                # outputs top-to-bottom, matching their order
         # title=title,
-        xlabel="Input features",
-        ylabel="Output corrections",
+        xlabel=xlabel,
+        ylabel=ylabel,
         xgridvisible=false,
         ygridvisible=false)
 
@@ -157,14 +159,16 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
     # the zero point is the neutral colour rather than an arbitrary midpoint.
     hm = heatmap!(ax, 1:n_in, 1:n_out, corr_mat; colormap=:berlin, colorrange=(-1, 1))
 
-    # Add text annotations
+    # Add text annotations. Both ends of :berlin are light (relative luminance
+    # 0.46 at -1, 0.54 at +1) and only its centre is dark, so a fixed white label
+    # is unreadable on strongly correlated cells -- which is every diagonal cell
+    # of a channel-against-itself matrix. Flip to black past the point where
+    # black wins the contrast ratio.
     for i in 1:n_in, j in 1:n_out
         val = corr_mat[i, j]
-        # if abs(val) >= 0.1
         text!(ax, i, j, text="$(round(val, digits=2))";
-            color=:white,
+            color=abs(val) > 0.7 ? :black : :white,
             align=(:center, :center))
-        # end
     end
     # Horizontal colorbar below the heatmap. `spinewidth=0` is what drops its black frame --
     # Colorbar ignores the `*spinevisible` attributes it advertises (Makie 0.24).

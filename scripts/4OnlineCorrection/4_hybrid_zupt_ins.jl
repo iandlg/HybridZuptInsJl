@@ -1,7 +1,7 @@
 include("../../src/HybridZuptInsJl.jl");
 using .HybridZuptInsJl;
 include("../5Results/_common.jl")
-using GLMakie, OrderedCollections
+using GLMakie, OrderedCollections, Printf
 
 # Choose Parameters file (see HSGP_PARAM_PATHS in scripts/5Results/_common.jl)
 hsgp_p_key = 42
@@ -46,8 +46,26 @@ sigma_groundtruth = (
 )
 posyaw_measurement_update=true
 
+# Filter used for the Static/HSGP corrections, with its correctors (see
+# CORRECTION_FILTERS / CORRECTORS in scripts/5Results/_common.jl). The two go
+# together: V4 needs the JointStride correctors, and running it with V2's
+# Decoupled ones silently corrects nothing, since `propagate_stride!` falls back
+# to the uncorrected `dynamic_update!` for any other estimator.
+# "ZUPT only" runs through the SAME filter: it has no learned model, but the
+# filter still sets where the corrector starts (V4 starts it on the mocap pose
+# when ground truth is available at k=1, V2 on `x_init`) and how the mocap fixes
+# are weighted, so running it through V2 left its training half offset from the
+# corrected runs it is the baseline for.
+filter_tag = "V4"
+# V4 stride-noise arm (`StrideNoise`, ignored by V2/V3 correctors): `:split`
+# estimates γ₀/γ₁ online and splits them into process noise and mocap jitter,
+# `:process_only` is the model this replaced — no split, σ_w = σ_n fixed from the
+# hyperparameters — and `:online_total` drops only the split.
+noise_mode = :process_only
+corr_filter = CORRECTION_FILTERS[filter_tag]
+
 trial_id = 14 # meta["trial_id"]
-train_ratio = 0.3
+train_ratio = 0.35
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 # sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
@@ -75,18 +93,19 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 # Run online correction
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[], noise_mode=noise_mode)
+zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
-    x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
+    x_init=x_init, gt_available=gt_available, ref_frame=FRAME,
+    feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], decoup_stat_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode)
+zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
@@ -117,6 +136,8 @@ trajs = OrderedDict(
     "Static" => decoupled_stat_traj[mask],
     "HSGP" => hsgp1_corr_traj[mask],
 )
+final_rmse = OrderedDict(k => HybridZuptInsJl.rmse(tr, gt_traj_aligned[step_seg][mask])[end] for (k, tr) in trajs)
+foreach(((k, r),) -> @info(@sprintf("%-10s final RMSE %.3f m (%+.1f %% vs ZUPT only)", k, r, 100 * (r / final_rmse["ZUPT only"] - 1))), final_rmse)
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg][mask])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg][mask])
@@ -129,7 +150,7 @@ n_last_strides = 20
 fig_traj_panels = results_figure() do
     HybridZuptInsJl.plot_trajectory_start_end_panels(
         trajs, gt_traj_aligned[step_seg][mask];
-        train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides,
+        train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides, markers=true,
         save_path=stamped(section, "trajectory2d_panels_$(data_key)_trial$(trial_id)"))
 end
 
@@ -149,7 +170,7 @@ end
 GLMakie.activate!()
 
 # fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
+fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])
 
 # The three channels the corrections actually estimate (Δz is left alone), on one stacked
 # figure: target grey, Static wong yellow, HSGP wong green, a single shared legend. Keys
@@ -160,7 +181,7 @@ fig_regr_panels = results_figure() do
             "Static" => io_data["Decoupled Static"]["prediction"],
             "HSGP" => io_data["Decoupled HSGP"]["prediction"],
         ),
-        io_data["Base"]["target"];
+        io_data["Decoupled HSGP"]["target"];
         save_path=stamped(regression_section, "regression_panels_$(data_key)_trial$(trial_id)"))
 end
 GLMakie.activate!()
@@ -194,18 +215,18 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
-zupt, step_seg, def_corr_traj, io_data["Base"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[], noise_mode=noise_mode)
+zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_static_est = HybridZuptInsJl.DecoupledStaticEstimator(round(Int, N / 60); corrected_channels=output_channels) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
-zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+decoup_static_est = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode) # [:pos_1, :pos_2] ; corrected_channels=[:yaw]
+zupt, step_seg, decoupled_stat_traj, io_data["Decoupled Static"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_static_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=decoup_stat_model, posyaw_measurement_update=posyaw_measurement_update)
 
-decoup_hsgp_estmtr = HybridZuptInsJl.DecoupledHsgpEstimator(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels)
-zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = HybridZuptInsJl.hybrid_zupt_aided_insv2(
+decoup_hsgp_estmtr = CORRECTORS[filter_tag].hsgp(round(Int, N / 60); params=hsgp_p, corrected_channels=output_channels, noise_mode=noise_mode)
+zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)
 
@@ -221,6 +242,8 @@ trajs = OrderedDict(
     "Static" => decoupled_stat_traj,
     "HSGP" => hsgp1_corr_traj,
 )
+final_rmse = OrderedDict(k => HybridZuptInsJl.rmse(tr, gt_traj_aligned[step_seg])[end] for (k, tr) in trajs)
+foreach(((k, r),) -> @info(@sprintf("%-10s final RMSE %.3f m (%+.1f %% vs ZUPT only)", k, r, 100 * (r / final_rmse["ZUPT only"] - 1))), final_rmse)
 
 fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
 fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
@@ -243,4 +266,4 @@ fig_rmse_hybrid = results_figure() do
 end
 # results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
 GLMakie.activate!()
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Base"]["target"])
+fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])

@@ -1,4 +1,25 @@
-function hybrid_zupt_aided_insv2(
+"""
+    hybrid_zupt_aided_insv4(inertial, simdata, gt_traj, corrector; ...)
+
+`hybrid_zupt_aided_insv3` with the stride model moved into the corrector's
+state (notes/015). Same signature, same return tuple, same `io_data` keys.
+
+V3 learns the stride error in a separate filter and hands its prediction to the
+corrector as per-stride process noise, so the model's uncertainty is white from
+one stride to the next. Here `β` is part of the corrector's error state and the
+correction `y = y₀ + Φ(z) β` is a term of the propagation, so:
+
+- there is one model and it is the same in both halves; ground truth only adds
+  a position/yaw measurement, which learns `β` through the cross-covariance the
+  propagation builds. No stride measurement, which would count the same mocap
+  twice;
+- in the test half `β`'s uncertainty accumulates as a correlated bias.
+
+`corrector` is a `AbstractJointStrideEstimator`, or any other estimator, which
+then propagates the raw stride (the "ZUPT only" baseline). The target and the
+feature are built from the inner INS only, as in V3 (notes/014).
+"""
+function hybrid_zupt_aided_insv4(
     inertial::InertialData,
     simdata::InsConfig,
     gt_traj::Trajectory,
@@ -8,12 +29,8 @@ function hybrid_zupt_aided_insv2(
     gt_available::Vector{Bool}=zeros(Bool, length(gt_traj)),
     ref_frame::ReferenceFrame=HEADING,
     feature_type::FeatureType=THREED_STEP,
-    init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing,
+    init_model::Optional{Tuple}=nothing,
     posyaw_measurement_update::Bool=true,
-    # Opt-in per-footfall record of the corrector's own state and Σ. `nothing`
-    # (the default) reproduces the previous behaviour exactly; the return tuple
-    # is unchanged either way, which is what keeps the ~19 existing call sites
-    # working. See `CorrectorDiagnostics` in SingleFilterDiagnostics.jl.
     diagnostics::Optional{CorrectorDiagnostics}=nothing
 )
     is_compatible(inertial, gt_traj) ||
@@ -48,17 +65,27 @@ function hybrid_zupt_aided_insv2(
     x[:, 1] = x_init
     quat[:, 1] = matrix_to_quat(euler_to_matrix(x_init[7:9]))
 
+    # With mocap at the start, the corrector starts on it. Otherwise the offset
+    # between `x_init` (a whole-walk alignment) and the mocap pose at k=1 --
+    # 0.045 rad of yaw on ANG2 13, 26σ of the initial yaw prior -- is first
+    # observed after one stride, and the flat prior on β absorbs it as bias.
+    Σ_gt = Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+    pos_init, quat_init = x_init[1:3], quat[:, 1]
+    Σpq_init = P[[1:3; 7:9], [1:3; 7:9], 1]
+    if gt_available[1] && posyaw_measurement_update
+        pos_init = gt_traj.pos[:, 1]
+        δψ = wrap_pi(matrix_to_euler(gt_traj.R_nb[:, :, 1])[3] - x_init[9])
+        quat_init = quat_multiply(quat_exp([0.0, 0.0, δψ]), quat[:, 1])
+        Σpq_init[[1, 2, 3, 6], [1, 2, 3, 6]] = Σ_gt
+    end
+
     initialize_corrector!(corrector;
         t=inertial.t[1],
-        pos_init=x_init[1:3],
-        quat_init=quat[:, 1],
-        Σpq_init=P[[1:3; 7:9], [1:3; 7:9], 1],
+        pos_init=pos_init,
+        quat_init=quat_init,
+        Σpq_init=Σpq_init,
         init_model=init_model
     )
-
-    # n_train_cutoff = floor(Int, train_ratio * N)
-    # gt_available = [n <= n_train_cutoff for n in 1:N]
-    # @show typeof(gt_available)
 
     seg_start = 2
     seg_end = N
@@ -107,7 +134,6 @@ function hybrid_zupt_aided_insv2(
             P[:, :, n] = (P[:, :, n] + P[:, :, n]') / 2
             ΔP = (ΔP + ΔP') / 2
 
-
             if update!(step_detector, zupt[n])
                 push!(step_seg, n)
                 seg_end = n
@@ -140,119 +166,83 @@ function hybrid_zupt_aided_insv2(
             seg_start = seg_end + 1
             seg_end = N
         else
-            break # Break early as to not repeat next part on last index
+            break
         end
 
         prev_step = step_seg[end-1]
         curr_step = step_seg[end]
 
-        # using ΔP means we assume i-1 known
-        # means no additive uncertainty p_i and pi-1
-        # and no rotation uncertainty q_i-1
+        # INS position error is nav-frame, INS attitude error is body-frame
+        # (`state_matrix`), so this puts ε_p in b_i and leaves ε_q in b_{i+1}.
+        R_ins_prev = quat_to_matrix(quat[:, prev_step])
         mat66 .= 0.0
-        mat66[1:3, 1:3] = quat_to_matrix(quat[:, prev_step])'
-        mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3) # Body frame noise from INS
+        mat66[1:3, 1:3] = R_ins_prev'
+        mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3)
 
         @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------ " maxlog = 5
-        # Update slow kalman
-        dynamic_update!(corrector;
-            t=inertial.t[curr_step],
-            Δp=mat66[1:3, 1:3] * (x[1:3, curr_step] - x[1:3, prev_step]),
-            Δq=quat_multiply(quat_conjugate(quat[:, prev_step]), quat[:, curr_step]),
-            Σpq=(mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66')
-        )
 
-        # Compute stride error and estimated stride 
-        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl = stride_error(ref_frame;
-            R_wb=(quat_to_matrix(corrector.quat[:, corrector.i-1]), quat_to_matrix(corrector.quat[:, corrector.i])),
-            Δp=corrector.pos[:, corrector.i] - corrector.pos[:, corrector.i-1],
+        Δp_stride = mat66[1:3, 1:3] * (x[1:3, curr_step] - x[1:3, prev_step])
+        Δq_stride = quat_multiply(quat_conjugate(quat[:, prev_step]), quat[:, curr_step])
+        Σ_stride = mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66'
+
+        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl_ins = stride_error(ref_frame;
+            R_wb=(R_ins_prev, quat_to_matrix(quat[:, curr_step])),
+            Δp=x[1:3, curr_step] - x[1:3, prev_step],
             Σ_ΔpΔθ3=ΔP[[1:3; 9], [1:3; 9]],
             R_wb_gt=(gt_traj.R_nb[:, :, prev_step], gt_traj.R_nb[:, :, curr_step]),
             Δp_gt=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step],
-            Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
+            Σ_ΔpΔθ3_gt=Σ_gt
         )
 
-        # Compute feature
         feature, Σ_feature = compute_feature(feature_type;
             ins_stride=ins_stride, Σ_ins_stride=Σ_ins_stride,
             ΔT=inertial.t[curr_step] - inertial.t[prev_step]
         )
 
-        # Save for plotting
         append_io!(io_data["target"], inertial.t[prev_step], stride_err, sqrt.(diag(Σ_err)))
         append_io!(io_data["input"], inertial.t[prev_step], feature, sqrt.(diag(Σ_feature)))
 
         if has_params
-            feat_norm = deepcopy(feature)
-            Σ_feat_norm = deepcopy(Σ_feature)
-            normalize_feature!(feature_type;
-                feature=feat_norm,
-                Σ_feature=Σ_feat_norm,
-                input_stats=corrector.params.input_stats,
-                mid_norm=corrector.params.mid_norm
-            )
-
-            target_norm = deepcopy(stride_err)
-            target_norm = (target_norm .- corrector.params.output_stats[1]) ./ corrector.params.output_stats[2]
-            Σ_err_norm = deepcopy(Σ_err)
-            Σ_err_norm = Diagonal(1 ./ corrector.params.output_stats[2]) * Σ_err_norm * Diagonal(1 ./ corrector.params.output_stats[2])
-
+            feat_norm, Σ_feat_norm = normalize_feature!(feature_type;
+                feature=copy(feature), Σ_feature=copy(Σ_feature),
+                input_stats=corrector.params.input_stats, mid_norm=corrector.params.mid_norm)
+            σ_out = corrector.params.output_stats[2]
+            target_norm = (stride_err .- corrector.params.output_stats[1]) ./ σ_out
+            Σ_err_norm = Diagonal(1 ./ σ_out) * Σ_err * Diagonal(1 ./ σ_out)
             append_io!(io_data["target_norm"], inertial.t[prev_step], target_norm, sqrt.(diag(Σ_err_norm)))
             append_io!(io_data["input_norm"], inertial.t[prev_step], feat_norm, sqrt.(diag(Σ_feat_norm)))
         end
 
-        if gt_available[curr_step] && gt_available[prev_step]
-            # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-            # @info "Prev and curr GT available"
-            residual, residual_var = stride_measurement_update!(corrector;
-                feature_type=feature_type,
-                stride_err=stride_err, Σ_err=Σ_err,
-                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl,
-            )
+        # R^{bh}: the stride's local frame into the INS body frame at t_i, from
+        # INS quantities only, so it is a known input and has no Jacobian.
+        R_bh = R_ins_prev' * R_aug_wl_ins[1:3, 1:3]
 
-            if posyaw_measurement_update
-                relinearize!(corrector)
+        predicted = propagate_stride!(corrector;
+            t=inertial.t[curr_step], Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride,
+            R_bh=R_bh, ins_stride=ins_stride, ref_frame=ref_frame,
+            feature_type=feature_type, feature=feature)
 
-                posyaw_measurement_update!(corrector;
-                    curr_pos=gt_traj.pos[:, curr_step],
-                    curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                    Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
-                )
+        if gt_available[curr_step] && posyaw_measurement_update
+            # The pseudo-stride from k=1 is not a stride: skip it.
+            if gt_available[prev_step] && prev_step != 1
+                observe_stride_error!(corrector, stride_err)
+                isnothing(predicted) ||
+                    append_io!(io_data["residual"], inertial.t[prev_step], stride_err - predicted[1])
             end
-            if !isnothing(residual)
-                append_io!(io_data["residual"], inertial.t[prev_step], residual)
-            end
-
-        elseif gt_available[curr_step] && posyaw_measurement_update
-            # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-            # @info "Curr GT available"
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) #.* 0.5e1
+                Σy=Σ_gt
             )
-        else
-            # @info "No GT available"
-            pred, var_pred, pred_norm, var_pred_norm = learned_measurement_update!(corrector;
-                feature_type=feature_type,
-                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl)
-            if !isnothing(pred) && !isnothing(var_pred)
-                append_io!(io_data["prediction"], inertial.t[prev_step], pred, sqrt.(var_pred))
-            end
-            if !isnothing(pred_norm) && !isnothing(var_pred_norm)
-                append_io!(io_data["prediction_norm"], inertial.t[prev_step], pred_norm, sqrt.(var_pred_norm))
-            end
-
+        elseif !isnothing(predicted)
+            append_io!(io_data["prediction"], inertial.t[prev_step],
+                predicted[1], sqrt.(diag(predicted[2])))
         end
         relinearize!(corrector)
 
-        # Recorded after relinearize!, so this is the posterior: the state and Σ
-        # left by whichever update this footfall took -- mocap in the train
-        # half, the GP correction in the test half.
         isnothing(diagnostics) || record_corrector!(diagnostics, corrector;
             k=curr_step, t=inertial.t[curr_step])
     end
 
     return zupt, step_seg, get_trajectory(corrector), io_data, get_model(corrector)
 end
-

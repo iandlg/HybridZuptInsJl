@@ -232,6 +232,10 @@ const _METHOD_COLOR_INDICES = Dict{String,Int}(
     "ZUPT only" => 1,
     "Static" => 2,
     "HSGP" => 3,
+    # The same run as "ZUPT only" with the mocap fixes switched off, so it takes
+    # wong 4 rather than the fallback grey: it is a fourth series a reader
+    # compares against the other three, not an unrecognised name.
+    "ZUPT only (no mocap)" => 4,
 )
 
 const _METHOD_FALLBACK_COLOR = Makie.RGBAf(0.45, 0.45, 0.45, 1.0)
@@ -343,9 +347,8 @@ function plot_regression_comparison(
     show_rmse::Bool=false,
     show_mean_std::Bool=false,
     clip_quantile::Union{Nothing,Real}=nothing,
-    title::Union{Nothing,AbstractString}=nothing,
-    show_subtitle::Bool=true,
-    save_path::Union{String,Nothing}=nothing
+    save_path::Union{String,Nothing}=nothing,
+    figsize::Tuple{Int,Int}=(900, 300)
 )
     isempty(pred_data) && throw(ArgumentError("pred_data is empty"))
     all_series = CorrectionIO[values(pred_data)...]
@@ -392,12 +395,12 @@ function plot_regression_comparison(
     isnothing(time_window) || push!(provenance,
         @sprintf("%.0f-%.0f s", time_window[1], time_window[2]))
 
-    fig = Figure(size=(1000, 560))
+    fig = Figure(size=figsize)
     ax = Axis(fig[1, 1];
         xlabel="Time [s]",
-        ylabel=channel == 4 ? "Stride yaw error [rad]" : "Stride position error [m]",
-        title=isnothing(title) ? "$(_OUTPUT_NAMES[channel]) correction — $(seg_name) segment" : title,
-        subtitle=(show_subtitle && !isempty(provenance)) ? join(provenance, " · ") : "",
+        ylabel=channel == 4 ? "Δθ [rad]" : "Δpos [m]",
+        # title=isnothing(title) ? "$(_OUTPUT_NAMES[channel]) correction — $(seg_name) segment" : title,
+        # subtitle=(show_subtitle && !isempty(provenance)) ? join(provenance, " · ") : "",
         subtitlesize=11,
         xgridvisible=true,
         ygridvisible=true)

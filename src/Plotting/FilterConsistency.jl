@@ -90,7 +90,8 @@ the x-axis by the unearned one. NEES is a Mahalanobis quadratic form, hence
 strictly positive, so the log axis is safe.
 
 `colors` maps a run name to its colour ([`FILTER_CONFIG_COLORS`](@ref) positionally
-otherwise) and `dashed` lists the runs drawn dashed. Legend entries are the run
+otherwise), `dashed` lists the runs drawn dashed, and `legend_position` moves the
+legend off the data when a run climbs into the default top-right corner. Legend entries are the run
 names alone: the per-run statistics belong in the table the caller prints, and a
 single consistency percentage over a run whose two halves differ by 70 points is
 not a number worth putting on a figure.
@@ -102,6 +103,7 @@ function plot_nees_comparison(
     split_k::Union{Nothing,Int}=nothing,
     colors::Union{Nothing,AbstractDict}=nothing,
     dashed::AbstractVector{<:AbstractString}=String[],
+    legend_position=:rt,
     title::String="NEES consistency ($block)",
     save_path::Union{String,Nothing}=nothing
 )
@@ -124,7 +126,49 @@ function plot_nees_comparison(
     end
     isnothing(split_k) || vlines!(ax, [split_k]; color=:black, linestyle=:dash,
         linewidth=1.5, label="train | test")
-    axislegend(ax; position=:rt)
+    axislegend(ax; position=legend_position)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end
+
+"""
+    plot_position_covariance(runs; split_k, colors, dashed, title, save_path)
+
+`tr(Σ[1:3,1:3])` over the run for one or more correctors, from the NamedTuples
+`pos_cov_trace` returns (fields `k`, `trace`). This is the covariance a V2
+decoupled corrector reports for its own position, i.e. the matrix its NEES is
+scored against — read the two figures together: a trace that falls while NEES
+rises is a shrink the estimator has not earned.
+
+`split_k` marks the train/test boundary, where the shrink changes hands from the
+mocap update to the GP correction. Log axis for the same reason as
+`plot_nees_comparison`: the mocap-anchored half sits decades below the other.
+
+Not a special case of `plot_zupt_starvation`, which pairs its covariance panel
+with a ZUPT gain the decoupled corrector does not have — the ZUPT lives in the
+inner INS loop, which this design leaves untouched.
+"""
+function plot_position_covariance(
+    runs::AbstractDict{String,<:NamedTuple};
+    split_k::Union{Nothing,Int}=nothing,
+    colors::Union{Nothing,AbstractDict}=nothing,
+    dashed::AbstractVector{<:AbstractString}=String[],
+    title::String="Corrector position uncertainty",
+    save_path::Union{String,Nothing}=nothing
+)
+    fig = Figure(size=(900, 450))
+    ax = Axis(fig[1, 1]; xlabel="Sample index k", ylabel="tr(Σ[1:3,1:3])  [m²]",
+        title=title, xgridvisible=false, yscale=log10)
+
+    for (si, (key, r)) in enumerate(runs)
+        dash = key in dashed
+        lines!(ax, r.k, max.(r.trace, eps()); color=_run_color(colors, key, si),
+            label=key, linestyle=dash ? :dash : :solid, linewidth=1.6)
+    end
+    isnothing(split_k) || vlines!(ax, [split_k]; color=:black, linestyle=:dash,
+        linewidth=1.5, label="train | test")
+    axislegend(ax; position=:lt)
 
     isnothing(save_path) || save(save_path, fig)
     return fig

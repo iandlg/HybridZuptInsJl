@@ -51,6 +51,14 @@ sweep_trial_ids = trial_ids(data_key)
 train_ratio = 0.4
 output_channel_idxs = [1, 2, 4]
 
+# Correction filter (see CORRECTION_FILTERS in _common.jl). Its tag goes into
+# every output file name, and picks the correctors below (CORRECTORS).
+filter_tag = "V4"
+# V4 stride-noise arm (`StrideNoise`): `:process_only` is σ_w = σ_n fixed from the
+# hyperparameters, no split and no online estimate. In the file stem as well as the
+# estimator, so this sweep cannot be mistaken for a `:split` one.
+noise_mode = :process_only
+
 noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
 
 # `pred_includes_noise` controls whether the GP `noise` hyperparameter reaches
@@ -59,12 +67,12 @@ noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag
 # RMSE -- three flat lines that look like an insensitivity result but are a dead
 # knob. `sweep_noise` therefore tracks it, and `vary_hsgp_parameters` warns if
 # anything else comes back inert.
-pred_includes_noise = false
+pred_includes_noise = true
 sweep_noise = pred_includes_noise
 
 # Probe ranges. `n_steps` must be ODD so both identities -- multiplier 1 and
 # offset 0 -- are hit exactly and the baseline sits on every curve.
-n_steps = smoke_test ? 5 : 11
+n_steps = smoke_test ? 5 : 9
 log_range = (-1.0, 1.0)     # scale families: decades
 delta_range = (-3.0, 3.0)   # location families: units of sigma_x (mu_x) or z (c_x)
 
@@ -137,14 +145,16 @@ outdir = joinpath("out/Results", SECTION, "data")
 mkpath(outdir)
 
 time = string(Dates.now())
-base_name = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
+base_name = "$(filter_tag)_$(noise_mode)_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
 ##
 make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
     m=m, output_channel_idxs=output_channel_idxs,
-    hsgp_estimator_factory=HybridZuptInsJl.DecoupledHsgpEstimator,
+    hsgp_estimator_factory=CORRECTORS[filter_tag].hsgp,
     noise_spec=noise_spec,
     pred_includes_noise=pred_includes_noise,
+    correction_filter=CORRECTION_FILTERS[filter_tag],
+    estimator_kwargs=(noise_mode=noise_mode,),
 )
 
 df = HybridZuptInsJl.sweep_over_trials(
@@ -221,7 +231,9 @@ metadata = Dict(
     "train_ratio" => train_ratio,
     "noise_spec_tag" => noise_spec.tag,
     "pred_includes_noise" => pred_includes_noise,
+    "noise_mode" => string(noise_mode),
     "hsgp_p_key" => hsgp_p_key,
+    "correction_filter" => filter_tag,
     "base_parameters_metadata" => meta
 )
 
@@ -243,7 +255,8 @@ println()
 ## ----- Plot ----------------------------------------------------------------
 # Set `replot_basename` to re-plot a previously saved sweep, or leave it
 # `nothing` to plot the sweep just computed above.
-replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"
+# replot_basename = "ANG2_HEADING_TWOD_STEP_YAW_2026-09-13T12:26:29.418"   # V2
+replot_basename = "V4_process_only_key42_ANG2_HEADING_TWOD_STEP_YAW_2026-09-21T23:37:28.017"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -297,7 +310,8 @@ end
 # data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
     HybridZuptInsJl.plot_probe_ranking(plot_df;
-        xlims=(-35.0, 150.0),
+        xlims=(-50.0, 200.0),
+        log_scale=false,
         save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"),
         figsize=(900, 475))
 end
@@ -319,6 +333,6 @@ for focus_param in focus_params
         HybridZuptInsJl.plot_param_closeup(plot_df, focus_param;
             box_df=plot_box,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"),
-            _ylims=(-5.0, 100.0))
+            _ylims=(-50.0, 200.0))
     end
 end

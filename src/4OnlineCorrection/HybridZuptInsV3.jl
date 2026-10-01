@@ -1,4 +1,29 @@
-function hybrid_zupt_aided_insv2(
+"""
+    hybrid_zupt_aided_insv3(inertial, simdata, gt_traj, corrector; ...)
+
+`hybrid_zupt_aided_insv2` with the GP correction moved from the absolute state
+onto the stride. Same signature, same return tuple, same `io_data` keys, same
+`CorrectorDiagnostics` hook, so every existing consumer works on either.
+
+V2 applies the GP's prediction as a Kalman measurement on the corrector's
+*absolute* error state, which shrinks the absolute `Σ` at every test-phase
+footfall although the GP only knows about the stride (notes/003 §3.8). Here the
+GP corrects the stride and the stride covariance, and the corrected stride then
+propagates the absolute state, so no measurement update touches `Σ` in the test
+half (notes/013).
+
+The stride error and the feature are built from the inner ZUPT-INS's own
+attitude and position, so the GP's input and target depend on the INS and the
+ground truth only. Building them from the corrector's attitude instead -- as the
+first version did -- lets the corrector's drifting roll/pitch leak into the
+training targets, which flipped the sign of the learned yaw bias on some walks
+(notes/014). The corrector's orientation enters exactly once, in
+`correct_stride`, to put the corrected local stride back into the world.
+
+The ground-truth branches keep V2's updates: mocap *is* exogenous absolute
+information, and 002 Result 3 measured that its shrink is earned.
+"""
+function hybrid_zupt_aided_insv3(
     inertial::InertialData,
     simdata::InsConfig,
     gt_traj::Trajectory,
@@ -10,10 +35,8 @@ function hybrid_zupt_aided_insv2(
     feature_type::FeatureType=THREED_STEP,
     init_model::Optional{Tuple{AbstractVector{Float64},AbstractMatrix{Float64}}}=nothing,
     posyaw_measurement_update::Bool=true,
-    # Opt-in per-footfall record of the corrector's own state and Σ. `nothing`
-    # (the default) reproduces the previous behaviour exactly; the return tuple
-    # is unchanged either way, which is what keeps the ~19 existing call sites
-    # working. See `CorrectorDiagnostics` in SingleFilterDiagnostics.jl.
+    # Opt-in per-footfall record of the corrector's own state and Σ. See
+    # `CorrectorDiagnostics` in SingleFilterDiagnostics.jl.
     diagnostics::Optional{CorrectorDiagnostics}=nothing
 )
     is_compatible(inertial, gt_traj) ||
@@ -154,23 +177,33 @@ function hybrid_zupt_aided_insv2(
         mat66[4:6, 4:6] = Matrix{Float64}(I, 3, 3) # Body frame noise from INS
 
         @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------ " maxlog = 5
-        # Update slow kalman
-        dynamic_update!(corrector;
-            t=inertial.t[curr_step],
-            Δp=mat66[1:3, 1:3] * (x[1:3, curr_step] - x[1:3, prev_step]),
-            Δq=quat_multiply(quat_conjugate(quat[:, prev_step]), quat[:, curr_step]),
-            Σpq=(mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66')
-        )
 
-        # Compute stride error and estimated stride 
-        stride_err, Σ_err, ins_stride, Σ_ins_stride, R_aug_wl = stride_error(ref_frame;
-            R_wb=(quat_to_matrix(corrector.quat[:, corrector.i-1]), quat_to_matrix(corrector.quat[:, corrector.i])),
-            Δp=corrector.pos[:, corrector.i] - corrector.pos[:, corrector.i-1],
+        # ------------------- Raw stride, before the state moves ----------------
+        # V2 called `dynamic_update!` here and read the stride back off the
+        # corrector afterwards. Here the propagation waits until the GP has
+        # corrected the stride, so the correction lands on the stride rather than
+        # on the absolute state.
+        Δp_stride = mat66[1:3, 1:3] * (x[1:3, curr_step] - x[1:3, prev_step])
+        Δq_stride = quat_multiply(quat_conjugate(quat[:, prev_step]), quat[:, curr_step])
+        Σ_stride = mat66 * ΔP[[1:3; 7:9], [1:3; 7:9]] * mat66'
+
+        q_prev = corrector.quat[:, corrector.i]
+        R_prev = quat_to_matrix(q_prev)
+
+        # Stride error and stride in the inner INS's own local frame: the target
+        # and the feature never see the corrector's state.
+        stride_err, Σ_err, ins_stride, Σ_ins_stride, _ = stride_error(ref_frame;
+            R_wb=(quat_to_matrix(quat[:, prev_step]), quat_to_matrix(quat[:, curr_step])),
+            Δp=x[1:3, curr_step] - x[1:3, prev_step],
             Σ_ΔpΔθ3=ΔP[[1:3; 9], [1:3; 9]],
             R_wb_gt=(gt_traj.R_nb[:, :, prev_step], gt_traj.R_nb[:, :, curr_step]),
             Δp_gt=gt_traj.pos[:, curr_step] - gt_traj.pos[:, prev_step],
             Σ_ΔpΔθ3_gt=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
         )
+
+        # The corrector's local→world map, used only to put the corrected stride
+        # back into the world.
+        R_aug_wl = stride_local(ref_frame; R_wb=R_prev, ΔpΔθ3=zeros(4))[3]
 
         # Compute feature
         feature, Σ_feature = compute_feature(feature_type;
@@ -202,8 +235,12 @@ function hybrid_zupt_aided_insv2(
         end
 
         if gt_available[curr_step] && gt_available[prev_step]
-            # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-            # @info "Prev and curr GT available"
+            # Mocap at both ends: the stride is a training target, and the
+            # absolute update that follows is genuinely exogenous information.
+            # Unchanged from V2, deliberately -- see notes/013 §0.
+            dynamic_update!(corrector;
+                t=inertial.t[curr_step], Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride)
+
             residual, residual_var = stride_measurement_update!(corrector;
                 feature_type=feature_type,
                 stride_err=stride_err, Σ_err=Σ_err,
@@ -224,35 +261,48 @@ function hybrid_zupt_aided_insv2(
             end
 
         elseif gt_available[curr_step] && posyaw_measurement_update
-            # @info "----- Footfall n°$(length(step_seg)) detected : k=$curr_step ------"
-            # @info "Curr GT available"
+            dynamic_update!(corrector;
+                t=inertial.t[curr_step], Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride)
+
             posyaw_measurement_update!(corrector;
                 curr_pos=gt_traj.pos[:, curr_step],
                 curr_θ3=matrix_to_euler(gt_traj.R_nb[:, :, curr_step])[3],
-                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2) #.* 0.5e1
+                Σy=Diagonal(sigma_groundtruth_array(simdata) .^ 2)
             )
         else
-            # @info "No GT available"
-            pred, var_pred, pred_norm, var_pred_norm = learned_measurement_update!(corrector;
-                feature_type=feature_type,
-                feature=feature, Σ_feature=Σ_feature, R_aug_wl=R_aug_wl)
-            if !isnothing(pred) && !isnothing(var_pred)
-                append_io!(io_data["prediction"], inertial.t[prev_step], pred, sqrt.(var_pred))
-            end
-            if !isnothing(pred_norm) && !isnothing(var_pred_norm)
-                append_io!(io_data["prediction_norm"], inertial.t[prev_step], pred_norm, sqrt.(var_pred_norm))
-            end
+            # No ground truth: the GP corrects the stride and the stride
+            # covariance, and the corrected stride then propagates the absolute
+            # state. No measurement update touches Σ here, so the GP can no
+            # longer credit the filter with absolute information it never
+            # received. notes/013 §1.4-1.6.
+            predicted = predict_stride_error(corrector;
+                feature_type=feature_type, feature=feature, Σ_feature=Σ_feature,
+                include_noise=true)
 
+            if isnothing(predicted)
+                dynamic_update!(corrector;
+                    t=inertial.t[curr_step], Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride)
+            else
+                pred, Σ_pred = predicted
+                Δp_corr, Δq_corr, Σ_corr = correct_stride(;
+                    q_prev=q_prev, Δp=Δp_stride, Δq=Δq_stride, Σpq=Σ_stride,
+                    s_l=ins_stride, pred=pred, Σ_pred=Σ_pred, R_aug_wl=R_aug_wl,
+                    mask=corrector.correction_mask)
+
+                dynamic_update!(corrector;
+                    t=inertial.t[curr_step], Δp=Δp_corr, Δq=Δq_corr, Σpq=Σ_corr)
+
+                append_io!(io_data["prediction"], inertial.t[prev_step], pred, sqrt.(diag(Σ_pred)))
+            end
         end
         relinearize!(corrector)
 
         # Recorded after relinearize!, so this is the posterior: the state and Σ
-        # left by whichever update this footfall took -- mocap in the train
-        # half, the GP correction in the test half.
+        # left by whichever path this footfall took -- mocap in the train half,
+        # the corrected propagation in the test half.
         isnothing(diagnostics) || record_corrector!(diagnostics, corrector;
             k=curr_step, t=inertial.t[curr_step])
     end
 
     return zupt, step_seg, get_trajectory(corrector), io_data, get_model(corrector)
 end
-

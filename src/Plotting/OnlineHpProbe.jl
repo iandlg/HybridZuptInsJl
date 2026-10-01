@@ -287,7 +287,7 @@ function _clip_marks!(ax::Axis, y::Real, lo_val::Real, hi_val::Real;
 end
 
 """
-    plot_probe_ranking(df; xlims=nothing, save_path=nothing, figsize=(940, 560))
+    plot_probe_ranking(df; xlims=nothing, save_path=nothing, log_scale=false, figsize=(940, 560))
 
 Which parameters move RMSE, by how much, and in which direction. The overview
 figure, and the one to read first.
@@ -295,7 +295,11 @@ figure, and the one to read first.
 Two boxes per parameter over the trials, both of the same quantity -- a
 **per-trial extreme** of the RMSE change (`probe_extremes_by_trial`) -- drawn on
 one row and told apart by which side of zero they fall. Rows are sorted by the
-gap between the two medians, largest at top.
+median of the **worst** side, largest at top: the parameter whose typical worst
+setting costs the most RMSE comes first, so the figure reads top-down as "how
+much does getting this one wrong cost". (The sort key is `worst_med` in
+[`probe_extremes_summary`](@ref); the earlier best-to-worst `gap` ranked a
+parameter with a large upside above one that is merely dangerous.)
 
 Nothing marks best from worst because nothing needs to: `best` is the minimum
 over probes and `worst` the maximum, and the identity probe contributes exactly
@@ -332,9 +336,10 @@ function plot_probe_ranking(df::DataFrame;
     xlims::Union{Nothing,Tuple{Float64,Float64}}=nothing,
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
+    log_scale::Bool=false,
     figsize::Tuple{Int,Int}=(750, 600))
 
-    g = probe_extremes_summary(df)          # sorted by gap, descending
+    g = probe_extremes_summary(df)          # sorted by the worst-side median, descending
     ext = probe_extremes_by_trial(df)       # the per-trial values the boxes reduce
     params = unique(g.parameter)
     n = length(params)
@@ -349,10 +354,12 @@ function plot_probe_ranking(df::DataFrame;
     end
 
     fig = Figure(size=figsize)
-    # Largest gap at the top: Makie's y increases upward.
+    # Worst worst-case at the top: Makie's y increases upward.
     ypos(i) = n - i + 1
     ax = Axis(fig[1, 1];
         xlabel=_rmse_change_label(),
+        # pseudolog10, not log10: the axis crosses zero into negative changes.
+        xscale=log_scale ? Makie.pseudolog10 : identity,
         xtickformat=_HP_PCT_TICKFORMAT,
         yticks=(1:n, [hp_param_label(params[ypos(i)]) for i in 1:n]),
         ygridvisible=false)

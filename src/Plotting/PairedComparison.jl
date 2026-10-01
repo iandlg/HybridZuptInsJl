@@ -52,6 +52,7 @@ end
         save_path::Union{String,Nothing}=nothing,
         show_outliers::Bool=true,
         show_points::Bool=false,
+        series_colors::Union{Nothing,AbstractDict}=nothing,
     )
 
 `plot_noise_paired_relative_change` with `train_ratio` on the x axis instead of the
@@ -84,6 +85,7 @@ function plot_train_ratio_paired_relative_change(
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
+    series_colors::Union{Nothing,AbstractDict}=nothing,
 )
     check_metric(metric)
     value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
@@ -116,6 +118,7 @@ function plot_train_ratio_paired_relative_change(
     hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
     labeled = _grouped_boxplot!(ax, sub, value_col;
         group_col=:train_ratio, group_order_col=:train_ratio_order,
+        series_colors=series_colors,
         show_outliers=show_outliers, show_points=show_points)
 
     # `_grouped_boxplot!` labels the groups with the raw Float64; a percentage
@@ -160,6 +163,8 @@ the zero line.
 
 # Arguments
 - `paired`: output of `paired_estimator_contrast`.
+- `series_colors`: per-series colour override, for series that are variants of a method
+  (`"HSGP (split)"`) and so miss `method_color`'s table. Unnamed series keep the table's.
 - `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
 - `metric`: only used to name the quantity in the axis label — it must be the one
   `paired_estimator_contrast` was called with, which is not checked.
@@ -204,6 +209,73 @@ function plot_dataset_paired_relative_change(
     labeled = _grouped_boxplot!(ax, paired, value_col;
         group_col=:dataset_name, group_order_col=:dataset_order,
         show_outliers=show_outliers, show_points=show_points)
+
+    if !isempty(labeled)
+        Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
+    end
+
+    if !isnothing(save_path)
+        mkpath(dirname(save_path))
+        save(save_path, fig)
+        @info "Saved figure: $save_path"
+    end
+    return fig
+end
+
+"""
+    plot_learning_curve_relative_change(paired, dataset_name; value_col=:rel_change_pct,
+        metric=:rmse, series_colors=nothing, save_path=nothing,
+        show_outliers=true, show_points=false)
+
+`plot_train_ratio_paired_relative_change` with the online mocap budget on the x axis:
+one group per number of training strides, estimators side by side within it.
+
+The difference is not cosmetic. There each group is a different evaluation window, so
+the trend across groups mixes "the model got better" with "the test got shorter"; here
+every group is scored on the same strides against a baseline re-run at that same budget
+(from `learning_curve_contrast`), so the trend across groups is the learning curve. The
+reference estimator has no box: it is the zero line.
+"""
+function plot_learning_curve_relative_change(
+    paired::DataFrame,
+    dataset_name::AbstractString;
+    value_col::Symbol=:rel_change_pct,
+    metric::Symbol=:rmse,
+    series_colors::Union{Nothing,AbstractDict}=nothing,
+    save_path::Union{String,Nothing}=nothing,
+    show_outliers::Bool=true,
+    show_points::Bool=false,
+)
+    check_metric(metric)
+    value_col in (:delta, :rel_change_pct) || throw(ArgumentError(
+        "value_col must be :delta or :rel_change_pct, got :$value_col"))
+
+    sub = paired[paired.dataset_name .== dataset_name, :]
+    isempty(sub) && error("No rows found for dataset_name = $dataset_name")
+
+    as_pct = value_col === :rel_change_pct
+    fig = Figure(size=(900, 600))
+    ax = Axis(fig[1, 1],
+        xlabel="Online training strides",
+        ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
+               rich("change in ", metric_label(metric)),
+        subtitlesize=10,
+        xticklabelsize=14,
+    )
+    as_pct && (ax.ytickformat = vs -> [string(round(v; digits=1), "%") for v in vs])
+
+    hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1)
+    labeled = _grouped_boxplot!(ax, sub, value_col;
+        group_col=:train_strides, group_order_col=:train_strides_order,
+        series_colors=series_colors,
+        show_outliers=show_outliers, show_points=show_points)
+
+    # A budget longer than a trial's pre-split prefix is skipped rather than clamped, so
+    # the wide end of the axis can rest on fewer trials than the narrow end. Say how many.
+    budget_order = Dict(r.train_strides => r.train_strides_order for r in eachrow(sub))
+    budgets = sort(unique(sub.train_strides), by=b -> budget_order[b])
+    n_trials = Dict(b => length(unique(sub[sub.train_strides .== b, :trial_id])) for b in budgets)
+    ax.xticks = (1:length(budgets), ["$b\n(n=$(n_trials[b]))" for b in budgets])
 
     if !isempty(labeled)
         Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
