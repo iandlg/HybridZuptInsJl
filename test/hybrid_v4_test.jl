@@ -7,7 +7,7 @@ include("../src/HybridZuptInsJl.jl")
 using .HybridZuptInsJl
 include("../scripts/5Results/_common.jl")
 include("mock_trials.jl")
-using Test, OrderedCollections, DataFrames, LinearAlgebra
+using Test, OrderedCollections, DataFrames, LinearAlgebra, Statistics
 
 const H = HybridZuptInsJl
 const SECONDS = 40
@@ -57,6 +57,36 @@ end
                for (j, name) in enumerate(H._OUTPUT_NAMES)]
         @test H.stride_noise_std(hsgp_p) ≈ σ_n
         @test corrector(:static).σ_w == corrector(:hsgp).σ_w == H.stride_noise_std(hsgp_p)
+    end
+
+    @testset "BaseEstimator stride noise" begin
+        σ = H.sigma_stride_array(H.InsConfig())
+        ψ = 0.7
+        q0 = H.quat_exp([0.0, 0.0, ψ])
+        step(c; kw...) = H.propagate_stride!(c; t=1.0, Δp=[0.7, 0.0, 0.0], Δq=H.quat_exp([0.0, 0.0, 0.05]),
+            Σpq=zeros(6, 6), kw...)
+
+        c = H.BaseEstimator(ALLOC)
+        H.initialize_corrector!(c; t=0.0, pos_init=zeros(3), quat_init=q0, Σpq_init=zeros(6, 6))
+        step(c; σ_stride=σ)
+        R_ψ = H.euler_to_matrix([0.0, 0.0, ψ])
+        @test c.Σ[6, 6] ≈ σ[4]^2
+        @test c.Σ[1:3, 1:3] ≈ R_ψ * Diagonal(σ[1:3] .^ 2) * R_ψ'
+        @test all(iszero, c.Σ[1:3, 4:6])
+
+        c = H.BaseEstimator(ALLOC)
+        H.initialize_corrector!(c; t=0.0, pos_init=zeros(3), quat_init=q0, Σpq_init=zeros(6, 6))
+        @test_throws UndefKeywordError step(c)
+
+        # With the noise, ZUPT only follows the mocap yaw in the train phase instead of
+        # trusting its own heading over it (notes/022).
+        res = aligned["ANG2"][1]
+        k0 = floor(Int, 0.5 * length(res.inertial_updated))
+        d = H.CorrectorDiagnostics()
+        run_v4(res, H.BaseEstimator(ALLOC); train_ratio=0.5, diagnostics=d)
+        gt = res.gt_traj_aligned[d.k]
+        eψ = [abs(H.rotmat_to_rotvec(gt.R_nb[:, :, i] * H.quat_to_matrix(d.quat[i])')[3]) for i in 1:length(d)]
+        @test median(eψ[d.k .<= k0]) <= 5e-3
     end
 
     # A real stride feature, from the INS of the first mock trial.
@@ -176,6 +206,24 @@ end
         paired = H.paired_estimator_contrast(df; metric=:rmse, reference_estimator="ZUPT only",
             train_ratios=train_ratios)
         @test nrow(paired) == count(df.estimator .!= "ZUPT only")
+    end
+
+    @testset "run_online_nees_sweep" begin
+        train_ratios = [0.3, 0.6]
+        ff = H.run_online_nees_sweep(aligned, FRAME, FEATURE_TYPE, hsgp_p, train_ratios,
+            estimators, CHANNELS;
+            estimator_alloc=ALLOC,
+            correction_filter=CORRECTION_FILTERS["V4"])
+        @test all(isfinite, ff.nees_pos) && all(isfinite, ff.nees_yaw)
+        for r in eachrow(ff)
+            cutoff = floor(Int, r.train_ratio * length(aligned[r.dataset_name][r.trial_id].inertial_updated))
+            @test (r.phase == "train") == (r.k <= cutoff)
+        end
+
+        s = H.nees_summary(ff)
+        @test nrow(s) == n_trials * length(train_ratios) * length(estimators) * 2
+        @test all(0 .<= s.inside_pos .<= 1) && all(0 .<= s.inside_yaw .<= 1)
+        @test sum(s.n) == nrow(ff)
     end
 
     @testset "run_online_learning_curve" begin

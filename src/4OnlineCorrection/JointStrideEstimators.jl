@@ -158,7 +158,7 @@ For a plain `AbstractEstimator` this is the uncorrected `dynamic_update!`.
 """
 function propagate_stride!(c::AbstractEstimator; t::Float64, Δp::AbstractVector{Float64},
     Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
-    dynamic_update!(c; t=t, Δp=Δp, Δq=Δq, Σpq=Σpq)
+    dynamic_update!(c; t=t, Δp=Δp, Δq=Δq, Σpq=Σpq, kwargs...)
     return nothing
 end
 

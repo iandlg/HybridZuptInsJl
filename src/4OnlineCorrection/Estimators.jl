@@ -238,7 +238,11 @@ function initialize_corrector!(c::BaseEstimator; t::Float64, pos_init::AbstractV
     c.i = 1
 end
 
-function dynamic_update!(c::BaseEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64}, kwargs...)
+"""`σ_stride` is the per-stride process noise (`InsConfig.sigma_stride`), added in the
+stride's heading frame on top of the INS's own `Σpq`, which alone under-states the
+per-stride heading error (notes/022)."""
+function dynamic_update!(c::BaseEstimator; t::Float64, Δp::AbstractVector{Float64}, Δq::AbstractVector{Float64}, Σpq::AbstractMatrix{Float64},
+    σ_stride::AbstractVector{Float64}, kwargs...)
     c.i += 1
     c.t[c.i] = t
 
@@ -260,6 +264,10 @@ function dynamic_update!(c::BaseEstimator; t::Float64, Δp::AbstractVector{Float
     # Covariance update
     c.δx[:, c.i] .= 0.0
     c.Σ .= c.F * c.Σ * c.F' + c.G * Σpq * c.G'
+
+    R_ψ = stride_local(HEADING; R_wb=R_prev, ΔpΔθ3=zeros(4))[3][1:3, 1:3]
+    B = [R_ψ zeros(3); zeros(3, 3) [0.0, 0.0, 1.0]]
+    c.Σ .+= B * Diagonal(σ_stride .^ 2) * B'
 end
 
 function posyaw_measurement_update!(c::BaseEstimator; curr_pos::AbstractVector{Float64}, curr_θ3::Float64, Σy::AbstractMatrix{Float64}, kwargs...)

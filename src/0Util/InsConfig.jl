@@ -77,6 +77,11 @@ mutable struct InsConfig
     calibration_distance_m::Float64
     # Hybrid
     sigma_groundtruth::NTuple{4,Float64}
+    # Per-stride process noise of the ZUPT-only baseline (`BaseEstimator`): pos x/y/z [m],
+    # yaw [rad], in the stride's heading frame. Hand-set, of the order of key 42's σ_n
+    # (0.061 m, 0.017 rad) but deliberately not read from any hyperparameter set, so the
+    # baseline does not move with the HSGP key (notes/022).
+    sigma_stride::NTuple{4,Float64}
 end
 
 function InsConfig(;
@@ -98,7 +103,8 @@ function InsConfig(;
     g=nothing,
     segmentation_thrsld=0.1e-3,
     calibration_distance_m=1.55,
-    sigma_groundtruth=(1e-2, 1e-2, 1e-2, 1e-3)
+    sigma_groundtruth=(1e-2, 1e-2, 1e-2, 1e-3),
+    sigma_stride=(0.05, 0.05, 0.05, 0.02)
 )
     g_val = isnothing(g) ? compute_gravity(latitude, altitude) : Float64(g)
 
@@ -107,7 +113,8 @@ function InsConfig(;
         sigma_a, sigma_g, window_size, gamma,
         sigma_acc, sigma_gyro, sigma_vel,
         sigma_initial_pos, sigma_initial_vel, sigma_initial_att,
-        g_val, segmentation_thrsld, calibration_distance_m, sigma_groundtruth
+        g_val, segmentation_thrsld, calibration_distance_m, sigma_groundtruth,
+        sigma_stride
     )
 end
 
@@ -122,3 +129,4 @@ sigma_initial_pos_array(cfg::InsConfig) = collect(cfg.sigma_initial_pos)
 sigma_initial_vel_array(cfg::InsConfig) = collect(cfg.sigma_initial_vel)
 sigma_initial_att_array(cfg::InsConfig) = collect(cfg.sigma_initial_att)
 sigma_groundtruth_array(cfg::InsConfig) = collect(cfg.sigma_groundtruth)
+sigma_stride_array(cfg::InsConfig) = collect(cfg.sigma_stride)

@@ -232,3 +232,53 @@ function plot_zupt_starvation(
     isnothing(save_path) || save(save_path, fig)
     return fig
 end
+
+"""
+    plot_nees_train_ratio(summary, dataset_name; phase="test", show_points, save_path)
+
+Consistency over the train-ratio sweep, from `nees_summary`: one box per corrector per
+train ratio, one point per trial. Columns are position (χ²(3)) and yaw (χ²(1)); the top
+row is the ANEES on a log axis against its dof (dashed) and the per-sample 95% envelope
+(grey), the bottom row the fraction of footfalls inside that envelope against 0.95.
+"""
+function plot_nees_train_ratio(
+    summary::DataFrame,
+    dataset_name::AbstractString;
+    phase::AbstractString="test",
+    show_points::Bool=true,
+    save_path::Union{String,Nothing}=nothing,
+)
+    sub = summary[(summary.dataset_name .== dataset_name) .& (summary.phase .== phase), :]
+    isempty(sub) && error("No $phase rows for dataset_name = $dataset_name")
+
+    fig = Figure(size=(1200, 800))
+    Label(fig[0, 1:2], "NEES consistency, $dataset_name, $phase phase"; fontsize=17, font=:bold)
+    legend_ax = nothing
+    for (col, (block, dof, name)) in enumerate(((:pos, 3, "Position"), (:yaw, 1, "Yaw")))
+        lo, hi = quantile(Chisq(dof), 0.025), quantile(Chisq(dof), 0.975)
+
+        ax_n = Axis(fig[1, col]; title="$name (χ²($dof))", ylabel="ANEES", yscale=log10,
+            xlabel="Ground truth available online")
+        hspan!(ax_n, lo, hi; color=(:gray, 0.2))
+        hlines!(ax_n, [dof]; color=:black, linestyle=:dash, linewidth=1)
+        col == 1 && (legend_ax = ax_n)
+        _grouped_boxplot!(ax_n, sub, Symbol("anees_", block);
+            group_col=:train_ratio, group_order_col=:train_ratio_order, show_points=show_points)
+
+        ax_r = Axis(fig[2, col]; ylabel="inside 95% envelope", limits=(nothing, (0, 1.05)),
+            xlabel="Ground truth available online")
+        hlines!(ax_r, [0.95]; color=:black, linestyle=:dash, linewidth=1)
+        _grouped_boxplot!(ax_r, sub, Symbol("inside_", block);
+            group_col=:train_ratio, group_order_col=:train_ratio_order, show_points=show_points)
+
+        ratio_order = Dict(r.train_ratio => r.train_ratio_order for r in eachrow(sub))
+        ratios = sort(unique(sub.train_ratio), by=r -> ratio_order[r])
+        for ax in (ax_n, ax_r)
+            ax.xticks = (1:length(ratios), ["$(round(Int, 100r))%" for r in ratios])
+        end
+    end
+    Legend(fig[3, 1:2], legend_ax; orientation=:horizontal, tellwidth=false)
+
+    isnothing(save_path) || save(save_path, fig)
+    return fig
+end

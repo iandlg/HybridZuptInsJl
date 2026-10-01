@@ -47,10 +47,11 @@ sigma_groundtruth = (
 posyaw_measurement_update=true
 
 # Filter used for all three runs, with its correctors (see CORRECTION_FILTERS /
-# CORRECTORS in scripts/5Results/_common.jl). "ZUPT only" runs through the SAME
-# filter: it has no learned model, but the filter still sets where the corrector
-# starts (on the mocap pose when ground truth is available at k=1) and how the
-# mocap fixes are weighted.
+# CORRECTORS in scripts/5Results/_common.jl). "ZUPT only" is `BaseEstimator`, the
+# 5Results baseline, run through the SAME filter: it has no learned model, but the
+# filter still sets where the corrector starts (on the mocap pose when ground truth is
+# available at k=1) and how the mocap fixes are weighted. Its per-stride process noise
+# is `sim_config_updated.sigma_stride` (notes/022), not the HSGP σ_n.
 filter_tag = "V4"
 corr_filter = CORRECTION_FILTERS[filter_tag]
 
@@ -83,7 +84,7 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 # Run online correction
 io_data = OrderedDict()
 
-default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[])
+default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME,
@@ -205,7 +206,7 @@ pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
 
 io_data = OrderedDict()
 
-default_corr = CORRECTORS[filter_tag].static(round(Int, N / 60); params=hsgp_p, corrected_channels=Symbol[])
+default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)

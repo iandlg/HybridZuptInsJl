@@ -645,6 +645,85 @@ function run_online_correction_sweep(
     return df
 end
 
+"""
+    run_online_nees_sweep(aligned, frame, feature_type, hsgp_params, train_ratios,
+        estimators, output_channels; estimator_alloc, correction_filter) -> DataFrame
+
+`run_online_correction_sweep`'s design (same `gt_available`, clean ground truth), scored
+on consistency instead of error: per footfall, the position NEES (3 dof) and yaw NEES
+(1 dof) of the corrector's own state and `Σ` against ground truth. One row per footfall,
+`phase` is `"train"` while mocap is available at that footfall and `"test"` after.
+"""
+function run_online_nees_sweep(
+    aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
+    frame::ReferenceFrame,
+    feature_type::FeatureType,
+    hsgp_params::HsgpParameters,
+    train_ratios::AbstractVector{<:Real},
+    estimators::AbstractDict{<:AbstractString,<:Type},
+    output_channels::Vector{Symbol};
+    estimator_alloc::Int=300,
+    correction_filter::Function=hybrid_zupt_aided_insv4,
+)::DataFrame
+    df = DataFrame(dataset_name=String[], dataset_order=Int[], trial_id=Int[],
+        train_ratio=Float64[], train_ratio_order=Int[],
+        estimator=String[], estimator_order=Int[],
+        k=Int[], phase=String[], nees_pos=Float64[], nees_yaw=Float64[])
+
+    for (dataset_order, (dataset_name, trials)) in enumerate(aligned)
+        for (trial_id, res) in trials
+            N = length(res.inertial_updated)
+            for (train_ratio_order, train_ratio) in enumerate(train_ratios)
+                n_train_cutoff = floor(Int, train_ratio * N)
+                gt_available = [n <= n_train_cutoff for n in 1:N]
+
+                for (estimator_order, (est_name, est_type)) in enumerate(estimators)
+                    try
+                        estimator = est_type(estimator_alloc;
+                            params=hsgp_params, corrected_channels=output_channels)
+                        d = CorrectorDiagnostics()
+                        correction_filter(res.inertial_updated, res.sim_config_updated,
+                            res.gt_traj_aligned, estimator;
+                            x_init=res.x_init, gt_available=gt_available,
+                            ref_frame=frame, feature_type=feature_type, diagnostics=d)
+
+                        npos = corrector_nees_series(d, res.gt_traj_aligned).pos
+                        nyaw = nees_yaw_series(d, res.gt_traj_aligned).yaw
+                        for (i, k) in enumerate(d.k)
+                            push!(df, (dataset_name, dataset_order, trial_id,
+                                train_ratio, train_ratio_order, est_name, estimator_order,
+                                k, k <= n_train_cutoff ? "train" : "test", npos[i], nyaw[i]))
+                        end
+                    catch e
+                        @warn "Skipping (dataset_name=$dataset_name, trial=$trial_id, train_ratio=$train_ratio, estimator=$est_name)" exception = e
+                    end
+                end
+            end
+        end
+    end
+    return df
+end
+
+"""
+    nees_summary(df) -> DataFrame
+
+Per run and phase of a `run_online_nees_sweep` frame: footfall count, ANEES (mean),
+median NEES, and the fraction of footfalls inside the per-sample 95% χ² envelope, for
+position (3 dof) and yaw (1 dof).
+"""
+function nees_summary(df::DataFrame)::DataFrame
+    inside(v, dof) = consistency_ratio(v, quantile(Chisq(dof), 0.025), quantile(Chisq(dof), 0.975))
+    return combine(groupby(df, [:dataset_name, :dataset_order, :trial_id, :train_ratio,
+            :train_ratio_order, :estimator, :estimator_order, :phase]),
+        nrow => :n,
+        :nees_pos => mean => :anees_pos,
+        :nees_pos => median => :median_nees_pos,
+        :nees_pos => (v -> inside(v, 3)) => :inside_pos,
+        :nees_yaw => mean => :anees_yaw,
+        :nees_yaw => median => :median_nees_yaw,
+        :nees_yaw => (v -> inside(v, 1)) => :inside_yaw)
+end
+
 # ── Paired comparison of a noise sweep ────────────────────────────────────
 #
 # A noise sweep runs the SAME trials through every estimator, which makes the
