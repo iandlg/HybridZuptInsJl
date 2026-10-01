@@ -10,8 +10,7 @@
 # It is plot-only. Nothing here re-runs a sweep; to add a panel, run the sibling script
 # with that noise spec and add the CSV it writes to `panel_csvs` below.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
@@ -95,7 +94,7 @@ TEST_ID = haskey(ENV, "TEST_ID") ? parse(Int, ENV["TEST_ID"]) : only(unique(df.t
 
 test_name = first(df[df.test_id .== TEST_ID, :test_name])
 results_figure() do
-    HybridZuptInsJl.plot_multi_track_training_noise_panels(
+    StrideGP.plot_multi_track_training_noise_panels(
         df, TEST_ID;
         metric=METRIC,
         save_path=stamped(SECTION,

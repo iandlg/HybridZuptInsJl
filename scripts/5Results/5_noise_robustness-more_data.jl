@@ -6,8 +6,7 @@
 # (dashed line in the figure). Noise is applied to the training tracks only; the test
 # tracks' GT stays clean.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
@@ -30,7 +29,7 @@ estimators = OrderedDict(
 # `BaseEstimator` through `correction_filter`, so it is whichever filter `filter_tag`
 # selects. Assert the pairing rather than trusting the tag to have been edited in step
 # with the correctors.
-@assert CORRECTION_FILTERS[filter_tag] === HybridZuptInsJl.hybrid_zupt_aided_insv4
+@assert CORRECTION_FILTERS[filter_tag] === StrideGP.hybrid_zupt_aided_insv4
 @assert estimators["Static"] === CORRECTORS[filter_tag].static
 @assert estimators["HSGP"] === CORRECTORS[filter_tag].hsgp
 # NOTE: the order of these entries no longer matters -- it defines the *set* of training
@@ -75,13 +74,13 @@ params, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=200)
 # the ones used.
 use_hand_tuned = false
 if use_hand_tuned
-    new_hp = HybridZuptInsJl.SeHyperparams(
+    new_hp = StrideGP.SeHyperparams(
         [5e-1, 2.0, 0.09],
         [5e-1, 2.0, 0.09],
         [5e-1, 2.0, 0.09],
         [0.146, 30.0, 127.0]
     )
-    params = HybridZuptInsJl.basecopy(params; new_hp=new_hp)
+    params = StrideGP.basecopy(params; new_hp=new_hp)
 end
 
 # Set to the path of a CSV written by an earlier run to re-plot it and skip the sweep
@@ -102,10 +101,10 @@ SEEDS = collect(1:N_REPEATS)
 test_tr_ratio = 0.0
 
 noise_specs = OrderedDict(
-    "no_noise" => HybridZuptInsJl.NoiseSpec(; tag="No Noise"),
-    "pos0.1_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
+    "no_noise" => StrideGP.NoiseSpec(; tag="No Noise"),
+    "pos0.1_att10" => StrideGP.NoiseSpec(; pos_std=0.1, att_std=10*pi/180,
         tag="Position & Heading Noise (0.1m, ±10°)"),
-    "pos1.0_att10" => HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
+    "pos1.0_att10" => StrideGP.NoiseSpec(; pos_std=1.0, att_std=10*pi/180,
         tag="Position & Heading Noise (1.m, ±10°)"),
 )
 
@@ -175,7 +174,7 @@ if isnothing(replot_csv)
     for (noise_label, noise) in noise_specs
         @info "##### Noise spec $(noise_label): $(noise.tag) #####"
 
-        df_spec = HybridZuptInsJl.multi_track_training_analysis(
+        df_spec = StrideGP.multi_track_training_analysis(
             data_dir_path, estimators, train_labels, test_labels, params;
             frame=FRAME, feature_type=FEATURE_TYPE, corrected_channels=output_channels,
             noise_spec=noise,
@@ -198,7 +197,7 @@ if isnothing(replot_csv)
         # the same timestamp. Two calls gave them timestamps milliseconds apart.
         fig_path = stamped(SECTION, "multi_track_training_$(filter_tag)_process_only_matchedR_key$(hsgp_p_key)_$(data_key)_testgt$(test_tr_ratio)_$(noise_label)")
         results_figure() do
-            HybridZuptInsJl.plot_multi_track_training_quality(
+            StrideGP.plot_multi_track_training_quality(
                 df_spec;
                 metric=METRIC,
                 save_path=fig_path,
@@ -223,7 +222,7 @@ else
     # is what you want while iterating on the styling.
     fig_path = results_path(SECTION, replace(basename(replot_csv), r"\.csv$" => ".pdf"))
     results_figure() do
-        HybridZuptInsJl.plot_multi_track_training_quality(
+        StrideGP.plot_multi_track_training_quality(
             df_results; metric=METRIC, save_path=fig_path)
     end
     @info "Wrote $fig_path"
@@ -244,7 +243,7 @@ if save_hand_tuned_params && use_hand_tuned
         string(FRAME) * "-" * string(FEATURE_TYPE))
     mkpath(combo_dir)
     filename = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(Dates.now()).json"
-    HybridZuptInsJl.to_json(joinpath(combo_dir, filename), params;
+    StrideGP.to_json(joinpath(combo_dir, filename), params;
         metadata=Dict(
             "data_key" => data_key,
             "ref_frame" => FRAME,

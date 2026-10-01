@@ -1,16 +1,15 @@
-include("../src/HybridZuptInsJl.jl")
-using .HybridZuptInsJl
+using StrideGP
 using LinearAlgebra, Test
 
 # ── helpers exposed from the module ────────────────────────────────────────
-const IQ = HybridZuptInsJl.integrate_quaternion
-const NE = HybridZuptInsJl.navigation_equations
-const SM = HybridZuptInsJl.state_matrix
-const CI = HybridZuptInsJl.comp_internal_states
-const QM = HybridZuptInsJl.quat_to_matrix
-const MQ = HybridZuptInsJl.matrix_to_quat
-const ME = HybridZuptInsJl.matrix_to_euler
-const EM = HybridZuptInsJl.euler_to_matrix
+const IQ = StrideGP.integrate_quaternion
+const NE = StrideGP.navigation_equations
+const SM = StrideGP.state_matrix
+const CI = StrideGP.comp_internal_states
+const QM = StrideGP.quat_to_matrix
+const MQ = StrideGP.matrix_to_quat
+const ME = StrideGP.matrix_to_euler
+const EM = StrideGP.euler_to_matrix
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1.  integrate_quaternion
@@ -182,8 +181,11 @@ end
         @test F[4:6, 7:9] ≈ expected atol = 1e-10
     end
 
-    @testset "F att-att block = I (first-order Euler approx)" begin
-        @test F[7:9, 7:9] ≈ I(3) atol = 1e-12
+    @testset "F att-att block = R'{ω Ts}  (exact rotation)" begin
+        # w is a pure z-rate, so R{ω Ts} is a z-rotation by θ = w[3]*Ts
+        θ = w[3] * Ts
+        Rz = [cos(θ) -sin(θ) 0; sin(θ) cos(θ) 0; 0 0 1]
+        @test F[7:9, 7:9] ≈ Rz' atol = 1e-12
     end
 
     @testset "G vel block = R*Ts  (accel noise → velocity)" begin

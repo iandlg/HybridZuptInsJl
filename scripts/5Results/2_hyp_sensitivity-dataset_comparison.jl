@@ -4,8 +4,7 @@
 # Design: one frozen hyperparameter set, applied to both datasets, 9 + 10 trials,
 # train_ratio = 0.5, no injected noise. Varied: dataset x estimator.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames
 import CSV
@@ -27,7 +26,7 @@ const DATA_SECTION = "$(SECTION)/data"
 results_csv = "results_V4_process_only_key42_2026-09-24T10:08:09.457.csv"
 
 # 2. Align INS / GT trajectories for every trial (skipped when re-plotting from CSV)
-aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(data_dict) : nothing
+aligned = isnothing(results_csv) ? StrideGP.collect_aligned_trajectories(data_dict) : nothing
 
 ## 3. Hyperparameters (trained on ANG2 -- that is the point of this figure)
 m = 200
@@ -40,7 +39,7 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 filter_tag = "V4"
 
 estimators = OrderedDict(
-    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "ZUPT only" => StrideGP.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
@@ -56,7 +55,7 @@ score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_rat
     :rmse, :rmse_rate, :rmse_yaw]
 
 if isnothing(results_csv)
-    results_df = HybridZuptInsJl.run_online_correction_sweep(
+    results_df = StrideGP.run_online_correction_sweep(
         aligned,
         FRAME,
         FEATURE_TYPE,
@@ -88,15 +87,15 @@ count_wins(paired) = combine(groupby(paired, [:dataset_name, :estimator]; sort=f
 
 # Trials on which HSGP beats Static on the same trial, per dataset.
 hsgp_wins_over_static(metric) = count_wins(filter(:estimator => ==("HSGP"),
-    HybridZuptInsJl.paired_estimator_contrast(results_df; metric=metric, reference_estimator="Static")))
+    StrideGP.paired_estimator_contrast(results_df; metric=metric, reference_estimator="Static")))
 
-paired = HybridZuptInsJl.paired_estimator_contrast(
+paired = StrideGP.paired_estimator_contrast(
     results_df; metric=:rmse, reference_estimator="ZUPT only")
 println("Wins over ZUPT only (rmse):\n", count_wins(paired))
 println("HSGP wins over Static (rmse):\n", hsgp_wins_over_static(:rmse))
 
 results_figure() do
-    HybridZuptInsJl.plot_dataset_paired_relative_change(
+    StrideGP.plot_dataset_paired_relative_change(
         paired;
         metric=:rmse,
         show_points=false,
@@ -105,13 +104,13 @@ results_figure() do
     )
 end
 
-paired = HybridZuptInsJl.paired_estimator_contrast(
+paired = StrideGP.paired_estimator_contrast(
     results_df; metric=:rmse_yaw, reference_estimator="ZUPT only")
 println("Wins over ZUPT only (rmse_yaw):\n", count_wins(paired))
 println("HSGP wins over Static (rmse_yaw):\n", hsgp_wins_over_static(:rmse_yaw))
 
 results_figure() do
-    HybridZuptInsJl.plot_dataset_paired_relative_change(
+    StrideGP.plot_dataset_paired_relative_change(
         paired;
         metric=:rmse_yaw,
         show_points=false,

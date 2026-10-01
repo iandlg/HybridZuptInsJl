@@ -1,19 +1,10 @@
-# Shared preamble for the scripts/5Results/ figure generators.
+# Shared preamble for the scripts/5Results/ figure generators: dataset paths, trial-id
+# lists, hyperparameter paths, output helpers and the figure theme. Load it with
 #
-# Every script here used to carry its own copy of the dataset dict, the
-# hyperparameter-path dict, the trial-id lists and its own save/mkpath/theme
-# incantation. That duplication is not cosmetic: it is how
-# 3_yaw_channel-correlation_analysis.jl ended up running the DCSC trial list
-# against the ANG2 dataset, how two scripts silently wrote no figure at all,
-# and how the same experiment ended up under two different output roots.
-#
-# Include this after the module include, e.g.
-#
-#     include("../../src/HybridZuptInsJl.jl")
-#     using .HybridZuptInsJl
+#     using StrideGP
 #     include("_common.jl")
 #
-# Run from the repository root.
+# and run from the repository root.
 
 import CairoMakie, Dates
 
@@ -94,10 +85,10 @@ stored.
 function load_hsgp_params(key::Int; m::Int=200)
     path = HSGP_PARAM_PATHS[key]
     isfile(path) || error("hyperparameter file for key $key not found: $path")
-    params, meta, _ = HybridZuptInsJl.from_json(HybridZuptInsJl.HsgpParameters, path)
-    params = HybridZuptInsJl.basecopy(params; new_m=m)
-    frame = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.ReferenceFrame, meta["ref_frame"])
-    feature = HybridZuptInsJl.string_to_enum(HybridZuptInsJl.FeatureType, meta["feature_type"])
+    params, meta, _ = StrideGP.from_json(StrideGP.HsgpParameters, path)
+    params = StrideGP.basecopy(params; new_m=m)
+    frame = StrideGP.string_to_enum(StrideGP.ReferenceFrame, meta["ref_frame"])
+    feature = StrideGP.string_to_enum(StrideGP.FeatureType, meta["feature_type"])
     return params, frame, feature, meta
 end
 
@@ -112,7 +103,7 @@ script picks it with `filter_tag` and passes `CORRECTION_FILTERS[filter_tag]` as
 `correction_filter=`.
 """
 const CORRECTION_FILTERS = Dict{String,Function}(
-    "V4" => HybridZuptInsJl.hybrid_zupt_aided_insv4,
+    "V4" => StrideGP.hybrid_zupt_aided_insv4,
 )
 
 """
@@ -120,7 +111,7 @@ The correctors the filter runs, keyed by the same tag as `CORRECTION_FILTERS`.
 Scripts build their estimator tables from `CORRECTORS[filter_tag]`.
 """
 const CORRECTORS = Dict{String,NamedTuple{(:static, :hsgp),Tuple{Type,Type}}}(
-    "V4" => (static=HybridZuptInsJl.JointStrideStaticEstimator, hsgp=HybridZuptInsJl.JointStrideHsgpEstimator),
+    "V4" => (static=StrideGP.JointStrideStaticEstimator, hsgp=StrideGP.JointStrideHsgpEstimator),
 )
 
 # ---------------------------------------------------------------------------

@@ -1,41 +1,12 @@
-### Why `cov_update=true` costs position accuracy in the single filter -- and why
-### the mocap updates in the train half do not cost the same thing.
-###
-### Three panels, over the FULL run with the train/test boundary marked:
-###   (a) the position covariance collapse            -- the cause
-###   (b) the ZUPT -> position gain being throttled   -- the mechanism
-###   (c) position error, incl. a counterfactual run  -- the cost, and the proof
-###
-### In the test half, panel (c) carries the argument. It keeps the collapsed P
-### everywhere *except* the ZUPT gain (`p_split=:downstream_only,
-### zupt_gain_source=:P_alt`); if that curve lands on `cov_update=false`, the
-### ZUPT gain is the whole mechanism and (b) is causal rather than merely
-### correlated.
-###
-### The train half answers the question that argument raises: the mocap update
-### (`HybridZuptIns.jl` ~L250-270) is *also* an absolute 4-dof update on P, and a
-### tighter one than the GP ever supplies (R_gt = sigma_groundtruth^2 = 1e-4 m²,
-### InsConfig.jl:101), so it should starve the ZUPT gain at least as hard. If it
-### does, and costs nothing, then the shrink itself is not the damage -- what
-### matters is whether anything replaces the absolute-position channel it closes.
-### Mocap does (it observes absolute position); the GP does not (it predicts a
-### stride *increment*, whose covariance is ΔP, not P).
-###
-### Two consequences of the code that the figure has to be read with:
-###   * `cov_update`, `p_split` and `correct` all gate the GP branch only, so the
-###     configurations coincide left of the boundary by construction -- §4 below
-###     asserts that as a number rather than leaving it hidden under overlapping
-###     lines;
-###   * P_alt takes the mocap update too, so the fixed-gain counterfactual can
-###     only differ from `cov_update=true` in the test half.
-###
-### NOTE ON SCOPE: this script runs ONE trial. The 14-trial evidence quoted in
-### notes/002 (paired win count 10/14, mean delta 0.283 m) is not reproduced by
-### anything in this repository -- the script that produced it no longer exists.
-### Panel (c) is a strong causal argument on this trial; the generality claim
-### needs the multi-trial loop restored.
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+### Why `cov_update=true` costs position accuracy in the V1 single filter, on one trial,
+### over the full run with the train/test boundary marked:
+###   (a) position covariance collapse, (b) throttled ZUPT -> position gain,
+###   (c) position error, incl. a counterfactual that keeps the collapsed P everywhere
+###       except the ZUPT gain (`p_split=:downstream_only, zupt_gain_source=:P_alt`).
+### If (c)'s counterfactual lands on `cov_update=false`, the ZUPT gain is the mechanism.
+### The configurations coincide in the train half by construction (they gate only the GP
+### branch); §4 asserts that. Multi-trial evidence (notes/002) is not reproduced here.
+using StrideGP
 include("_common.jl")
 using OrderedCollections, Statistics, LinearAlgebra, Printf
 
@@ -49,12 +20,12 @@ data_key = "ANG2"
 trial_id = 14
 
 ins_traj_aligned, gt_traj, zupt, segs, inertial, simdata =
-    HybridZuptInsJl.compute_aligned_ins_trajectory(data_dir(data_key), trial_id)
+    StrideGP.compute_aligned_ins_trajectory(data_dir(data_key), trial_id)
 
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
     ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
+    StrideGP.matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
 )
 
 # Ground truth is withheld after the cutoff: the mocap update runs over `train_ks`
@@ -87,7 +58,7 @@ configs = OrderedDict{String,NamedTuple}(
 # Pin each configuration to its draw-order colour from FILTER_CONFIG_COLORS. The
 # palette is positional, but the panels hold different subsets of the runs, so
 # only a name => colour map keeps one configuration the same colour throughout.
-config_colors = Dict(name => HybridZuptInsJl.FILTER_CONFIG_COLORS[i]
+config_colors = Dict(name => StrideGP.FILTER_CONFIG_COLORS[i]
                      for (i, name) in enumerate(keys(configs)))
 
 # (a)/(b) compare the two real configurations; the fixed-gain counterfactual
@@ -108,30 +79,30 @@ nees_runs = OrderedDict{String,NamedTuple}()   # NEES consistency figure
     "in 95%", "tr(P_pp)", "||K_pos||", "n_zupt")
 
 for (name, kw) in configs
-    _, _, _, _, _, _, _, _, _, diag, quat, x, P = HybridZuptInsJl.hybrid_zupt_aided_ins(
+    _, _, _, _, _, _, _, _, _, diag, quat, x, P = StrideGP.hybrid_zupt_aided_ins(
         inertial, simdata, gt_traj, params;
         gt_available=[n <= n_train_cutoff for n in 1:N], x_init=x_init,
         feature_type=FEATURE_TYPE, ref_frame=FRAME, kw...)
 
-    nees = HybridZuptInsJl.nees_series(x, P, quat, gt_traj; ks=full_ks)
+    nees = StrideGP.nees_series(x, P, quat, gt_traj; ks=full_ks)
     nees_runs[name] = nees
 
     in_gain_panels(name) &&
-        (zupt_runs[name] = HybridZuptInsJl.zupt_gain_series(diag; from_k=1))
+        (zupt_runs[name] = StrideGP.zupt_gain_series(diag; from_k=1))
     zupt_train[name] =
-        HybridZuptInsJl.zupt_gain_series(diag; from_k=1, to_k=n_train_cutoff)
+        StrideGP.zupt_gain_series(diag; from_k=1, to_k=n_train_cutoff)
 
     for (phase, ks, from_k, to_k) in
         (("train", train_ks, 1, n_train_cutoff), ("test", test_ks, k0, N))
 
-        rmse = HybridZuptInsJl.rmse_summary(x, quat, gt_traj; ks=ks)
+        rmse = StrideGP.rmse_summary(x, quat, gt_traj; ks=ks)
         nees_phase = view(nees.pos, ks)          # nees was computed over 1:N
-        zg = HybridZuptInsJl.zupt_gain_series(diag; from_k=from_k, to_k=to_k)
+        zg = StrideGP.zupt_gain_series(diag; from_k=from_k, to_k=to_k)
 
         @printf("%-46s %-6s %9.4f %9.4f %11.2f %10.2f %6.1f%% %11.3e %11.3e %7d\n",
             phase == "train" ? name : "", phase,
             rmse.pos, rmse.yaw, mean(nees_phase), median(nees_phase),
-            100 * HybridZuptInsJl.consistency_ratio(nees_phase, nees.lower, nees.upper),
+            100 * StrideGP.consistency_ratio(nees_phase, nees.lower, nees.upper),
             zg.mean_P_pos, zg.mean_K_pos, zg.n)
     end
 
@@ -168,7 +139,7 @@ const SECTION = "6_SingleFilter"
 run_label = "$data_key trial $trial_id, full run — train: mocap updates, test: GP correction"
 
 results_figure() do
-    HybridZuptInsJl.plot_zupt_starvation(
+    StrideGP.plot_zupt_starvation(
         zupt_runs; poserr=pos_errors, split_k=k0,
         colors=config_colors, dashed=[FIXED_GAIN],
         save_path=stamped(SECTION, "zupt_starvation_$(data_key)$(trial_id)"),
@@ -181,7 +152,7 @@ end
 # reduction in true error (mean NEES 1597 vs 3.2 in notes/002). Log axis because
 # the two phases live three decades apart.
 results_figure() do
-    HybridZuptInsJl.plot_nees_comparison(
+    StrideGP.plot_nees_comparison(
         nees_runs; block=:pos, yscale=log10, split_k=k0,
         colors=config_colors, dashed=[FIXED_GAIN],
         title="Position NEES, $run_label",

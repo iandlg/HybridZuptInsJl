@@ -1,27 +1,10 @@
-# Section 2 (sensitivity): how sensitive is performance to the GP
-# hyperparameters and to the input normalisation, one at a time?
-#
-# WHAT THIS DESIGN DOES AND DOES NOT SUPPORT.
-#
-# Each parameter is perturbed in the group that matches its type. Scales -- the
-# length scales, the signal variances, the input std -- get a multiplicative
-# probe over decades, which is the right orbit for a positive, unit-equivariant
-# quantity with no fixed point. Locations -- the input mean and the centering
-# offset -- get an additive probe in units of the matching input std, because a
-# multiplier on a location is sized by its own base value, cannot cross zero,
-# reverses direction on a negative base, and fixes zero. Mixing the two, which
-# is what this script used to do, made the location rows un-rankable against the
-# scale rows: their span was partly just a reading of mu/sigma.
-#
-# The sweep is repeated over several trials and each trial is scored against its
-# OWN ZUPT-only run (BaseEstimator through the same filter), so the design is
-# paired and every curve carries an across-trial band. Zero is "no better than
-# ZUPT only"; the unperturbed probe sits at the trained corrector's improvement,
-# and how far a probe moves from it is what the perturbation cost. Interactions
-# are still untested; this is still one-at-a-time.
+# Section 2 (sensitivity): one-at-a-time sensitivity of performance to the GP
+# hyperparameters and the input normalisation. Scales (length scales, signal variances,
+# input std) get a multiplicative probe, locations (input mean, centering) an additive one
+# in units of the input std. Repeated over trials, each scored against its own ZUPT-only
+# run, so curves carry an across-trial band; interactions are not tested.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 
 using JSON, CSV, DataFrames
@@ -54,7 +37,7 @@ output_channel_idxs = [1, 2, 4]
 # every output file name, and picks the correctors below (CORRECTORS).
 filter_tag = "V4"
 
-noise_spec = HybridZuptInsJl.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
+noise_spec = StrideGP.NoiseSpec() # ; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"
 
 # `pred_includes_noise` controls whether the GP `noise` hyperparameter reaches
 # the estimator at all. With the default `false`, the (since removed) DecoupledHsgpEstimator loaded
@@ -86,11 +69,11 @@ box_delta_range = (-12.0, 12.0)
 # hyperparameter kind in the first and a feature dimension in the second.
 # Normalisation parameters additionally get domain-containment shading.
 focus_params = [
-    HybridZuptInsJl.hp_param_name(:yaw, :length_scale),
-    HybridZuptInsJl.stat_param_name(:input_std, 3),
-    HybridZuptInsJl.stat_param_name(:input_center, 2),
-    HybridZuptInsJl.hp_param_name(:pos_1, :signal_variance),
-    HybridZuptInsJl.stat_param_name(:input_mean, 3),
+    StrideGP.hp_param_name(:yaw, :length_scale),
+    StrideGP.stat_param_name(:input_std, 3),
+    StrideGP.stat_param_name(:input_center, 2),
+    StrideGP.hp_param_name(:pos_1, :signal_variance),
+    StrideGP.stat_param_name(:input_mean, 3),
 ]
 
 if smoke_test
@@ -106,15 +89,15 @@ end
 include_stats_params = true
 include_output_stats = false   # output_mean is fitted to exactly 0; see make_stats_param_grid
 
-hp_specs, hp_grid = HybridZuptInsJl.make_hp_param_grid(hsgp_p.hp, output_channel_idxs;
+hp_specs, hp_grid = StrideGP.make_hp_param_grid(hsgp_p.hp, output_channel_idxs;
     log_range=log_range, n_steps=n_steps, include_noise=sweep_noise)
 
 stats_specs, stats_grid = include_stats_params ?
-                          HybridZuptInsJl.make_stats_param_grid(hsgp_p;
+                          StrideGP.make_stats_param_grid(hsgp_p;
     log_range=log_range, delta_range=delta_range, n_steps=n_steps,
     output_channel_idxs=output_channel_idxs,
     include_output_params=include_output_stats) :
-                          (HybridZuptInsJl.ParamSpec[], nothing)
+                          (StrideGP.ParamSpec[], nothing)
 
 specs = vcat(hp_specs, stats_specs)
 
@@ -124,7 +107,7 @@ specs = vcat(hp_specs, stats_specs)
 # figure.
 for spec in specs
     base_val = spec.get_current(hsgp_p)
-    probes = [HybridZuptInsJl.probe_coordinate(spec, hsgp_p, base_val, v)
+    probes = [StrideGP.probe_coordinate(spec, hsgp_p, base_val, v)
               for v in spec.value_generator(base_val)]
     identity_probe = spec.probe_kind === :multiplicative ? 1.0 : 0.0
     @assert any(isapprox.(probes, identity_probe; atol=1e-12)) "$(spec.name): probe grid misses the unperturbed point $identity_probe"
@@ -144,7 +127,7 @@ base_name = "$(filter_tag)_process_only_refBase_key$(hsgp_p_key)_$(data_key)_$(F
 run_dir = joinpath(outdir, base_name)
 mkpath(run_dir)
 ##
-make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
+make_evaluator(tid) = StrideGP.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
     m=m, output_channel_idxs=output_channel_idxs,
     hsgp_estimator_factory=CORRECTORS[filter_tag].hsgp,
@@ -155,15 +138,15 @@ make_evaluator(tid) = HybridZuptInsJl.make_rmse_evaluator(
 
 # The reference every probe is scored against: the same trial through the same
 # filter with no correction (BaseEstimator ignores the HSGP parameters).
-reference_rmse(tid) = HybridZuptInsJl.make_rmse_evaluator(
+reference_rmse(tid) = StrideGP.make_rmse_evaluator(
     data_dir_path, tid, train_ratio, FEATURE_TYPE, FRAME;
     m=m, output_channel_idxs=output_channel_idxs,
-    hsgp_estimator_factory=HybridZuptInsJl.BaseEstimator,
+    hsgp_estimator_factory=StrideGP.BaseEstimator,
     noise_spec=noise_spec,
     correction_filter=CORRECTION_FILTERS[filter_tag],
 )(hsgp_p)
 
-df = HybridZuptInsJl.sweep_over_trials(
+df = StrideGP.sweep_over_trials(
     hsgp_p, specs, make_evaluator, reference_rmse, sweep_trial_ids;
     include_baseline=true,
     checkpoint_dir=joinpath(run_dir, "trials"),
@@ -175,22 +158,22 @@ df = HybridZuptInsJl.sweep_over_trials(
 # (×0.13-×0.47 across the ANG2 trials), so a single trial's exit point would
 # misstate it. Closed-form in the normalisation statistics, so this is one
 # feature extraction per trial and no filter runs.
-box_specs, _ = HybridZuptInsJl.make_stats_param_grid(hsgp_p;
+box_specs, _ = StrideGP.make_stats_param_grid(hsgp_p;
     log_range=box_log_range, delta_range=box_delta_range, n_steps=box_n_steps,
     output_channel_idxs=output_channel_idxs, include_output_params=false)
 
-box_df = HybridZuptInsJl.box_exit_over_trials(data_dir_path, sweep_trial_ids,
+box_df = StrideGP.box_exit_over_trials(data_dir_path, sweep_trial_ids,
     hsgp_p, box_specs, FEATURE_TYPE; ref_frame=FRAME)
-exit_df = HybridZuptInsJl.box_exit_points(box_df)
+exit_df = StrideGP.box_exit_points(box_df)
 
 # LL was built from the training features with a margin, so the trained
 # parameters should place every stride inside the domain. A trial that is
 # already outside is not a reason to stop -- it is a finding (notes/009 §6) --
 # but it must be reported rather than absorbed into the figures silently.
 for tid in sweep_trial_ids
-    X = HybridZuptInsJl.raw_features(data_dir_path, tid;
+    X = StrideGP.raw_features(data_dir_path, tid;
         ref_frame=FRAME, feature_type=FEATURE_TYPE)
-    occ = HybridZuptInsJl.box_occupancy(X, hsgp_p, FEATURE_TYPE)
+    occ = StrideGP.box_occupancy(X, hsgp_p, FEATURE_TYPE)
     occ.frac_outside == 0.0 ||
         @warn "trial $tid is already outside ±LL at the trained parameters" occ.frac_outside occ.max_z_ratio
 end
@@ -210,11 +193,11 @@ CSV.write(exit_path, exit_df)
 # One row per parameter: span, worst probe, across-trial IQR and the sign test.
 # This is the table notes/009 §4 quotes, so it is generated rather than
 # recomputed by hand whenever the sweep is rerun.
-CSV.write(agree_path, HybridZuptInsJl.probe_agreement(df))
+CSV.write(agree_path, StrideGP.probe_agreement(df))
 # Box geometry behind the ranking figure, including the values that figure clips
 # at its frame -- the input std rows run to roughly +100% where the axis stops
 # near +49%, so the untruncated numbers have to live somewhere quotable.
-CSV.write(rank_path, HybridZuptInsJl.probe_extremes_summary(df))
+CSV.write(rank_path, StrideGP.probe_extremes_summary(df))
 
 metadata = Dict(
     "data_key" => meta["data_key"],
@@ -231,8 +214,8 @@ metadata = Dict(
     "smoke_test" => smoke_test,
     # One grid per family: a grid is only the panel layout for
     # plot_probe_sensitivity, which draws one row per parameter group.
-    "grid" => HybridZuptInsJl.grid_to_dict(hp_grid),
-    "stats_grid" => isnothing(stats_grid) ? nothing : HybridZuptInsJl.grid_to_dict(stats_grid),
+    "grid" => StrideGP.grid_to_dict(hp_grid),
+    "stats_grid" => isnothing(stats_grid) ? nothing : StrideGP.grid_to_dict(stats_grid),
     "timestamp" => time,
     "train_ratio" => train_ratio,
     "noise_spec_tag" => noise_spec.tag,
@@ -270,17 +253,17 @@ replot_basename = nothing
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
 # typed input either way.
 plot_name = isnothing(replot_basename) ? base_name : replot_basename
-plot_df, plot_meta = HybridZuptInsJl.load_hp_variation_results(
+plot_df, plot_meta = StrideGP.load_hp_variation_results(
     joinpath(outdir, plot_name, "$plot_name.csv"),
     joinpath(outdir, plot_name, "$plot_name.json"))
 plot_box = CSV.read(joinpath(outdir, plot_name, "$(plot_name)_box.csv"), DataFrame)
 
-grid = HybridZuptInsJl.grid_from_dict(plot_meta["grid"])
+grid = StrideGP.grid_from_dict(plot_meta["grid"])
 stats_grid_meta = get(plot_meta, "stats_grid", nothing)
 
 # GP hyperparameters: one panel per channel and kind, multiplier axis.
 results_figure() do
-    HybridZuptInsJl.plot_probe_sensitivity(plot_df, grid;
+    StrideGP.plot_probe_sensitivity(plot_df, grid;
         save_path=results_path(SECTION, "$(plot_name)_param_var.pdf"))
 end
 
@@ -289,8 +272,8 @@ end
 # and the std row stays on the multiplier axis.
 if !isnothing(stats_grid_meta)
     results_figure() do
-        HybridZuptInsJl.plot_probe_sensitivity(plot_df,
-            HybridZuptInsJl.grid_from_dict(stats_grid_meta);
+        StrideGP.plot_probe_sensitivity(plot_df,
+            StrideGP.grid_from_dict(stats_grid_meta);
             save_path=results_path(SECTION, "$(plot_name)_stats_var.pdf"))
     end
 end
@@ -309,7 +292,7 @@ end
 # mu/sigma and by c respectively, and were reported as separate findings with
 # spans differing by an order of magnitude.
 results_figure() do
-    HybridZuptInsJl.plot_box_exit(plot_df, plot_box;
+    StrideGP.plot_box_exit(plot_df, plot_box;
         save_path=results_path(SECTION, "$(plot_name)_box_exit.pdf"))
 end
 
@@ -317,7 +300,7 @@ end
 # agree. This is the one to read first. Its x limits come from the bars, not the
 # data -- see plot_probe_ranking on why the previous version was unreadable.
 results_figure() do
-    HybridZuptInsJl.plot_probe_ranking(plot_df;
+    StrideGP.plot_probe_ranking(plot_df;
         xlims=(-100.0, 50.0),
         log_scale=false,
         sides=(:worst,),
@@ -337,9 +320,9 @@ for focus_param in focus_params
         @warn "Skipping close-up: \"$focus_param\" was not swept in $plot_name"
         continue
     end
-    focus_slug = HybridZuptInsJl.param_slug(focus_param)
+    focus_slug = StrideGP.param_slug(focus_param)
     results_figure() do
-        HybridZuptInsJl.plot_param_closeup(plot_df, focus_param;
+        StrideGP.plot_param_closeup(plot_df, focus_param;
             box_df=plot_box,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"),
             _ylims=nothing)

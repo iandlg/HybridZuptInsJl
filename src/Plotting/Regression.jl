@@ -17,32 +17,12 @@ function plot_line_with_std!(ax, t, data, data_std; color, label=nothing, linewi
 end
 
 """
-    plot_regression_results(
-        pred_data::Union{Nothing,AbstractDict{String,Union{CorrectionIO, Dict}}},
-        true_data::Union{CorrectionIO, Matrix{Float64}})
+    plot_regression_results(pred_data, true_data; channels=nothing, show_std=true,
+                            ylims=nothing, save_path=nothing) -> Figure
 
-Plot regression results for yaw and position components (X, Y, Z) with RMSE annotations.
-Supports both CorrectionIO objects and traditional dictionary/matrix formats.
-
-# Arguments
-- `pred_data`: Dictionary mapping method names to CorrectionIO
-- `true_data`: CorrectionIO
-
-# Keywords
-- `channels`: which output channels to draw, as indices into the 4-row correction vector
-  (`1:3` = position, `4` = yaw). `nothing` (default) draws them all. Units and panel
-  titles follow the *original* channel index, so selecting `[4]` still labels the panel
-  yaw/radians rather than treating it as the first position component.
-- `show_std`: draw the ±1σ band around each prediction (default `true`). Worth turning off
-  when one series has a far wider predictive variance than the others, since its band
-  otherwise fills the panel and hides every line in it.
-- `ylims`: `(lo, hi)` limits for every panel. Without this a single divergent series sets
-  the scale and compresses the rest to a flat line at zero; the legend still reports each
-  series' true RMSE, so clipping costs no information as long as the caption says so.
-- `save_path`: write the figure here as well as returning it.
-
-# Returns
-- `Figure` object.
+Predicted vs target correction per channel (position X/Y/Z, yaw) with RMSE in the legend.
+`pred_data` maps method names to `CorrectionIO`. `channels` indexes the 4-row correction
+vector and keeps its original labels/units; `ylims` fixes every panel's limits.
 """
 function plot_regression_results(
     pred_data::Union{Nothing,AbstractDict{String,CorrectionIO}},
@@ -190,64 +170,19 @@ function method_color(name::AbstractString)
 end
 
 """
-    plot_regression_comparison(pred_data, true_data; kwargs...)
+    plot_regression_comparison(pred_data, true_data; kwargs...) -> Figure
 
-One channel of the GP correction, with every method's regressed output on a single panel.
+One correction channel with every method's prediction on a single panel.
 
-A sibling of [`plot_regression_results`](@ref) rather than more keywords on it: this one
-draws a single channel over a chosen part of the track, defaults its annotations off, and
-takes explicit per-series colours -- a different figure with a different job, sharing
-`plot_line_with_std!` and the segment-window logic.
-
-# Arguments
-- `pred_data`: ordered map from series name to its predicted `CorrectionIO`.
-- `true_data`: the target `CorrectionIO`. Optional, but see `segment` below.
-
-# Keywords
-- `channel`: which output channel to draw (`1:3` position, `4` yaw). Default `4`.
-- `segment`: `:test` (default), `:train` or `:full`. `:train`/`:test` need `train_ratio`.
-  The cut is placed by time across the *union* of every series' time span, because the
-  predictions only start once the model is trained -- cutting on a prediction's own span
-  would put the boundary in the wrong place.
-- `train_ratio`: the fraction passed to the filter.
-- `colors`: map from series name to colour. Names not present fall back to
-  [`method_color`](@ref).
-- `linestyles` / `linewidths`: maps from series name to `:solid`/`:dash`/`:dot` and to a
-  line width. Colour alone cannot separate two series that lie on top of each other, which
-  is exactly what happens when several settings of one estimator all collapse to nearly
-  the same output; linestyle can, and survives greyscale printing besides. Use them to say
-  which series is the real setting and which are perturbations of it.
-- `labels`: map from series name to the label to show in the legend. Values may be
-  `rich` text, which is how a series gets a real superscript (`×10¹`) rather than a
-  typed-out `10^+1`. Names not present fall back to the series name itself.
-- `time_window`: `(t_first, t_last)` in seconds, applied on top of `segment`, for zooming
-  in. It filters the data rather than only setting `xlims`, so `clip_quantile` scales to
-  what is actually in view.
-- `dataset` / `trial_id`: named in the subtitle, so a figure lifted out of the output
-  directory still says which walk it came from.
-- `show_std`: draw the ±1σ predictive band (default `false`).
-- `show_rmse` / `show_mean_std`: append the RMSE against the target, and the mean
-  predictive std, to each legend label. Both default `false` -- with four series and long
-  hyperparameter names the legend is otherwise unreadable, and this figure is about the
-  *shape* of the correction, with the numbers reported elsewhere.
-- `clip_quantile`: sets the y-axis from the *target* rather than from the drawn values.
-  Below 1 it is a quantile: `0.95` gives the target's central 95%. At and above 1 it is a
-  margin on the target's full range: `1.0` is exactly that range, `1.1` adds 10% (5% each
-  side), `1.5` half again. The two regimes meet continuously at 1, and the value alone
-  fixes the window -- there is no hidden padding on top of it.
-
-  Scaling to the target rather than to the drawn values is what makes this usable: a
-  divergent series contributes most of the spread, so pooling everything leaves the
-  y-range set by the very series you wanted to stop dominating the figure. The target is
-  the quantity the corrections are trying to reproduce, so its own range is the scale at
-  which they should be compared. Falls back to the predictions when there is no
-  `true_data`. `nothing` (default) autoscales. Clipping crops the view only; it never
-  changes a reported number.
-- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
-  when the document's own caption carries the same information.
-
-# Returns
-- A `Figure` object (Makie figure).
+- `channel`: `1:3` position, `4` yaw (default).
+- `segment`: `:test` (default), `:train` or `:full`, cut by time over the union of all
+  series (needs `train_ratio`); `time_window` zooms further.
+- `colors`, `linestyles`, `linewidths`, `labels`: per-series maps; missing names fall back
+  to [`method_color`](@ref) / the series name.
+- `show_std`, `show_rmse`, `show_mean_std`: bands and legend annotations (all off).
+- `clip_quantile`: y-limits from the target (predictions if no `true_data`): below 1 a
+  central quantile, from 1 up a margin on its full range (`1.1` = +10%). View only.
+- `dataset`/`trial_id`: named in the subtitle.
 """
 function plot_regression_comparison(
     pred_data::AbstractDict{String,CorrectionIO},
@@ -318,8 +253,6 @@ function plot_regression_comparison(
     ax = Axis(fig[1, 1];
         xlabel="Time [s]",
         ylabel=channel == 4 ? "Δθ [rad]" : "Δpos [m]",
-        # title=isnothing(title) ? "$(_OUTPUT_NAMES[channel]) correction — $(seg_name) segment" : title,
-        # subtitle=(show_subtitle && !isempty(provenance)) ? join(provenance, " · ") : "",
         subtitlesize=11,
         xgridvisible=true,
         ygridvisible=true)
@@ -431,16 +364,9 @@ end
 """
     plot_regression_panels(pred_data, true_data; show_std=true, save_path=nothing)
 
-Regression outputs on three stacked panels — stride Δx, Δy and heading Δθ — each line with
-its ±1σ band, and one shared legend below the panels instead of one per axis.
-
-Target is grey, `"Static"` wong yellow and `"HSGP"` wong green; any other series name falls
-back to [`method_color`](@ref). Per-panel RMSE against the target goes in the panel title,
-which is where it has to live once there is a single legend.
-
-Each panel is scaled to the plotted lines -- target and predictions, plus 10% padding --
-rather than to the ±1σ bands around them; the heading panel uses their central 98% instead,
-cropping its outlier spikes.
+Stride Δx, Δy and Δθ on three stacked panels with ±1σ bands, one shared legend and
+per-panel RMSE in the titles. Colours key on `"Static"`/`"HSGP"` (others fall back to
+[`method_color`](@ref)).
 """
 function plot_regression_panels(
     pred_data::AbstractDict{String,CorrectionIO},
@@ -459,7 +385,6 @@ function plot_regression_panels(
         last_panel = idx == length(_REGRESSION_PANELS)
 
         ax = Axis(fig[idx, 1];
-            # title=name,
             ylabel=ylabel,
             xlabel=last_panel ? "Time [s]" : "",
             xgridvisible=true,

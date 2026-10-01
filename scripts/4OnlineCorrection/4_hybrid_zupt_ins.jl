@@ -1,5 +1,4 @@
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("../5Results/_common.jl")
 using GLMakie, OrderedCollections, Printf
 
@@ -11,20 +10,13 @@ m = 200
 hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 use_hand_tuned = false
 if use_hand_tuned
-    new_hp = HybridZuptInsJl.SeHyperparams(
+    new_hp = StrideGP.SeHyperparams(
         [0.06063349111094665, 1.9009449161575966, 0.06392436373774413],
         [0.06063340044438242, 1.755542511682359, 0.09133912436420788],
         [0.06063313723928771, 1.4138158563148968, 0.018763841300751767],
         [0.01721875922611514, 14.684512247403717, 127.94772453083775]
     )
-    # original 42
-    # new_hp = HybridZuptInsJl.SeHyperparams(
-    #     [0.06063349111094665, 1.9009449161575966, 0.06392436373774413],
-    #     [0.06063340044438242, 1.755542511682359, 0.09133912436420788],
-    #     [0.06063313723928771, 1.4138158563148968, 0.018763841300751767],
-    #     [0.01721875922611514, 14.684512247403717, 127.94772453083775]
-    # )
-    hsgp_p = HybridZuptInsJl.basecopy(hsgp_p; new_hp=new_hp)
+    hsgp_p = StrideGP.basecopy(hsgp_p; new_hp=new_hp)
 end
 
 data_key = "DCSC" # meta["data_key"]
@@ -58,16 +50,15 @@ corr_filter = CORRECTION_FILTERS[filter_tag]
 trial_id = 5 # meta["trial_id"]
 train_ratio = 0.35
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
-# sim_config = HybridZuptInsJl.InsConfig(sigma_groundtruth=sigma_groundtruth)
-ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir_path, trial_id;# sim_config=sim_config
+ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = StrideGP.compute_aligned_ins_trajectory(
+    data_dir_path, trial_id
 )
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
     ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(
+    StrideGP.matrix_to_euler(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
@@ -76,15 +67,15 @@ n_train_cutoff = floor(Int, train_ratio * N)
 gt_available = [n <= n_train_cutoff for n in 1:N]
 
 # Add noise to GT
-noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
+noisy_gt_traj = StrideGP.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
 
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+true_outputs = Dict{String,StrideGP.CorrectionIO}()
+pred_outputs = Dict{String,StrideGP.CorrectionIO}()
 
 # Run online correction
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
+default_corr = StrideGP.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME,
@@ -100,8 +91,8 @@ zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], hsgp_decoup_model = 
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
 
-input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+input_data = OrderedDict{String,StrideGP.CorrectionIO}()
+output_data = OrderedDict{String,StrideGP.CorrectionIO}()
 for (method_name, io_dict) in io_data
     input_data["$method_name : Input"] = io_dict["input"]
     output_data["$method_name : Prediction"] = io_dict["prediction"]
@@ -127,11 +118,11 @@ trajs = OrderedDict(
     "Static" => decoupled_stat_traj[mask],
     "HSGP" => hsgp1_corr_traj[mask],
 )
-final_rmse = OrderedDict(k => HybridZuptInsJl.rmse(tr, gt_traj_aligned[step_seg][mask])[end] for (k, tr) in trajs)
+final_rmse = OrderedDict(k => StrideGP.rmse(tr, gt_traj_aligned[step_seg][mask])[end] for (k, tr) in trajs)
 foreach(((k, r),) -> @info(@sprintf("%-10s final RMSE %.3f m (%+.1f %% vs ZUPT only)", k, r, 100 * (r / final_rmse["ZUPT only"] - 1))), final_rmse)
 
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg][mask])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg][mask])
+fig_ori = StrideGP.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg][mask])
+fig_xyz = StrideGP.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg][mask])
 
 # Zoom on where the corrections diverge: the first strides after the model takes over
 # (top row) and the end of the walk (bottom row), one column per correction, ground
@@ -139,7 +130,7 @@ fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligne
 n_first_strides = 20
 n_last_strides = 20
 fig_traj_panels = results_figure() do
-    HybridZuptInsJl.plot_trajectory_start_end_panels(
+    StrideGP.plot_trajectory_start_end_panels(
         trajs, gt_traj_aligned[step_seg][mask];
         train_ratio=train_ratio, n_first=n_first_strides, n_last=n_last_strides, markers=true,
         save_path=stamped(section, "trajectory2d_panels_$(data_key)_trial$(trial_id)"))
@@ -148,26 +139,25 @@ end
 # These two take no save_path, so the figure is saved here instead — still inside
 # results_figure(), so `save` is served by CairoMakie like every other results figure.
 fig_dist = results_figure() do
-    f = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
+    f = StrideGP.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
     save(stamped(section, "distance_error_$(data_key)_trial$(trial_id)"), f)
     f
 end
 fig_rmse_hybrid = results_figure() do
-    f = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=false)
+    f = StrideGP.plot_position_rmse(trajs, gt_traj_aligned[step_seg], train_ratio; show_index_ticks=false)
     save(stamped(section, "rmse_$(data_key)_trial$(trial_id)"), f)
     f
 end
 # results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
 GLMakie.activate!()
 
-# fig_dist = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg])
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])
+fig_out = StrideGP.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])
 
 # The three channels the corrections actually estimate (Δz is left alone), on one stacked
 # figure: target grey, Static wong yellow, HSGP wong green, a single shared legend. Keys
 # have to be exactly "Static"/"HSGP" — that is what picks the colours.
 fig_regr_panels = results_figure() do
-    HybridZuptInsJl.plot_regression_panels(
+    StrideGP.plot_regression_panels(
         OrderedDict(
             "Static" => io_data["Decoupled Static"]["prediction"],
             "HSGP" => io_data["Decoupled HSGP"]["prediction"],
@@ -176,24 +166,21 @@ fig_regr_panels = results_figure() do
         save_path=stamped(regression_section, "regression_panels_$(data_key)_trial$(trial_id)"))
 end
 GLMakie.activate!()
-# fig_in_def = HybridZuptInsJl.plot_input_features(io_data["Default"]["input"])
-# fig_in_hsgp = HybridZuptInsJl.plot_input_features(io_data["SplitHsgp"]["input"])
 
 ## Test on second track
 trial_id = 16
 train_ratio = 0.1
 posyaw_measurement_update = true
-ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
-    data_dir_path, trial_id;# sim_config=sim_config
+ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = StrideGP.compute_aligned_ins_trajectory(
+    data_dir_path, trial_id
 )
-# sim_config_updated.sigma_groundtruth = (sqrt(var_pos), sqrt(var_pos), sqrt(var_pos), sqrt(var_yaw))
-noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
+noisy_gt_traj = StrideGP.add_gaussian_noise(gt_traj_aligned; pos_std=pos_std, att_std=att_std)
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
     ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(
+    StrideGP.matrix_to_euler(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
@@ -201,12 +188,12 @@ N = length(inertial_updated)
 n_train_cutoff = floor(Int, train_ratio * N)
 gt_available = [n <= n_train_cutoff for n in 1:N]
 
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+true_outputs = Dict{String,StrideGP.CorrectionIO}()
+pred_outputs = Dict{String,StrideGP.CorrectionIO}()
 
 io_data = OrderedDict()
 
-default_corr = HybridZuptInsJl.BaseEstimator(round(Int, N / 60))
+default_corr = StrideGP.BaseEstimator(round(Int, N / 60))
 zupt, step_seg, def_corr_traj, io_data["Base"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, default_corr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, posyaw_measurement_update=posyaw_measurement_update)
@@ -221,8 +208,8 @@ zupt, step_seg, hsgp1_corr_traj, io_data["Decoupled HSGP"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, decoup_hsgp_estmtr;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE, init_model=hsgp_decoup_model, posyaw_measurement_update=posyaw_measurement_update)
 
-input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+input_data = OrderedDict{String,StrideGP.CorrectionIO}()
+output_data = OrderedDict{String,StrideGP.CorrectionIO}()
 for (method_name, io_dict) in io_data
     input_data["$method_name : Input"] = io_dict["input"]
     output_data["$method_name : Prediction"] = io_dict["prediction"]
@@ -233,28 +220,28 @@ trajs = OrderedDict(
     "Static" => decoupled_stat_traj,
     "HSGP" => hsgp1_corr_traj,
 )
-final_rmse = OrderedDict(k => HybridZuptInsJl.rmse(tr, gt_traj_aligned[step_seg])[end] for (k, tr) in trajs)
+final_rmse = OrderedDict(k => StrideGP.rmse(tr, gt_traj_aligned[step_seg])[end] for (k, tr) in trajs)
 foreach(((k, r),) -> @info(@sprintf("%-10s final RMSE %.3f m (%+.1f %% vs ZUPT only)", k, r, 100 * (r / final_rmse["ZUPT only"] - 1))), final_rmse)
 
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
+fig_ori = StrideGP.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
+fig_xyz = StrideGP.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
 # results_figure() == CairoMakie + theme_ggplot2(), the theme every saved results figure
 # uses. It has to be CairoMakie: saving SVG under GLMakie silently rasterises the figure.
 fig = results_figure() do
-    HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg];
+    StrideGP.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg];
         segment=:test, train_ratio=train_ratio, show_heading=false, heading_stride=1,
         save_path=stamped(section, "trajectory2d_$(data_key)_trial$(trial_id)"))
 end
 fig_dist = results_figure() do
-    f = HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
+    f = StrideGP.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
     save(stamped(section, "distance_error_$(data_key)_trial$(trial_id)"), f)
     f
 end
 fig_rmse_hybrid = results_figure() do
-    f = HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
+    f = StrideGP.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
     save(stamped(section, "rmse_$(data_key)_trial$(trial_id)"), f)
     f
 end
 # results_figure leaves CairoMakie active; restore GLMakie so later plots still open windows.
 GLMakie.activate!()
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])
+fig_out = StrideGP.plot_regression_results(output_data, io_data["Decoupled HSGP"]["target"])

@@ -2,14 +2,15 @@
 # DCSC trials (test/mock_trials.jl). Run from the repository root:
 #
 #     julialauncher --project=. -t 1 test/hybrid_v4_test.jl
+#
+# or the whole suite with `julialauncher --project=. -t 1 -e "using Pkg; Pkg.test()"`.
 
-include("../src/HybridZuptInsJl.jl")
-using .HybridZuptInsJl
+using StrideGP
 include("../scripts/5Results/_common.jl")
 include("mock_trials.jl")
 using Test, OrderedCollections, DataFrames, LinearAlgebra, Statistics
 
-const H = HybridZuptInsJl
+const H = StrideGP
 const SECONDS = 40
 # DCSC 1 and 2 have a -33/-16 s mocap lag, which 40 s is too short to re-estimate, and
 # 6 locks onto a wrong peak at 40 s; 4 and 8 re-estimate it to within one sample.

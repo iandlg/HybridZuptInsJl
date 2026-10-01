@@ -78,12 +78,12 @@ function run_correlation_analysis(
     # Determine input labels
     n_features = size(input_feature, 1)
     feature_labels = Dict{Any,Vector{String}}(
-        HybridZuptInsJl.THREED_STEP => ["step_x", "step_y", "step_z"],
-        HybridZuptInsJl.TWOD_STEP_DT => ["step_x", "step_y", "dt"],
-        HybridZuptInsJl.THREED_STEP_DT => ["step_x", "step_y", "step_z", "dt"],
-        HybridZuptInsJl.TWOD_STEP_YAW => ["step_x", "step_y", "yaw"],
-        HybridZuptInsJl.TWOD_STEP_DT_YAW => ["step_x", "step_y", "dt", "yaw"],
-        HybridZuptInsJl.THREED_STEP_DT_YAW => ["step_x", "step_y", "step_z", "dt", "yaw"],
+        THREED_STEP => ["step_x", "step_y", "step_z"],
+        TWOD_STEP_DT => ["step_x", "step_y", "dt"],
+        THREED_STEP_DT => ["step_x", "step_y", "step_z", "dt"],
+        TWOD_STEP_YAW => ["step_x", "step_y", "yaw"],
+        TWOD_STEP_DT_YAW => ["step_x", "step_y", "dt", "yaw"],
+        THREED_STEP_DT_YAW => ["step_x", "step_y", "step_z", "dt", "yaw"],
     )
 
     n_features = size(input_feature, 1)
@@ -148,7 +148,6 @@ function plot_correlation_heatmap(corr_mat::Matrix{Float64},
         yticks=(1:n_out, output_labels),
         xticklabelrotation=0,          # no rotation
         yreversed=true,                # outputs top-to-bottom, matching their order
-        # title=title,
         xlabel=xlabel,
         ylabel=ylabel,
         xgridvisible=false,

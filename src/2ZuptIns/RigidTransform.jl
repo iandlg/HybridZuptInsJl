@@ -1,16 +1,7 @@
 """
-    wrapped_min_residuals(ins_vals::AbstractVector{T}, gt_vals::AbstractVector{T}) where T<:Real
+    wrapped_min_residuals(ins_vals, gt_vals) -> Vector
 
-Compute the minimum absolute angular residual between two vectors, accounting for the
-±2π periodic ambiguity of angles. For each pair of elements, the residual is
-`min(|d|, |d+2π|, |d-2π|)` where `d = ins_vals - gt_vals`.
-
-# Arguments
-- `ins_vals`: Estimated angles (radians).
-- `gt_vals`: Ground-truth angles (radians), same length as `ins_vals`.
-
-# Returns
-- Vector of wrapped residuals of the same length.
+Element-wise `min(|d|, |d+2π|, |d-2π|)` with `d = ins_vals - gt_vals`.
 """
 function wrapped_min_residuals(ins_vals::AbstractVector{T}, gt_vals::AbstractVector{T}) where T<:Real
     diff = ins_vals - gt_vals
@@ -19,22 +10,11 @@ function wrapped_min_residuals(ins_vals::AbstractVector{T}, gt_vals::AbstractVec
 end
 
 """
-    transform_position(ins_traj::Trajectory, gt_traj::Trajectory, calib_idxs::Vector{Int})
+    transform_position(ins_traj, gt_traj, calib_idxs) -> (aligned_traj, R_opt, t_opt)
 
-Estimate a rigid transformation (rotation + translation) that aligns the inertial-navigation
-trajectory with the ground-truth reference frame. The rotation is constrained to a yaw change
-plus a fixed 180° roll (to mirror the IMU mounting), and a 3D translation.
-
-# Arguments
-- `ins_traj`: Trajectory computed from inertial data.
-- `gt_traj`: Ground-truth trajectory (already temporally aligned with `ins_traj`).
-- `calib_idxs`: Indices of the time window used for calibration (typically the first few metres).
-
-# Returns
-- `aligned_traj`: `Trajectory` with positions, velocities and orientations rotated/translated
-  to match the ground-truth frame.
-- `R_opt`: 3×3 rotation matrix that maps INS-frame coordinates to GT-frame coordinates.
-- `t_opt`: 3-element translation vector.
+Fit a rigid transform (yaw rotation plus a fixed 180° roll for the IMU mounting, and a
+translation) mapping `ins_traj` onto the time-aligned `gt_traj` over `calib_idxs`, and
+apply it to positions, velocities and orientations.
 """
 function transform_position(ins_traj::Trajectory, gt_traj::Trajectory,
     calib_idxs::Vector{Int})
@@ -75,25 +55,10 @@ function transform_position(ins_traj::Trajectory, gt_traj::Trajectory,
 end
 
 """
-    euler_mse(angles::Vector{Float64}, ins_traj::Trajectory, gt_traj::Trajectory,
-              zupt::BitVector, calib_idxs::Vector{Int}) -> Vector{Float64}
+    euler_mse(angles, ins_traj, gt_traj, zupt, calib_idxs) -> Vector{Float64}
 
-Compute the per-sample Euler-angle residuals between an inertial trajectory (rotated by
-`angles`) and the ground truth. Roll and pitch residuals are evaluated only on zero-velocity
-(ZUPT) frames; yaw residuals only on the calibration window. The residuals are the minimum
-absolute difference wrapped to the interval [-π, π].
-
-# Arguments
-- `angles`: (roll, pitch, yaw) in radians, applied as an extrinsic ZYX rotation to the
-  orientation matrices of `ins_traj`.
-- `ins_traj`: Inertial trajectory (original orientation estimates).
-- `gt_traj`: Ground-truth trajectory (reference Euler angles).
-- `zupt`: Boolean vector, `true` where the foot is stationary (used for roll/pitch).
-- `calib_idxs`: Indices of the calibration window (used for yaw).
-
-# Returns
-- A 1-D vector concatenating the per-frame roll residual (zupt length), pitch residual
-  (zupt length) and yaw residual (length of `calib_idxs`).
+Wrapped Euler residuals of `ins_traj` rotated by `angles` (extrinsic ZYX) against
+`gt_traj`: roll and pitch over the ZUPT samples, yaw over `calib_idxs`, concatenated.
 """
 function euler_mse(angles::Vector{Float64}, ins_traj::Trajectory,
     gt_traj::Trajectory, zupt::BitVector,
@@ -117,25 +82,10 @@ function euler_mse(angles::Vector{Float64}, ins_traj::Trajectory,
 end
 
 """
-    transform_orientation(ins_traj::Trajectory, gt_traj::Trajectory, zupt::BitVector,
-                          initial_value::Vector{Float64}, calib_idxs::Vector{Int}) ->
-                          (Trajectory, Matrix{Float64})
+    transform_orientation(ins_traj, gt_traj, zupt, initial_value, calib_idxs) -> (aligned_traj, R_opt)
 
-Optimise a full 3-axis rotation (roll, pitch, yaw) that aligns the inertial orientation
-estimates with the ground truth. The cost function minimises the wrapped Euler-angle errors
-over ZUPT frames (roll/pitch) and a calibration window (yaw).
-
-# Arguments
-- `ins_traj`: Inertial trajectory (original orientation matrices `R_nb`).
-- `gt_traj`: Ground-truth trajectory (reference orientations).
-- `zupt`: Boolean vector, `true` at zero-velocity frames (used for roll/pitch).
-- `initial_value`: Initial guess for (roll, pitch, yaw) in radians.
-- `calib_idxs`: Indices of the calibration window (used for yaw).
-
-# Returns
-- `aligned_traj`: `Trajectory` with orientations rotated by the optimal transformation
-  (positions and velocities unchanged).
-- `R_opt`: The optimal 3×3 rotation matrix that maps the INS body frame to the GT body frame.
+Fit the body-frame rotation minimising [`euler_mse`](@ref) from `initial_value` and apply
+it to the orientations (positions and velocities unchanged).
 """
 function transform_orientation(ins_traj::Trajectory, gt_traj::Trajectory,
     zupt::BitVector, initial_value::Vector{Float64},
@@ -174,26 +124,12 @@ function transform_orientation(ins_traj::Trajectory, gt_traj::Trajectory,
 end
 
 """
-    compute_aligned_ins_trajectory(data_path, trial_id::Int;
-                                   sim_config::INSConfig=INSConfig(),
-                                   orientation_offset::AbstractVector=zeros(3)) ->
-                                   (Trajectory, Trajectory, BitVector, Vector{Int}, InertialData, INSConfig)
+    compute_aligned_ins_trajectory(data_path, trial_id; sim_config=InsConfig(),
+        orientation_offset=zeros(3)) -> (ins_traj, gt_traj, zupt, segs, inertial, sim_config)
 
-Load inertial and ground truth data, compute an INS trajectory, and align it to the ground truth.
-
-# Arguments
-- `data_path`: Path to the data directory (string or `AbstractString`).
-- `trial_id`: Trial/session identifier passed to the CSV loaders.
-- `sim_config`: INS configuration. Defaults to `INSConfig()`.
-- `orientation_offset`: 3-element orientation offset for `transform_orientation`. Defaults to zeros.
-
-# Returns
-- `ins_traj_aligned`: The INS trajectory aligned to ground truth.
-- `gt_traj_aligned`: The ground truth trajectory aligned to the IMU time axis.
-- `zupt`: ZUPT detection signal (boolean vector, `true` where stationary).
-- `segs`: Segmentation output from `smoothed_zupt_aided_ins` (vector of step-end indices).
-- `inertial`: Updated inertial data after applying the estimated rotation.
-- `sim_config`: Updated simulation config (gravity rotated by the position alignment).
+Load a trial, run the smoothed ZUPT-INS and align it to ground truth. Returns the
+aligned INS and ground-truth trajectories (on the IMU time axis), the ZUPT mask, the
+step-end indices, the rotated inertial data and the config with gravity rotated to match.
 """
 function compute_aligned_ins_trajectory(
     data_path::AbstractString,
@@ -211,7 +147,6 @@ function compute_aligned_ins_trajectory(
 
     # # Truncate to overlapping time window and align ground truth to IMU timestamps
     # inertial_trunc, gt_traj_trunc = truncate_to_overlap(inertial, gt_traj)
-    # gt_traj_aligned = temporal_alignment(gt_traj_trunc, inertial_trunc.t)
 
     # Compute INS trajectory from inertial data
     zupt, ins_traj, segs = smoothed_zupt_aided_ins(inertial_trunc, sim_config)
@@ -253,25 +188,11 @@ initial_state(traj::Trajectory, n::Int=1)::Vector{Float64} =
     vcat(traj.pos[:, n], traj.vel[:, n], matrix_to_euler(traj.R_nb[:, :, n]))
 
 """
-    collect_aligned_trajectories(
-        data_dict::AbstractDict{<:AbstractString,<:AbstractVector{Int}};
-        kwargs...
-    )::Dict{String,Dict{Int,NamedTuple}}
+    collect_aligned_trajectories(data_dict; kwargs...) -> Dict{String,Dict{Int,NamedTuple}}
 
-For every `data_path => [trial_ids...]` pair, run `compute_aligned_ins_trajectory`
-for each trial and package everything needed for downstream steps (INS trajectory,
-GT trajectory, zupt, step segments, updated inertial data, updated sim config, and
-the initial state `x_init`) into a nested dictionary.
-
-# Arguments
-- `data_dict`: e.g. `Dict("data/angermann_v2" => [1, 2, 3])`.
-- `kwargs...`: forwarded to `compute_aligned_ins_trajectory` (e.g. `sim_config`,
-  `orientation_offset`, `fs_resample`).
-
-# Returns
-- `Dict{String,Dict{Int,NamedTuple}}`: `data_path => trial_id => (; ins_traj_aligned,
-  gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated, x_init)`.
-  Trials that fail to load/align are skipped with a `@warn`.
+[`compute_aligned_ins_trajectory`](@ref) for every `data_path => trial_ids` pair, as
+`data_path => trial_id => (; ins_traj_aligned, gt_traj_aligned, zupt, segs,
+inertial_updated, sim_config_updated, x_init)`. Failing trials are skipped with a `@warn`.
 """
 function collect_aligned_trajectories(
     data_dict::AbstractDict{String,Tuple{String,Vector{Int}}};

@@ -1,15 +1,13 @@
-module HybridZuptInsJl
+module StrideGP
 
 using LinearAlgebra, Statistics
-import Quaternions
-using Rotations, DSP
+using Rotations
+using DSP: unwrap
 import Interpolations, FFTW
 using CSV, DataFrames, JSON, OrderedCollections
 using GLMakie, Makie.Colors
 import Optim
 import LeastSquaresOptim
-import GaussianProcesses
-import PDMats
 using Distributions, Printf
 using Dates
 import MultivariateStats
@@ -47,7 +45,7 @@ include("4OnlineCorrection/MultiTrackModelTraining.jl")
 include("Plotting/MetricLabels.jl")
 include("Plotting/Trajectory.jl")
 include("Plotting/Steps.jl")
-include("Plotting/OfflineCorrection.jl")
+include("Plotting/Regression.jl")
 include("Plotting/FilterConsistency.jl")
 include("Plotting/CorrelationAnalysis.jl")
 include("Plotting/OnlineHpSensitivity.jl")

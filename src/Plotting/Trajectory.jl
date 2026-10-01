@@ -1,36 +1,13 @@
 """
-    plot_groundtruth_vs_inertial_positions(trajs, gt_traj)
+    plot_groundtruth_vs_inertial_positions(trajs, gt_traj; kwargs...) -> Figure
 
-Plot 2D positions (X-Y) of ground truth and one or more estimated trajectories.
+Top-down (X-Y) plot of ground truth and one estimate or a `Dict` of named estimates.
 
-# Arguments
-- `trajs`: A `Trajectory` object (single estimate) or a `Dict{String,Trajectory}` (multiple).
-- `gt_traj`: Ground truth `Trajectory`.
-
-# Keywords
-- `segment`: which part of the track to draw -- `:full` (default), `:train` or `:test`.
-  `:train`/`:test` need `train_ratio` and cut the trajectory themselves, so callers do
-  not have to work out stride indices by hand. The title is labelled to match.
-- `train_ratio`: the same fraction passed to the filter. Required by `:train`/`:test`.
-- `start`/`stop`: explicit index window, overriding `segment` on whichever end is given.
-  Leave both `nothing` to let `segment` decide. Everything reported in the title and the
-  legend (duration, distance, RMSE) is measured over the drawn window only, never over
-  the full track.
-- `marker_stride`: draw a dot every Nth stride along each track. `0` (default) draws none:
-  on a looping walk the per-stride dots were the bulk of the clutter, and the start/stop
-  markers still show the direction of travel. Set e.g. `5` to get a pace cue back.
-- `segment_label`: overrides the name `segment` puts in the title.
-- `legend_position`: `:outer_right` (default) or `:outer_bottom` put the legend outside
-  the axis so it cannot cover the track. Any other symbol is passed to `axislegend` as an
-  in-axis anchor (`:rt`, `:lt`, ...), which is compact but may overlap the trajectory.
-- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
-  when the document's own caption carries the same information.
-- `save_path`: write the figure here as well as returning it. Call inside
-  `results_figure()` (`scripts/5Results/_common.jl`) so it is saved under the same
-  CairoMakie theme as every other results figure.
-
-# Returns
-- A `Figure` object (Makie figure).
+- `segment`: `:full`, `:train` or `:test` (the latter two need `train_ratio`);
+  `start`/`stop` override either end. Title and legend metrics cover the drawn window.
+- `marker_stride`: a dot every Nth stride (`0` = none).
+- `legend_position`: `:outer_right`, `:outer_bottom`, or an `axislegend` anchor.
+- `save_path`: also save; call inside `results_figure()` for the shared theme.
 """
 function plot_groundtruth_vs_inertial_positions(
     trajs::Trajectory, gt_traj::Union{Nothing,Trajectory};
@@ -66,13 +43,8 @@ end
 """
     _segment_window(ref_traj, segment, train_ratio) -> (first, last)
 
-Index range of `ref_traj` covered by `segment` (`:full`, `:train` or `:test`).
-
-The train/test split is made on the IMU sample stream, which is uniformly sampled, so
-`train_ratio` is really a fraction of elapsed *time*. The trajectories plotted here are
-stride-indexed and strides are not uniform in time, so the cut is placed by time rather than
-by scaling the stride count -- otherwise the drawn window drifts away from the split the
-filter actually used, by more the more the walking pace varies.
+Index range of the stride-indexed `ref_traj` covered by `segment`. The split is placed
+by time, since `train_ratio` is a fraction of the uniformly sampled IMU stream.
 """
 function _segment_window(ref_traj::Trajectory, segment::Symbol, train_ratio::Union{Nothing,Real})
     return _segment_window(ref_traj.t, segment, train_ratio)
@@ -131,14 +103,8 @@ end
 """
     _draw_tracks!(ax, trajs, gt_traj, win_start, win_stop; kwargs...) -> (entries, labels, series)
 
-Draw the ground truth and every estimated track onto `ax` over `win_start:win_stop`,
-and return the legend entries/labels plus the `(traj, colour, last_index)` triples in
-the order they were drawn.
-
-Split out so the standalone top-down figure and the combined
-[`plot_trajectory_and_distance_error`](@ref) draw the same tracks in the same colours
-from one piece of code, and so the colour a series gets in one panel is by construction
-the colour it gets in the other.
+Draw ground truth and every track on `ax` over `win_start:win_stop`, shared by the
+top-down and [`plot_trajectory_and_distance_error`](@ref) figures so colours match.
 """
 function _draw_tracks!(
     ax,
@@ -355,14 +321,8 @@ end
     plot_trajectory_start_end_panels(trajs, gt_traj; train_ratio, n_first=40, n_last=40,
                                      markers=false, save_path=nothing)
 
-Six panels: the first `n_first` strides of the test segment on the top row and the last
-`n_last` strides of the trial on the bottom row, one column per correction in `trajs`, with
-the ground truth dashed underneath in every panel and one shared legend in the third row.
-
-All six panels share one pair of x/y limits, fitted to the widest extent over every
-trajectory (and the ground truth) in both windows, so a divergence is the same size on the
-page wherever it appears. `markers=true` marks the test-segment start (circle, top row)
-and the trial end (square, bottom row).
+First `n_first` test strides (top row) and last `n_last` strides (bottom row), one column
+per correction, ground truth dashed underneath, all panels on shared limits.
 """
 function plot_trajectory_start_end_panels(
     trajs::AbstractDict{String,Trajectory},
@@ -396,7 +356,6 @@ function plot_trajectory_start_end_panels(
         # Label(fig[row, 0], row_labels[row]; rotation=pi / 2, tellheight=false, font=:bold)
         for (col, (key, traj)) in enumerate(trajs)
             ax = Axis(fig[row, col];
-                # title=titles[row][col],
                 xlabel="X (m)",
                 ylabel="Y (m)",
                 aspect=DataAspect(),
@@ -435,26 +394,10 @@ function plot_trajectory_start_end_panels(
 end
 
 """
-    plot_position_rmse(trajs::Union{Dict{String, Trajectory}, Trajectory}, gt_traj::Trajectory)
+    plot_position_rmse(trajs, gt_traj) -> Figure
 
-Plot the cumulative root-mean-square error (RMSE) of the horizontal position (x-y) over time
-for one or more estimated trajectories against a ground truth trajectory.
-
-# Arguments
-- `trajs`: Either a single `Trajectory` (which will be labeled "Estimation") or a dictionary
-  mapping labels (e.g. "Estimation", "Filter", etc.) to `Trajectory` objects. Each trajectory
-  may optionally have a `name` field; if present it will be used in the legend instead of the
-  dictionary key.
-- `gt_traj`: Ground truth `Trajectory` (only its first two position coordinates are used).
-
-# Returns
-- A `Plots.Plot` object (the figure).
-
-# Details
-The horizontal RMSE at time step k is defined as:
-RMSE(k) = sqrt( (1/k) * Σ_{i=1..k} ( (x̂_i - x_i)² + (ŷ_i - y_i)² ) )
-
-Only the overlapping portion of the trajectories (minimum number of samples) is used.
+Cumulative horizontal RMSE over time, `sqrt(mean over 1..k of ‖Δxy‖²)`, for one
+`Trajectory` or a `Dict` of named ones, over the overlapping samples.
 """
 function plot_position_rmse(
     trajs::Union{AbstractDict{String,Trajectory},Trajectory},
@@ -532,20 +475,9 @@ end
 
 
 """
-    plot_groundtruth_vs_inertial_orientations(trajs::Union{Dict{String,Trajectory},Trajectory},
-                                               gt_traj::Trajectory)
+    plot_groundtruth_vs_inertial_orientations(trajs, gt_traj) -> Figure
 
-Plot Euler angles (roll, pitch, yaw) from estimated trajectories against a ground truth.
-
-# Arguments
-- `trajs`: Either a single `Trajectory` (labelled "Estimation") or a dictionary mapping labels
-  (e.g. "Estimation", "Filter") to `Trajectory` objects. Each trajectory must provide:
-  - `t::Vector{Float64}` time vector
-  - `euler_nb::Matrix{Float64}` Euler angles (3×N) in radians (roll=row1, pitch=row2, yaw=row3)
-- `gt_traj`: Ground truth trajectory with the same `t` and `euler_nb` fields.
-
-# Returns
-- A `Figure` object with three side-by-side axis objects.
+Roll, pitch and yaw of one `Trajectory` or a `Dict` of named ones against ground truth.
 """
 function plot_groundtruth_vs_inertial_orientations(
     trajs::Union{AbstractDict{String,Trajectory},Trajectory},
@@ -597,20 +529,9 @@ function plot_groundtruth_vs_inertial_orientations(
 end
 
 """
-    plot_groundtruth_vs_inertial_xyz(trajs::Union{AbstractDict{String,Trajectory},Trajectory},
-                                           gt_traj::Trajectory)
+    plot_groundtruth_vs_inertial_xyz(trajs, gt_traj) -> Figure
 
-Plot position components (X, Y, Z) from estimated trajectories against ground truth.
-
-# Arguments
-- `trajs`: Either a single `Trajectory` (labelled "Estimation") or a dictionary mapping labels
-  (e.g. "Estimation", "Filter") to `Trajectory` objects. Each trajectory must provide:
-  - `t::Vector{Float64}` time vector
-  - `pos::Matrix{Float64}` position (3×N) in meters (x=row1, y=row2, z=row3)
-- `gt_traj`: Ground truth trajectory with the same `t` and `pos` fields.
-
-# Returns
-- A `Figure` object with three side-by-side axis objects (X, Y, Z).
+X, Y and Z position of one `Trajectory` or a `Dict` of named ones against ground truth.
 """
 function plot_groundtruth_vs_inertial_xyz(
     trajs::Union{AbstractDict{String,Trajectory},Trajectory},
@@ -658,20 +579,9 @@ function plot_groundtruth_vs_inertial_xyz(
 end
 
 """
-    plot_position_distance_error(trajs::Union{Dict{String,Trajectory},Trajectory},
-                                 gt_traj::Trajectory)
+    plot_position_distance_error(trajs, gt_traj) -> Figure
 
-Plot the horizontal position error (Euclidean distance) over time for one or more
-estimated trajectories against a ground truth trajectory.
-
-# Arguments
-- `trajs`: Either a single `Trajectory` (labelled "Estimation") or a dictionary mapping
-  labels (e.g. "Estimation", "Filter") to `Trajectory` objects. Each trajectory may
-  optionally have a `name` field used in the legend.
-- `gt_traj`: Ground truth trajectory (only the first two position coordinates are used).
-
-# Returns
-- A `Figure` object containing the distance plot.
+Horizontal position error over time for one `Trajectory` or a `Dict` of named ones.
 """
 function plot_position_distance_error(
     trajs::Union{AbstractDict{String,Trajectory},Trajectory},
@@ -795,7 +705,6 @@ function make_ring_data(
         # Sample inferno: newest footfalls near 0.65, oldest near 0.0
         cmap_pos = 0.65f0 * (1f0 - frac)
         c = get(inferno, cmap_pos)
-        # c = inferno(cmap_pos)
 
         radius = (radius0 + radius_growth * frac) * radius_scale
         z_offset = -Float32(0.02f0 * sin(age * 2pi / (lifetime / 1.7) + z_phase))

@@ -2,53 +2,20 @@
     multi_track_training_analysis(data_dir, estimators, train_labels, test_labels, params;
                                   order_seeds=[1], noise_spec=nothing, kwargs...) -> DataFrame
 
-Accumulate the training tracks one at a time, re-testing the frozen model on every test
-track after each addition, for every estimator in `estimators`. The question the output is
-built to answer is whether *more* (noisy) training data buys back the performance the noise
-costs, so the quantity of interest is the trend against `train_set_order` — the number of
-tracks accumulated — with the untrained `"Base"` rows as the reference.
+Add training tracks one at a time and, after each, test the frozen model on every test
+track, for every estimator: does more (noisy) training data buy back what the noise costs?
 
-The whole accumulation is repeated once per seed in `order_seeds`, and repeat `s` walks its
-own random permutation `shuffle(Xoshiro(s), ids)` of the training tracks. WAS: the tracks
-were accumulated in the declared order of `train_labels`, one arbitrary permutation, so the
-curve against training-set size also encoded which track happened to come next. That order
-is now drawn, not chosen: `train_labels` defines the *set* of training tracks and their
-declared order no longer affects any result.
+- Each seed in `order_seeds` accumulates its own permutation `shuffle(Xoshiro(s), ids)`;
+  `train_labels` only defines the set.
+- A track's training-GT noise comes from `Xoshiro(1000 * train_id)`, identical across
+  estimators and repeats, and the training runs get the matching R
+  ([`matched_gt_sigma_config`](@ref)). Test tracks keep clean ground truth and R.
+- `test_tr_ratio`: mocap fraction on the test walks (`0` = start pose only).
 
-The training-GT noise is deliberately *not* redrawn per repeat. A track's realisation comes
-from `Xoshiro(1000 * train_id)`, keyed on the track and nothing else, which has two
-consequences worth keeping:
-
-- every estimator, and every repeat, trains on bit-identical noisy tracks, so estimators
-  stay paired and the only thing varying between repeats is the order;
-- at the final step, where all repeats have trained on the same set, any remaining spread is
-  order-sensitivity in the fit alone. That is the check that the shuffling measures what it
-  should. The flip side is that the figure carries one noise realisation per track, so it
-  marginalises over order but not over noise.
-
-The training runs are also *told* how noisy the ground truth they are handed is:
-`sigma_groundtruth` is raised to match the injected noise (`matched_gt_sigma_config`).
-WAS: the noise went into the ground truth while the R stayed at the trial's clean
-1cm/0.001rad, so a `pos_std=1.0` spec measured which corrector tolerates a mis-specified
-R rather than which correction model recovers from bad training data. The test tracks
-keep their clean ground truth and their clean R — the noise is a training-data-quality
-manipulation, and the test half is the thing being measured.
-
-Rows carry `seed` (which repeat), `train_set_order` (how many tracks had been accumulated)
-and `train_set`/`train_ids` (that repeat's ordered ids — the only record of the permutation
-it drew). Baseline rows (`train_set == "Base"`) are `BaseEstimator` run through
-`correction_filter` itself: the same filter, the same corrector start (V4 starts it on the
-mocap pose at k=1), the same mocap fixes over the first `test_tr_ratio` and the same
-scoring as every trained row, so a box and the baseline differ by the correction model and
-nothing else. WAS: the raw rigidly-aligned ZUPT INS, which went through no filter at all.
-They are untrained and see only clean test ground truth, hence noise- and
-order-independent: computed once per test track, carrying `seed === missing`. Their
-estimator name defaults to `"ZUPT only"` so it keys into `_METHOD_COLOR_INDICES`
-(`Plotting/OfflineCorrection.jl`) and matches the other Section 5 figures; rename it and
-the baseline silently drops to the fallback grey.
-
-`test_tr_ratio=0` gives the test walks the mocap pose at k=1 only: the corrector starts on
-it and then propagates the frozen model with no test-walk updates.
+Rows carry `seed`, `train_set_order` (tracks accumulated) and `train_set`/`train_ids`.
+Baseline rows (`train_set == "Base"`, `seed === missing`) are `BaseEstimator` through the
+same `correction_filter`, once per test track. Their name defaults to `"ZUPT only"`,
+which keys its colour in `_METHOD_COLOR_INDICES`; renaming it turns the baseline grey.
 """
 function multi_track_training_analysis(
     data_dir::AbstractString,

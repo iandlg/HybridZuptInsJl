@@ -1,5 +1,4 @@
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("../5Results/_common.jl")
 using GLMakie, OrderedCollections, Statistics, Random
 
@@ -23,10 +22,10 @@ data_dir_path = data_dir(data_key)
 train_trial_ids = trial_ids(data_key)  # train_ids(data_key) 
 test_trial_ids = test_ids(data_key)
 all_trial_ids = vcat(train_trial_ids, test_trial_ids)
-FRAME = HybridZuptInsJl.HEADING
-FEATURE_TYPE = HybridZuptInsJl.TWOD_STEP_YAW
+FRAME = StrideGP.HEADING
+FEATURE_TYPE = StrideGP.TWOD_STEP_YAW
 
-dataset = HybridZuptInsJl.collect_dataset(
+dataset = StrideGP.collect_dataset(
     data_dir_path, all_trial_ids;
     frame=FRAME,
     feature_type=FEATURE_TYPE,
@@ -44,10 +43,10 @@ train_results = [dataset[id] for id in train_trial_ids]
 test_results = [dataset[id] for id in test_trial_ids]
 
 # Each result tuple: (target::CorrectionIO, input::CorrectionIO, corr_traj, gt_traj, step_seg)
-train_out = HybridZuptInsJl.concatenate_io([res[1] for res in train_results])
-train_in = HybridZuptInsJl.concatenate_io([res[2] for res in train_results])
-test_out = HybridZuptInsJl.concatenate_io([res[1] for res in test_results])
-test_in = HybridZuptInsJl.concatenate_io([res[2] for res in test_results])
+train_out = StrideGP.concatenate_io([res[1] for res in train_results])
+train_in = StrideGP.concatenate_io([res[2] for res in train_results])
+test_out = StrideGP.concatenate_io([res[1] for res in test_results])
+test_in = StrideGP.concatenate_io([res[2] for res in test_results])
 
 # `keep_fraction` replaces the old chi-squared `alpha`: the trim is stated directly
 # rather than inferred from a Gaussian assumption these residuals do not satisfy.
@@ -71,7 +70,7 @@ if !isnothing(outlier_removal_params["dims"])
 
     fig_mahal = Figure()
     for (i, (label, M)) in enumerate(mahal_spaces)
-        sqd, d_mahal = HybridZuptInsJl.mahal_sqdistances(M)
+        sqd, d_mahal = StrideGP.mahal_sqdistances(M)
         thr = quantile(sqd, keep_frac)
         ax = Axis(fig_mahal[i, 1];
             xlabel="Mahalanobis D²", ylabel="count",
@@ -84,15 +83,13 @@ if !isnothing(outlier_removal_params["dims"])
 end
 
 if !isnothing(outlier_removal_params["dims"])
-    train_in, train_out = HybridZuptInsJl.remove_outliers(train_in, train_out;
+    train_in, train_out = StrideGP.remove_outliers(train_in, train_out;
         method=outlier_removal_params["method"],
         threshold=outlier_removal_params["threshold"],
         keep_fraction=outlier_removal_params["keep_fraction"],
         dims=outlier_removal_params["dims"]
     )
 end
-# test_in, test_out = HybridZuptInsJl.remove_outliers(test_in, test_out;
-#     method="zscore", threshold=3.0, dims=:both)
 ## --- Fit stats on TRAIN ONLY, apply to both train and test ---
 
 d = size(train_in.data, 1)
@@ -104,13 +101,13 @@ normalization_params = OrderedDict(
 )
 
 # Input preprocessing
-inp = HybridZuptInsJl.compute_input_preprocessing(train_in.data;
+inp = StrideGP.compute_input_preprocessing(train_in.data;
     normalize_x=normalization_params["normalize_x"], margin=normalization_params["margin"])
 train_in_norm = (train_in.data .- inp.μ) ./ inp.σ
 test_in_norm = (test_in.data .- inp.μ) ./ inp.σ
 
 # Output normalisation
-outp = HybridZuptInsJl.compute_output_normalisation(train_out.data; normalize_y=normalization_params["normalize_y"])
+outp = StrideGP.compute_output_normalisation(train_out.data; normalize_y=normalization_params["normalize_y"])
 train_out_norm = (train_out.data .- outp.μ) ./ outp.σ
 
 ## --- Optimize hyperparameters per output, predict on TEST ---
@@ -151,7 +148,7 @@ for (idx, symb) in enumerate(output_symbols)
 
     # First pass: fit on train, predict on test to get β for uncertainty propagation
     pred_norm, pred_var_norm, theta, lik, _, _, per_dim_eigvals, β =
-        HybridZuptInsJl.hsgp_regression(
+        StrideGP.hsgp_regression(
             train_in_norm', train_out_norm[idx, :],
             test_in_norm', m;
             use_linear=false, LL=inp.LL_norm, lower=lower, rng=rng, upper=upper, #theta=[0.01, 0.01, 0.01, 1.0]
@@ -162,7 +159,7 @@ for (idx, symb) in enumerate(output_symbols)
         x_scaled_norm = train_in_norm' .- inp.mid_norm'
         dfdx = zeros(size(x_scaled_norm, 1), d)
         for di in 1:d
-            Phi_dx = HybridZuptInsJl.calc_eigenvectors_dx(x_scaled_norm, inp.Lvec_norm, per_dim_eigvals, di)
+            Phi_dx = StrideGP.calc_eigenvectors_dx(x_scaled_norm, inp.Lvec_norm, per_dim_eigvals, di)
             dfdx[:, di:di] = Phi_dx * β
         end
         train_in_std_norm = train_in.data_std[:, :] ./ inp.σ
@@ -172,11 +169,10 @@ for (idx, symb) in enumerate(output_symbols)
         lower[1] += sqrt(maximum(var_x_norm))
 
         pred_norm, pred_var_norm, theta, lik, _, _, _, _ =
-            HybridZuptInsJl.hsgp_regression(
+            StrideGP.hsgp_regression(
                 train_in_norm', train_out_norm[idx, :],
                 test_in_norm', m;
                 use_linear=false, LL=inp.LL_norm, lower=lower, rng=rng, upper=upper,
-                # theta=[0.01, 0.01, 0.01, 1.0]
             )
     end
 
@@ -188,34 +184,34 @@ end
 
 @info "Optimized yaw hyperparameters: " hyps["yaw"]
 
-pred = HybridZuptInsJl.CorrectionIO(test_out.t, pred_data, sqrt.(pred_var))
+pred = StrideGP.CorrectionIO(test_out.t, pred_data, sqrt.(pred_var))
 
-hsgp_opt = HybridZuptInsJl.HsgpParameters(
-    HybridZuptInsJl.SeHyperparams(hyps), d, m, inp.Lvec_norm;
+hsgp_opt = StrideGP.HsgpParameters(
+    StrideGP.SeHyperparams(hyps), d, m, inp.Lvec_norm;
     input_stats=[inp.μ, inp.σ],
     output_stats=[outp.μ, outp.σ],
     mid_norm=inp.mid_norm
 )
 GLMakie.activate!()
-fig_regr = HybridZuptInsJl.plot_regression_results(pred, test_out)
+fig_regr = StrideGP.plot_regression_results(pred, test_out)
 ## --- Run Correction using both Hyper Parameter Sets ---
 trial_id = 14
 train_ratio = 0.35
 output_channels = [:pos_1, :pos_2, :yaw] # [:pos_1, :pos_2, :pos_3, :yaw]
 
-ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
+ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated = StrideGP.compute_aligned_ins_trajectory(
     data_dir_path, trial_id
 )
 # Add noise to training data
-noise_spec = HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)")
-noise_spec = HybridZuptInsJl.NoiseSpec()
-noisy_gt_traj = HybridZuptInsJl.add_gaussian_noise(gt_traj_aligned; pos_std=noise_spec.pos_std, att_std=noise_spec.att_std)
+noise_spec = StrideGP.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)")
+noise_spec = StrideGP.NoiseSpec()
+noisy_gt_traj = StrideGP.add_gaussian_noise(gt_traj_aligned; pos_std=noise_spec.pos_std, att_std=noise_spec.att_std)
 
 # Extract the aligned initial state from the trajectory
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
     ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(
+    StrideGP.matrix_to_euler(
         ins_traj_aligned.R_nb[:, :, 1]
     )
 )
@@ -223,15 +219,15 @@ N = length(inertial_updated)
 n_train_cutoff = floor(Int, train_ratio * N)
 gt_available = [n <= n_train_cutoff for n in 1:N]
 
-true_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
-pred_outputs = Dict{String,HybridZuptInsJl.CorrectionIO}()
+true_outputs = Dict{String,StrideGP.CorrectionIO}()
+pred_outputs = Dict{String,StrideGP.CorrectionIO}()
 
 io_data = OrderedDict()
 alloc = round(Int, N / 60)
 corr_filter = CORRECTION_FILTERS["V4"]
 
 zupt, step_seg, def_corr_traj, io_data["Default"], _ = corr_filter(
-    inertial_updated, sim_config_updated, noisy_gt_traj, HybridZuptInsJl.BaseEstimator(alloc);
+    inertial_updated, sim_config_updated, noisy_gt_traj, StrideGP.BaseEstimator(alloc);
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
 static_est = CORRECTORS["V4"].static(alloc; params=hsgp_opt, corrected_channels=output_channels)
@@ -249,10 +245,10 @@ _, _, hsgp_opt_traj, io_data["HSGP Opt"], _ = corr_filter(
     inertial_updated, sim_config_updated, noisy_gt_traj, hsgp_opt_est;
     x_init=x_init, gt_available=gt_available, ref_frame=FRAME, feature_type=FEATURE_TYPE)
 
-input_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-output_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-input_data_norm = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
-residual_data = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+input_data = OrderedDict{String,StrideGP.CorrectionIO}()
+output_data = OrderedDict{String,StrideGP.CorrectionIO}()
+input_data_norm = OrderedDict{String,StrideGP.CorrectionIO}()
+residual_data = OrderedDict{String,StrideGP.CorrectionIO}()
 
 for (method_name, io_dict) in io_data
     input_data["$method_name : Input"] = io_dict["input"]
@@ -269,22 +265,22 @@ trajs = OrderedDict(
 )
 GLMakie.activate!()
 
-fig_ori = HybridZuptInsJl.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
-fig_xyz = HybridZuptInsJl.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
-fig = HybridZuptInsJl.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
+fig_ori = StrideGP.plot_groundtruth_vs_inertial_orientations(trajs, gt_traj_aligned[step_seg])
+fig_xyz = StrideGP.plot_groundtruth_vs_inertial_xyz(trajs, gt_traj_aligned[step_seg])
+fig = StrideGP.plot_groundtruth_vs_inertial_positions(trajs, gt_traj_aligned[step_seg]; start=1, stop=10, show_heading=true, heading_stride=1)
 
 fig_rmse_hybrid = with_theme(theme_ggplot2()) do
-    HybridZuptInsJl.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
+    StrideGP.plot_position_rmse(trajs, gt_traj_aligned[step_seg]; show_index_ticks=true)
 end
 fig_dist = with_theme(theme_ggplot2()) do
-    HybridZuptInsJl.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
+    StrideGP.plot_position_distance_error(trajs, gt_traj_aligned[step_seg], gt_available[step_seg])
 end
 
-fig_out = HybridZuptInsJl.plot_regression_results(output_data, io_data["Default"]["target"])
+fig_out = StrideGP.plot_regression_results(output_data, io_data["Default"]["target"])
 
-fig_in = HybridZuptInsJl.plot_regression_results(input_data, io_data["Default"]["input"])
-fig_in_norm = HybridZuptInsJl.plot_regression_results(input_data_norm, io_data["HSGP Opt"]["input_norm"])
-fig_res = HybridZuptInsJl.plot_regression_results(residual_data)
+fig_in = StrideGP.plot_regression_results(input_data, io_data["Default"]["input"])
+fig_in_norm = StrideGP.plot_regression_results(input_data_norm, io_data["HSGP Opt"]["input_norm"])
+fig_res = StrideGP.plot_regression_results(residual_data)
 display(hsgp_opt.input_stats)
 display(hsgp_opt.output_stats)
 ## -- Save hyperparameters ---
@@ -299,7 +295,7 @@ mkpath(combo_dir)
 
 time = string(Dates.now())
 filename = "$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time).json"
-HybridZuptInsJl.to_json(joinpath(combo_dir, filename), hsgp_opt;
+StrideGP.to_json(joinpath(combo_dir, filename), hsgp_opt;
     metadata=Dict(
         "data_key" => data_key,
         "trial_id" => trial_id,

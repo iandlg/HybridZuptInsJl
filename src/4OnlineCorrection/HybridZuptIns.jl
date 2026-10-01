@@ -373,8 +373,6 @@ function hybrid_zupt_aided_ins(
 
         end
 
-        # R_nb_final = euler_to_matrix(x[7:9, :])
-        # zupt_ins_traj = Trajectory(inertial.t, x[1:3, :], R_nb_final, x[4:6, :])
 
         dx[:, seg_end] .= 0.0
         if zero_xcov

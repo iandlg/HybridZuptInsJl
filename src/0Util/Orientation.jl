@@ -250,10 +250,6 @@ end
 matrix_to_quat(R::AbstractMatrix{<:Integer}) = matrix_to_quat(float.(R))
 matrix_to_quat(R::AbstractArray{<:Integer,3}) = matrix_to_quat(float.(R))
 
-# Integer input
-matrix_to_quat(R::AbstractMatrix{<:Integer}) = matrix_to_quat(float.(R))
-matrix_to_quat(R::AbstractArray{<:Integer,3}) = matrix_to_quat(float.(R))
-
 
 """
     normalize_quat(q)

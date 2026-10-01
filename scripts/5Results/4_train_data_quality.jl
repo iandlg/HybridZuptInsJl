@@ -9,8 +9,7 @@
 # inside what is meant to be a training-data experiment. Use key 43 (DCSC) to
 # remove it, or state it explicitly.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames, Statistics
 import CSV
@@ -57,7 +56,7 @@ results_csv = nothing
 
 ## Run the sweep and save the numbers, or read a finished run back
 if isnothing(results_csv)
-    df = HybridZuptInsJl.training_data_quality_analysis(
+    df = StrideGP.training_data_quality_analysis(
         data_dir_path, estimators, train_labels, test_labels, params;
         frame=FRAME, feature_type=FEATURE_TYPE,
         test_tr_ratio=0.0,# no measurements; initialised from rigid alignment
@@ -80,7 +79,7 @@ else
 end
 
 results_figure() do
-    HybridZuptInsJl.plot_train_data_quality(df; metric=:rmse,
+    StrideGP.plot_train_data_quality(df; metric=:rmse,
         # Named after the CSV it plots, timestamp included.
         save_path=results_path(SECTION, "$(file_stem(csv_path)).pdf"))
 end

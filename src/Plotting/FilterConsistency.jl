@@ -1,25 +1,9 @@
 """
-Colours for the filter configurations compared in `scripts/5Results/6_single_filter.jl`.
-
-Tol vibrant, deliberately *not* `Makie.wong_colors()`: Wong is what the rest of the
-suite uses -- correction methods in `scripts/5Results/`, hyperparameter families in
-`OnlineHpSensitivity.jl` -- and a filter configuration is neither of those, so
-sharing the palette would imply a correspondence that does not exist. (Note that
-`ColorSchemes.okabe_ito` is not an alternative here: it is the same palette as
-Wong's, permuted.) Entry 1 is black for the uncorrected baseline, which is drawn
-first and sits at the back.
-
-Entries 2-4 are Tol vibrant's canonical three -- magenta, blue, orange -- in that
-order, so that the most separated pair, blue and orange, falls on the third and
-fourth run drawn. In §6 those are `cov_update=false` and the fixed-ZUPT-gain
-counterfactual, which coincide *by design*: they are the pair a reader has to be
-able to separate, and the earlier green-against-blue assignment was exactly the
-pair that fails at it, on a light panel and worse under deuteranopia. No green in
-the palette at all for that reason.
-
-Used positionally only as a fallback; pass `colors` (name => colour) to keep one
-configuration the same colour across every panel and every figure, which
-positional assignment cannot do when the panels hold different subsets of runs.
+Colours for the filter configurations in `scripts/5Results/6_single_filter.jl`: Tol
+vibrant (not Wong, which the suite uses for correction methods), black first for the
+baseline, and no green so the blue/orange pair that must be told apart stays separable
+under deuteranopia. Positional fallback only; pass `colors` (name => colour) to keep a
+configuration's colour fixed across panels.
 """
 const FILTER_CONFIG_COLORS = ["#000000", "#EE3377", "#0077BB", "#EE7733",
     "#009988", "#33BBEE", "#CC3311"]
@@ -32,27 +16,11 @@ end
 """
     plot_nees_comparison(runs; block, yscale, split_k, colors, dashed, title, save_path)
 
-Overlays NEES-over-time for multiple filter configurations against the
-chi-square 95% envelope, using the NamedTuples returned by `nees_series`
-(fields `k`, `pos`, `vel`, `att`, `lower`, `upper`, `dof`). One line per entry
-of `runs` (e.g. `cov_update=true` / `cov_update=false` / baseline), `block`
-selects which field (`:pos`, `:vel`, or `:att`) to plot. The lower/upper
-bound is drawn once from the first run (identical dof=3 chi-square bounds for
-every run, per `nees_series`'s docstring) — consistent filters keep their
-line inside the band ~95% of the time.
-
-`split_k` draws the train/test divider, and `yscale=log10` is what makes a
-full-run series readable: the train half sits at NEES ~1 while an inconsistent
-test half reaches ~1e3, so on a linear axis the earned shrink is flattened onto
-the x-axis by the unearned one. NEES is a Mahalanobis quadratic form, hence
-strictly positive, so the log axis is safe.
-
-`colors` maps a run name to its colour ([`FILTER_CONFIG_COLORS`](@ref) positionally
-otherwise), `dashed` lists the runs drawn dashed, and `legend_position` moves the
-legend off the data when a run climbs into the default top-right corner. Legend entries are the run
-names alone: the per-run statistics belong in the table the caller prints, and a
-single consistency percentage over a run whose two halves differ by 70 points is
-not a number worth putting on a figure.
+NEES over time of several runs (`name => nees_series` result) against the 95% χ²
+envelope, for `block` `:pos`, `:vel` or `:att`. `split_k` draws the train/test divider;
+`yscale=log10` keeps train (NEES ~1) and an inconsistent test half (~1e3) both readable.
+`colors` maps names to colours ([`FILTER_CONFIG_COLORS`](@ref) otherwise), `dashed` lists
+runs drawn dashed.
 """
 function plot_nees_comparison(
     runs::AbstractDict{String,<:NamedTuple};
@@ -93,53 +61,14 @@ end
 """
     plot_zupt_starvation(runs; poserr, smooth, split_k, colors, dashed, title, save_path)
 
-Shows *why* a GP covariance update costs position accuracy: it starves the ZUPT.
+Why a GP covariance update costs position accuracy: collapsing `P[1:3,1:3]` throttles
+the ZUPT position gain `K[1:3,:] = P[1:3,4:6] S⁻¹`, the only path that corrects position.
 
-Position is never directly observed in a ZUPT-aided INS. The only channel that
-walks back the error accumulated during the swing phase is the
-position<->velocity cross-covariance carried in `P`, through the position rows
-of the ZUPT gain `K[1:3,:] = P[1:3,4:6] * S^-1`. A GP measurement update applied
-to the absolute `P` collapses `P[1:3,1:3]`, and that gain collapses with it.
-
-`runs` maps a configuration name to the NamedTuple from `zupt_gain_series`:
-
-  (a) `tr(P[1:3,1:3])` at ZUPT epochs -- the collapse (the cause).
-  (b) `‖K[1:3,:]‖` -- the throttled channel (the mechanism).
-
-`poserr` maps `name => (k, err)` for the bottom panel, which carries the causal
-claim: include a counterfactual run with the collapsed `P` left in place
-*everywhere except* the ZUPT gain (`p_split=:downstream_only,
-zupt_gain_source=:P_alt`). If that curve lands on the `cov_update=false` curve,
-the ZUPT gain is the whole mechanism and (b) is causal rather than correlated.
-Name it in `dashed` so it is drawn dashed and heavier, and visibly on top of the
-curve it is supposed to land on.
-
-`colors` maps a run name to its colour, [`FILTER_CONFIG_COLORS`](@ref)
-positionally otherwise. Pass it whenever the panels hold different subsets of the
-runs -- (a)/(b) typically compare two configurations while (c) shows four -- since
-positional assignment would then paint the same configuration differently in
-different panels of one figure.
-
-Both top panels plot a centred moving average of width `smooth` on a log scale.
-The raw per-epoch values span decades within a single stance phase (`P` is cut
-at every ZUPT and regrows through the swing), so the unsmoothed trace is a solid
-band that hides the between-configuration difference and bloats vector output.
-Legend entries are the run names alone; the per-run means belong in the table the
-caller prints.
-
-Note this deliberately does *not* plot cumulative delivered correction
-`sum‖Δp‖`: that sums magnitudes irrespective of direction, and does not separate
-the configurations.
-
-`split_k` marks the train/test boundary and extends the reading to the train
-half, where the mocap update — not the GP — is what shrinks `P`. That comparison
-answers the question the test half cannot: the mocap update is also an absolute
-4-dof update on `P`, so if it starves the gain just as hard while costing
-nothing, the damage is not the shrink itself but the absence of anything to
-replace the channel it closes. Note the configurations are *identical* left of
-`split_k` (`cov_update` gates only the GP branch), so the curves coincide there
-by construction. Each phase is smoothed independently: a centred moving average
-run across the boundary would smear the step at `split_k`, which is the payload.
+`runs` maps names to [`zupt_gain_series`](@ref) results: (a) `tr(P[1:3,1:3])` and (b)
+`‖K[1:3,:]‖` at ZUPT epochs, both log-scale and smoothed with a centred moving average of
+width `smooth` (per phase, so the step at `split_k` survives). `poserr` maps
+`name => (k, err)` for the bottom position-error panel; mark a counterfactual run in
+`dashed`. `colors` keeps names consistent across panels.
 """
 function plot_zupt_starvation(
     runs::AbstractDict{String,<:NamedTuple};

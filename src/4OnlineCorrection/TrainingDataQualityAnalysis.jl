@@ -1,27 +1,11 @@
 """
-    training_data_quality_analysis(
-        data_dir::AbstractString,
-        estimators::AbstractDict{<:AbstractString},
-        train_labels::AbstractDict{<:Integer,<:AbstractString},
-        test_labels::AbstractDict{<:Integer,<:AbstractString},
-        params::HsgpParameters;
-        corrected_channels::Vector{Symbol}=[:pos_1, :pos_2, :pos_3, :yaw],
-        frame::ReferenceFrame=BODY,
-        feature_type::FeatureType=THREED_STEP,
-        test_tr_ratio::Float64=0.1,
-        train_tr_ratio::Float64=1.0
-    )::DataFrame
+    training_data_quality_analysis(data_dir, estimators, train_labels, test_labels, params;
+        corrected_channels, frame=BODY, feature_type=THREED_STEP,
+        test_tr_ratio=0.1, train_tr_ratio=1.0) -> DataFrame
 
-For each estimator in `estimators`, and for each `train_id`, train a corrector on that
-track, extract the resulting `(β, Σβ)` via `get_model`, then apply it frozen to each
-`test_id` and record horizontal RMSE / RMSE-rate.
-
-`test_tr_ratio=0` gives the test walks the mocap pose at k=1 only: the corrector starts on
-it and then propagates the frozen model with no test-walk updates.
-
-The input dictionaries are ordered by iteration. The returned `DataFrame` contains
-`estimator_order`, `train_order`, and `test_order` columns so plotting functions can
-respect the same order.
+Per estimator and training track: train a corrector, freeze its `(β, Σβ)` (`get_model`)
+and score it on every test track. `test_tr_ratio=0` gives test walks only the start
+pose. `*_order` columns record the input dictionaries' iteration order for plotting.
 """
 function training_data_quality_analysis(
     data_dir::AbstractString,

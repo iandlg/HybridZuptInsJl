@@ -1,3 +1,21 @@
+StrideGP
 
+Pedestrian inertial navigation in Julia: a ZUPT-aided (zero-velocity update) strapdown
+INS whose stride increments are corrected online by a Hilbert-space Gaussian process
+(HSGP) learned from mocap/reference ground truth, with the stride model's coefficients
+estimated inside the filter.
 
-Thank you for the HSGP hyperparameter opitmization code and HSGP basis function code from Kok, M., Solin, A., & Schön, T. B. (2024). Rao-Blackwellized Particle Smoothing for Simultaneous Localization and Mapping. Data-Centric Engineering, 5. https://doi.org/10.1017/dce.2024.12
+Running (from the repository root, Julia 1.12):
+
+    julia --project=. -e 'using Pkg; Pkg.instantiate()'
+    julia --project=. scripts/4OnlineCorrection/4_hybrid_zupt_ins.jl
+    julia --project=. -t 1 -e 'using Pkg; Pkg.test()'
+
+Scripts load the package with `using StrideGP`; the figure scripts in scripts/5Results/
+share scripts/5Results/_common.jl. Data is expected under data/ and outputs go to out/
+(both gitignored).
+
+Thank you for the HSGP hyperparameter optimization code and HSGP basis function code from
+Kok, M., Solin, A., & Schön, T. B. (2024). Rao-Blackwellized Particle Smoothing for
+Simultaneous Localization and Mapping. Data-Centric Engineering, 5.
+https://doi.org/10.1017/dce.2024.12

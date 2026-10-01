@@ -1,30 +1,14 @@
 """
-Label and colour vocabulary for the sensitivity figures (`OnlineHpProbe.jl`),
-plus the multiplier-axis ticks they share.
-
-Every swept parameter is labelled `[symbol]_k`: the symbol of its kind in
-brackets, subscripted by which one it is. For a GP hyperparameter `k` is the
-channel's position among the swept channels (pos_1, pos_2, yaw -> 1, 2, 3); for
-a normalisation statistic it is the feature dimension. So `yaw[2]` renders as
-`[ℓ_SE]_3` and `input_std[3]` as `[σ_x]_3`.
-
-The parameter *names* in a sweep frame (`yaw[2]`, `input_std[3]`) are not
-touched here; see [`hp_param_name`](@ref) and [`stat_param_name`](@ref).
+Label and colour vocabulary for the sensitivity figures (`OnlineHpProbe.jl`), plus the
+shared multiplier-axis ticks. Parameters are labelled `[symbol]_k`, `k` being the
+channel's position among the swept channels (hyperparameters) or the feature dimension
+(statistics): `yaw[2]` → `[ℓ_SE]_3`, `input_std[3]` → `[σ_x]_3`.
 """
 
 """
-Every kind a sweep can contain, in legend order: `type => (symbol, subscript,
-colour)`. The key is the `type` column the sweep writes. The three GP
-hyperparameters come first, then the input normalisation statistics.
-
-Symbols are stored as `(base, subscript)` pairs rather than strings because
-Unicode has no subscript `f` or `S`, so they are rendered with Makie's
-`rich`/`subscript`.
-
-Colours: the hyperparameters take Wong 4-6, because Wong 1-3 are what the
-estimator figures in `scripts/5Results/` give to the correction types (ZUPT only
-/ Static / HSGP) and Wong 7 (yellow) is too light for a thin line. The
-statistics take Tol muted, so no two kinds share a colour.
+Every kind a sweep can contain, in legend order: `type => (symbol, subscript, colour)`,
+keyed by the sweep's `type` column. Hyperparameters take Wong 4-6 (1-3 belong to the
+correction types), the statistics Tol muted.
 """
 const _PARAM_KINDS = [
     "noise" => ("σ", "n", Makie.wong_colors()[4]),
@@ -153,16 +137,8 @@ end
 """
     _hp_tick_positions(mults; max_ticks=7) -> Vector{Float64}
 
-Which of the swept multipliers get a labelled tick. A tick per swept value is
-right for the 3-5 step sweeps, but a 15- or 21-step sweep overruns the axis and
-the labels collide, so beyond `max_ticks` this thins them out.
-
-Thinning is anchored on the ×1 tick and steps outwards by a constant stride, so
-the baseline is always labelled and the kept ticks stay evenly spaced (the sweep
-is geometric, so constant stride is constant distance on the log axis). The two
-endpoints are added back when they are not already kept, since they are the
-extremes of the range the figure is claiming -- but only when doing so leaves a
-gap, otherwise re-adding them recreates the collision being avoided.
+Swept multipliers that get a labelled tick: all of them up to `max_ticks`, otherwise
+an even stride anchored on ×1, plus the endpoints where they don't collide.
 """
 function _hp_tick_positions(mults::AbstractVector{<:Real}; max_ticks::Int=7)
     pos = sort(unique(float.(mults)))
@@ -196,13 +172,7 @@ end
 """
     hp_multiplier_label(m) -> String
 
-A single multiplier rendered the way the sensitivity axis renders it: `×0.1`, `×1`,
-`×10`. The exact baseline is `×1`, not `×1.0`, since it is the reference the reader
-looks for first.
-
-Public, and separate from [`_hp_multiplier_ticks`](@ref), so a figure that labels
-individual series by their multiplier spells them exactly as the axis of the sweep
-figure does -- that identity is what lets a reader carry a point from one to the other.
+A multiplier as the sensitivity axis renders it: `×0.1`, `×1`, `×10`.
 """
 function hp_multiplier_label(m::Real)::String
     isapprox(m, 1.0; rtol=1e-6) && return "×1"
@@ -217,13 +187,9 @@ const _HP_PCT_TICKFORMAT = vs -> [string(round(v; digits=1), "%") for v in vs]
 """
     hp_param_name(channel, kind) -> String
 
-The `parameter` string `vary_hsgp_parameters` uses for one hyperparameter, e.g.
-`hp_param_name(:yaw, :length_scale) == "yaw[2]"`. Spelling the name out beats
-hard-coding the index at the call site, where `"yaw[2]"` gives the reader no way
-to tell a length scale from a signal variance.
-
-`kind` is one of `:noise`, `:length_scale`, `:signal_variance` (the values of
-`_HYPERPARAM_TYPES`).
+The sweep's `parameter` string for one hyperparameter, e.g.
+`hp_param_name(:yaw, :length_scale) == "yaw[2]"`. `kind` is `:noise`, `:length_scale`
+or `:signal_variance`.
 """
 function hp_param_name(channel::Union{Symbol,AbstractString}, kind::Union{Symbol,AbstractString})::String
     want = String(kind)
@@ -238,14 +204,9 @@ end
 """
     stat_param_name(family, dim) -> String
 
-The `parameter` string `vary_hsgp_parameters` uses for one normalisation
-statistic, e.g. `stat_param_name(:input_std, 2) == "input_std[2]"`. The
-counterpart to [`hp_param_name`](@ref) for the other family
-`make_stats_param_grid` sweeps, so a script naming a focus parameter never has
-to hard-code a bracketed index whose meaning differs between the two families.
-
-`family` is `:input_mean`, `:input_std` or `:input_center`; `dim` is a feature
-dimension.
+The sweep's `parameter` string for one normalisation statistic, e.g.
+`stat_param_name(:input_std, 2) == "input_std[2]"`. `family` is `:input_mean`,
+`:input_std` or `:input_center`.
 """
 function stat_param_name(family::Union{Symbol,AbstractString}, dim::Integer)::String
     key = String(family)
@@ -259,12 +220,6 @@ end
 """
     param_slug(name) -> String
 
-Filename-safe form of a sweep parameter name: `"yaw[2]"` -> `"yaw_2"`,
-`"input_std[3]"` -> `"input_std_3"`. Brackets are legal in a POSIX filename but
-are glob metacharacters, so a saved figure called `..._yaw[2]_sensitivity.svg`
-is awkward to reach from a shell and from LaTeX's `\\includegraphics`.
-
-Lives here rather than in a script because both parameter families produce names
-of this shape and every caller wants the same transformation.
+Filename-safe parameter name: `"yaw[2]"` → `"yaw_2"` (brackets are glob characters).
 """
 param_slug(name::AbstractString)::String = replace(String(name), "[" => "_", "]" => "")

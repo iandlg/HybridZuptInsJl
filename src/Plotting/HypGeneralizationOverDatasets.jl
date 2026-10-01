@@ -1,29 +1,9 @@
 """
-    boxplot_dataset_comparison(
-        df::DataFrame;
-        metric::Symbol=:rmse,
-        train_ratio::Union{Real,Nothing}=nothing,
-        save_path::Union{String,Nothing}=nothing,
-    )
+    boxplot_dataset_comparison(df; metric=:rmse, train_ratio=nothing, save_path=nothing) -> Figure
 
-Boxplot of `rmse` or `rmse_rate` grouped by dataset (`dataset_name`), with one boxplot per
-correction method (`estimator`) inside each dataset group. Each box aggregates over all
-`trial_id`s for that `(dataset_name, estimator)` pair.
-
-If the DataFrame contains multiple `train_ratio` values and `train_ratio` is not
-specified, one subplot is produced per `train_ratio` (faceted, similar to
-`plot_train_data_quality`). Pass `train_ratio` explicitly to restrict to a single ratio
-and get a single axis.
-
-# Arguments
-- `df`: Output of `run_online_correction_sweep` (needs `dataset_name`, `estimator`,
-  `estimator_order`, `train_ratio`, and the chosen `metric` column).
-- `metric`: `:rmse` or `:rmse_rate`.
-- `train_ratio`: If given, filters to that single train ratio before plotting.
-- `save_path`: Optional path to save the figure.
-
-# Returns
-- A `Figure` object.
+Boxplots of `metric` over trials from a `run_online_correction_sweep` frame, grouped by
+`dataset_name` with one box per `estimator`. One facet per `train_ratio` unless
+`train_ratio` selects a single one.
 """
 function boxplot_dataset_comparison(
     df::DataFrame;

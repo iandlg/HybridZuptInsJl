@@ -1,39 +1,9 @@
 
 """
-    power_spectral_density(omega, ls, sigma_f)
+    power_spectral_density(omega, ls, sigma_f) -> Vector
 
-Power spectral density (PSD) for the Squared Exponential (SE) kernel.
-
-# Mathematical definition
-
-```math
-S(\\boldsymbol{\\omega}) = \\sigma_f^2 (\\sqrt{2\\pi})^D
-    \\left(\\prod_{i=1}^{D} \\ell_i\\right)
-    \\exp\\left(-\\frac{1}{2} \\sum_{i=1}^{D} \\ell_i^2 \\omega_i^2\\right)
-
-Arguments
-
-    omega: Matrix of frequencies, size (m_star, d), where m_star is the number of
-    frequency points and d is the input dimension. Each column corresponds to one dimension.
-
-    ls: Length scale(s). Can be a scalar (same for all dimensions) or a vector of length d.
-
-    sigma_f: Standard deviation (signal amplitude) of the SE kernel.
-
-Returns
-
-    A vector of length m_star containing the PSD value for each frequency point.
-
-Example
-julia
-
-# Isotropic length scale (same for both dimensions)
-omega = randn(100, 2)
-psd = power_spectral_density(omega, 0.5, 1.0)
-
-# Anisotropic length scales
-psd = power_spectral_density(omega, [0.3, 1.2], 2.0)
-
+SE-kernel spectral density `σ_f² (√(2π))^D ∏ℓᵢ exp(-½ Σ ℓᵢ² ωᵢ²)` at each row of
+`omega` (`m_star × d`). `ls` is a scalar or a length-`d` vector.
 """
 function power_spectral_density(
     omega::AbstractMatrix{T},
@@ -52,24 +22,10 @@ end
 
 
 """
-    calc_eigenvalues(L::AbstractVector{T}, m::Int, d::Int)::AbstractMatrix{T} where T<:Real
+    calc_eigenvalues(L, m, d) -> Matrix
 
-Calculate eigenvalues of the Laplacian on `[-L₁,L₁] x ... x [-L_d,L_d]`
-with Dirichlet boundary conditions, returning the `m` smallest.
-
-For each dimension `i`, the 1-D eigenvalues are `λ_{n_i} = (π n_i / (2 L_i))²` with
-`n_i = 1,2,…`. The full eigenvalues are the sum over dimensions. The function
-selects the `m` smallest sums and returns the per-dimension eigenvalue components.
-
-# Arguments
-- `L`: Domain half-widths per dimension, length `d`.
-- `m`: Number of eigenvalues (and eigenfunctions) to return.
-- `d`: Number of input dimensions.
-
-# Returns
-- `selected_per_dim_eigenvalues`: Matrix of size `(m, d)` containing the per-dimension
-  eigenvalue components for the `m` smallest eigenvalues, sorted in ascending order
-  of the summed eigenvalue.
+Per-dimension components `(π nᵢ / (2Lᵢ))²` (`m × d`) of the `m` smallest Dirichlet
+Laplacian eigenvalues on `[-L₁,L₁] × … × [-L_d,L_d]`, sorted by their sum.
 """
 function calc_eigenvalues(L::AbstractVector{<:Real}, m::Int, d::Int)::AbstractMatrix{Float64}
     L_float = Float64.(L)
@@ -100,23 +56,10 @@ function calc_eigenvalues(L::Real, m)::AbstractMatrix{Float64}
     calc_eigenvalues([L], m, 1)
 end
 """
-    calc_eigenvectors(Xs::AbstractMatrix{<:Real}, L::AbstractVector{<:Real},
-                      per_dim_eigvals::AbstractMatrix{<:Real}) -> Matrix{Float64}
+    calc_eigenvectors(Xs, L, per_dim_eigvals) -> Matrix{Float64}
 
-Calculate eigenvectors of the Laplacian on a rectangular domain with Dirichlet boundary
-conditions. These eigenvectors serve as basis functions for the Hilbert Space Gaussian
-Process (HSGP) approximation.
-
-# Arguments
-- `Xs`: Input points of size `(n_samples, d)`.
-- `L`: Domain half-widths of length `d`, i.e. domain is `[-L₁, L₁] x ... x [-L_d, L_d]`.
-- `per_dim_eigvals`: Per-dimension eigenvalues of size `(m, d)`, where each row
-  corresponds to a multi-index `(n₁, …, n_d)` and each column `j` gives
-  `(π n_j / (2 L_j))²`.
-
-# Returns
-- `phi`: Basis matrix of size `(n_samples, m)` containing the eigenvector values
-  (product of sine functions) evaluated at the input points.
+HSGP basis `φ(x) = ∏ⱼ (1/√Lⱼ) sin(√λⱼ (xⱼ + Lⱼ))` evaluated at `Xs` (`n × d`), giving an
+`n × m` matrix; `per_dim_eigvals` comes from `calc_eigenvalues`.
 """
 function calc_eigenvectors(Xs::AbstractMatrix{T}, L::AbstractVector{<:Real},
     per_dim_eigvals::AbstractMatrix{T})::AbstractMatrix{T} where T<:Real
@@ -145,34 +88,10 @@ function calc_eigenvectors(Xs::AbstractMatrix{T}, L::AbstractVector{<:Real},
 end
 
 """
-    calc_eigenvectors_dx(Xs::AbstractMatrix{<:Real}, L::AbstractVector{<:Real},
-                         per_dim_eigvals::AbstractMatrix{<:Real}, di::Int) -> Matrix{Float64}
+    calc_eigenvectors_dx(Xs, L, per_dim_eigvals, di) -> Matrix{Float64}
 
-Calculate the derivative of the Laplacian eigenvectors on a rectangular domain with
-Dirichlet boundary conditions with respect to input dimension `di`.
-
-Each eigenfunction is a product of 1-D sine functions:
-
-    φ(x) = ∏ⱼ (1/√Lⱼ) sin(√λⱼ (xⱼ + Lⱼ))
-
-where √λⱼ = π nⱼ / (2 Lⱼ) is recovered from `per_dim_eigvals`.
-
-Differentiating with respect to xᵢ replaces the i-th factor by its derivative:
-
-    ∂φ/∂xᵢ = (√λᵢ / √Lᵢ) cos(√λᵢ (xᵢ + Lᵢ)) · ∏ⱼ≠ᵢ (1/√Lⱼ) sin(√λⱼ (xⱼ + Lⱼ))
-
-which is equivalent to the original `calc_eigenvectors`, but with the `di`-th factor
-replaced by `(√λᵢ / √Lᵢ) cos(√λᵢ (xᵢ + Lᵢ))` instead of `(1/√Lᵢ) sin(...)`.
-
-# Arguments
-- `Xs`: Input points of size `(n_samples, d)`.
-- `L`: Domain half-widths of length `d`, i.e. domain is `[-L₁,L₁] x … x [-Lₐ,Lₐ]`.
-- `per_dim_eigvals`: Per-dimension eigenvalue components of size `(m, d)`, where each
-  entry `[k, j]` equals `(π nⱼ / (2 Lⱼ))²`. Matches the output of `calc_eigenvalues`.
-- `di`: Dimension index (1-based) with respect to which to differentiate.
-
-# Returns
-- `dphi`: Derivative basis matrix of size `(n_samples, m)`.
+`∂φ/∂x_di` of the [`calc_eigenvectors`](@ref) basis: the `di`-th sine factor is replaced
+by `(√λᵢ / √Lᵢ) cos(√λᵢ (xᵢ + Lᵢ))`.
 """
 function calc_eigenvectors_dx(
     Xs::AbstractMatrix{<:Real},
@@ -221,13 +140,9 @@ end
 """
     nlml(w, y, lambda, Phiy, PhiPhi, d, m, opt, theta, use_linear)
 
-Compute the negative log marginal likelihood and its gradient w.r.t. the
-log-transformed hyperparameters for the SE kernel reduced-rank GP.
-
-Only the hyperparameters indicated by `opt` (indices 1:σ_n, 2:ℓ, 3:σ_f, 4:σ_lin) are
-being optimised; `w` contains their logs in that order. Non-optimised
-hyperparameters are taken from `theta`. When `use_linear=false`, σ_lin is
-excluded from the basis and its gradient is never computed.
+Negative log marginal likelihood of the reduced-rank SE (+ optional linear) GP and its
+gradient in the logs `w` of the hyperparameters selected by `opt`
+(1:σ_n, 2:ℓ, 3:σ_f, 4:σ_lin); the rest come from `theta`.
 """
 function nlml(
     w::AbstractVector{T},
@@ -329,36 +244,20 @@ end
 
 
 """
-    hsgp_regression(x, y, xt, m; kwargs...)
+    hsgp_regression(x, y, xt, m; kwargs...) -> (Eft, Varft, theta, lik, Lvec)
 
-Reduced-rank Gaussian process regression (Hilbert-space approximation) with an
-optional linear kernel component plus a squared-exponential kernel.
+Reduced-rank (Hilbert-space) GP regression of `y` on `x` (`n × d`) with `m` SE basis
+functions plus an optional linear component, predicting at `xt`.
 
-# Arguments
-- `x`            : training inputs (n x d)
-- `y`            : training targets (n-vector)
-- `xt`           : test inputs (nₜ x d)
-- `m`            : number of SE basis functions
+- `theta`: `[σₙ, ℓ, σ_f, σ_lin]` start values; if empty and `rng` is given, sampled
+  log-uniformly between `lower` and `upper`.
+- `opt`: which entries of `theta` to optimise (length-4 `Bool`).
+- `LL`: `2 × d` domain bounds, or `nothing` for the data range plus 10%.
+- `predcf`: components used for prediction, `[1]` linear, `[2]` SE.
+- `optimizer`, `optim_options`: passed to `Optim.optimize`.
 
-# Keyword Arguments
-- `LL`           : domain bounds (2 x d), or `nothing` → auto-computed with 10 % padding
-- `theta`        : `[σₙ, ℓ, σ_f, σ_lin]` (standard deviations); σ_lin is ignored when `use_linear=false`
-- `opt`          : which of `theta` to optimise — length-4 `Bool` vector (default all `true`)
-- `use_linear`   : include the linear kernel component (default `true`)
-- `predcf`       : kernel components for prediction — `[1]` = linear, `[2]` = SE (default `[1, 2]`)
-- `lower`        : lower bounds for `[σₙ, ℓ, σ_f, σ_lin]` (default `1e-6`)
-- `upper`        : upper bounds for `[σₙ, ℓ, σ_f, σ_lin]` (default `1e6`)
-- `rng`          : optional RNG; when provided and `theta` is empty, sample `theta` uniformly in log-space from the bounds
-- `optimizer`    : `Optim.jl` optimizer (default `LBFGS()`)
-- `optim_options`: `Optim.Options` (default `Optim.Options()`)
-
-# Returns
-`(Eft, Varft, theta, lik, Lvec)` where:
-- `Eft`   : posterior mean at test points
-- `Varft` : posterior marginal variance at test points
-- `theta` : final (possibly optimised) hyperparameters
-- `lik`   : negative log marginal likelihood at the final hyperparameters
-- `Lvec`  : half-widths of the scaled domain
+Returns the posterior mean and marginal variance at `xt`, the final `theta`, the NLML
+and the domain half-widths.
 """
 function hsgp_regression(
     x::AbstractMatrix{T},

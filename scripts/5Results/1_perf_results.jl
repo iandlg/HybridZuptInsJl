@@ -1,20 +1,7 @@
-# THESIS SECTION 1 (headline): performance vs how much ground truth is available
-# online (train_ratio), for every corrector, across all trials of a dataset.
-#
-# Structurally this is the strongest sweep in 5Results: a genuinely swept
-# continuous x-axis with per-trial replication at every level.
-#
-# It now runs through `collect_aligned_trajectories` + `run_online_correction_sweep`,
-# the same path as every other 5Results script, instead of the older
-# `collect_dataset`/`performance_dataframe` pair. That path took *instances* of the
-# estimators and re-aligned each trial once per (corrector, train_ratio) cell, i.e.
-# it repeated the INS/GT alignment |correctors| x |train_ratios| times per trial for
-# no reason; the sweep aligns each trial once and reuses it. It also scores yaw
-# (`rmse_yaw`) and keeps the raw filter outputs in the frame, neither of which the
-# old path returned.
+# Section 1 (headline): performance vs how much ground truth is available online
+# (train_ratio), for every corrector, across all trials of a dataset.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames
 import CSV
@@ -24,7 +11,7 @@ import CSV
 # "across all trials" claim.
 data_key = "ANG2"
 data_dir_path = data_dir(data_key)
-ids = trial_ids(data_key) #  HybridZuptInsJl.list_trial_ids(data_dir_path; foot="R")
+ids = trial_ids(data_key)
 
 data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
     "Angerman" => (data_dir_path, ids),
@@ -48,7 +35,7 @@ filter_tag = "V4"
 # 2. Align INS / GT trajectories once per trial.
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
 # script, and nothing downstream of the scores table needs the trajectories.
-aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(data_dict) : nothing
+aligned = isnothing(results_csv) ? StrideGP.collect_aligned_trajectories(data_dict) : nothing
 
 ## 3. Hyperparameters
 hsgp_p_key = 42
@@ -59,7 +46,7 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 ## 4. Correction methods to compare
 estimators = OrderedDict(
-    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "ZUPT only" => StrideGP.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
@@ -79,7 +66,7 @@ score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_rat
     :rmse, :rmse_rate, :rmse_yaw]
 
 if isnothing(results_csv)
-    results_df = HybridZuptInsJl.run_online_correction_sweep(
+    results_df = StrideGP.run_online_correction_sweep(
         aligned,
         FRAME,
         FEATURE_TYPE,
@@ -123,11 +110,11 @@ const BASE_ESTIMATOR = "ZUPT only"
 const DATASET = first(unique(results_df.dataset_name))
 
 for metric in (:rmse, :rmse_yaw)
-    paired = HybridZuptInsJl.paired_estimator_contrast(
+    paired = StrideGP.paired_estimator_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR,
         train_ratios=sort(unique(results_df.train_ratio)))
     results_figure() do
-        HybridZuptInsJl.plot_train_ratio_paired_relative_change(
+        StrideGP.plot_train_ratio_paired_relative_change(
             paired, DATASET;
             metric=metric,
             show_outliers=true,

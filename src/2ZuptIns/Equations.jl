@@ -96,7 +96,6 @@ function state_matrix(
     R_nb = quat_to_matrix(q)   # 3x3
 
     # Specific force in navigation frame
-    # f_t = Rb2t * u[1:3]        # 3-element vector
 
     # Skew-symmetric matrix of f_t
     S_n = -R_nb * skew(u[1:3])

@@ -1,16 +1,7 @@
 """
-Consistency diagnostics for the ZUPT-aided INS + HSGP correction filter.
-
-Provides:
-  * `StepDiagnostics`  – per-step record filled inside the V1 filter loop
-  * `CorrectorDiagnostics` – per-footfall record of a V4 corrector's own state and Σ,
-    with `corrector_nees_series` / `pos_cov_trace` reading it
-  * `nees_series`      – post-hoc NEES per state block, with chi-square bounds
-  * `autocorr`         – innovation whiteness test with significance bands
-  * `noise_state_correlation` – direct test of the Kalman independence assumption
-  * `inflation_sweep`  – RMSE / ANEES as a function of measurement-noise inflation
-
-Nothing here is used by the filter itself; all quantities are evaluation-only.
+Evaluation-only consistency diagnostics for the correction filters (nothing here is
+used by the filters themselves): `StepDiagnostics` (V1, per step), `CorrectorDiagnostics`
+(V4 corrector, per footfall), NEES series and ZUPT gain series.
 """
 
 
@@ -71,9 +62,9 @@ Base.length(d::StepDiagnostics) = length(d.k)
 """
     record_step!(diagnostics; ...)
 
-Called once per corrected footfall. `y_meas` is what the filter actually
-consumed, `y_true_stride` the true stride error mapped through the same
-`R_aug_wl`, `e_state_true` the true absolute state error in measurement space.
+Called once per corrected footfall. `y_meas` is what the filter consumed,
+`y_true_stride` the true stride error through the same `R_aug_wl`, `e_state_true` the
+true absolute state error in measurement space.
 """
 function record_step!(diagnostics::StepDiagnostics;
     k::Int, t::Float64,
@@ -109,16 +100,8 @@ end
 # =====================================================================
 
 """
-Per-footfall record of an `AbstractEstimator`'s own state and covariance, filled
-by `hybrid_zupt_aided_insv4` when it is handed one.
-
-The correctors keep `Σ` as a single matrix whose leading 6×6 block is over
-`[pos(1:3); att(4:6)]`, and overwrite it every footfall, so after a run only the final value survives.
-Anything that wants the series -- NEES, the covariance trace -- has to be
-recorded while the filter runs, which is what this is for.
-
-`k` is the IMU sample index of the footfall, so every series indexes the same
-axis as the V1 diagnostics and the `split_k` divider in the plots.
+Per-footfall record of a corrector's state and `[pos; att]` covariance, filled by
+`hybrid_zupt_aided_insv4` when passed `diagnostics=`. `k` is the IMU sample index.
 """
 Base.@kwdef struct CorrectorDiagnostics
     k::Vector{Int} = Int[]
@@ -133,12 +116,8 @@ Base.length(d::CorrectorDiagnostics) = length(d.k)
 """
     record_corrector!(d, c; k, t)
 
-Snapshot the corrector at one footfall. Call it *after* `relinearize!`, so the
-record is the posterior -- state and `Σ` after whichever update that footfall
-took (mocap in the train half, GP in the test half).
-
-`Σ` is copied rather than aliased: the next `dynamic_update!` writes the same
-matrix in place.
+Snapshot (a copy of) the corrector's posterior state and `Σ` at one footfall; call it
+after `relinearize!`.
 """
 function record_corrector!(d::CorrectorDiagnostics, c::AbstractEstimator; k::Int, t::Float64)
     push!(d.k, k)
@@ -150,21 +129,11 @@ function record_corrector!(d::CorrectorDiagnostics, c::AbstractEstimator; k::Int
 end
 
 """
-    corrector_nees_series(d, gt_traj; att_convention, include_vel)
+    corrector_nees_series(d, gt_traj; att_convention=:left, include_vel=false)
 
-NEES of a corrector against ground truth, per footfall. An adapter
-onto [`nees_series`](@ref) rather than a second implementation of it: the 6×6
-`[pos; att]` covariance is embedded into the 9-state layout that function
-expects (position 1:3, attitude 7:9, velocity block left at zero and never
-read), and ground truth is subsampled to the footfall samples with `gt_traj[d.k]`.
-
-The returned `k` is relabelled to the IMU sample indices, so the result drops
-straight into `plot_nees_comparison` alongside a `split_k` divider.
-
-`att_convention` defaults to `:left` here, NOT to `nees_series`'s `:right`:
-`relinearize!` on the correctors applies `quat_exp(δθ) * q`, a left
-perturbation, so the attitude error matching their `Σ[4:6,4:6]` is
-`logmap(R_gt * R_est')`. Position NEES is unaffected either way.
+Per-footfall NEES of a corrector against ground truth, via [`nees_series`](@ref) with `k`
+relabelled to IMU sample indices. Defaults to `:left` because the correctors perturb
+attitude on the left (`quat_exp(δθ) * q`).
 """
 function corrector_nees_series(d::CorrectorDiagnostics, gt_traj;
     att_convention::Symbol=:left, include_vel::Bool=false)
@@ -190,14 +159,8 @@ end
 """
     nees_yaw_series(d, gt_traj; att_convention=:left) -> (k, yaw, lower, upper, dof=1)
 
-Yaw-only NEES of a corrector, per footfall: the third component of the same
-attitude error vector `corrector_nees_series` uses, over `Σ[6,6]` alone, against
-a `Chisq(1)` envelope.
-
-Separate from the 3-dof `att` NEES because roll and pitch are observed by nothing
-in this corrector, so their inflated covariance drags the 3-dof statistic towards
-zero and hides what the yaw channel is doing — which is the channel the stride
-noise model is argued on (notes/015 §2.5).
+Yaw-only NEES of a corrector per footfall (`Σ[6,6]`, `Chisq(1)` envelope). Roll and pitch
+are unobserved, so the 3-dof attitude NEES would hide the yaw channel (notes/015 §2.5).
 """
 function nees_yaw_series(d::CorrectorDiagnostics, gt_traj; att_convention::Symbol=:left)
     n = length(d)
@@ -222,19 +185,12 @@ end
 # =====================================================================
 
 """
-    nees_series(x, P, quat, gt_traj; ks, att_convention)
+    nees_series(x, P, quat, gt_traj; ks, att_convention=:right, include_vel=false)
 
-Per-sample NEES for the position / velocity / attitude blocks separately.
-Blocks are kept apart on purpose: pooling them hides which one diverges and
-mixes units with wildly different scales.
-
-`att_convention` selects the attitude error definition matching the filter's
-perturbation model. `:right` uses logmap(R_ins' * R_gt), `:left` uses
-logmap(R_gt * R_ins'). Given the `d(theta3)/d(delta_theta)_right` Jacobian in
-the measurement matrix, `:right` is the one to use.
-
-Returns a NamedTuple of vectors plus the two-sided 95% chi-square bounds for a
-single run (dof = 3).
+Per-sample NEES of the position, velocity and attitude blocks separately, with the
+two-sided 95% χ² bounds (dof = 3). `att_convention` picks the attitude error matching
+the filter's perturbation: `:right` = `logmap(R_ins' * R_gt)`, `:left` =
+`logmap(R_gt * R_ins')`.
 """
 function nees_series(x::AbstractMatrix, P::AbstractArray{<:Real,3},
     quat::AbstractMatrix, gt_traj;
@@ -274,25 +230,11 @@ consistency_ratio(nees::AbstractVector, lo::Real, hi::Real) =
 # =====================================================================
 
 """
-    zupt_gain_series(diagnostics; from_k, to_k)
+    zupt_gain_series(diagnostics; from_k=1, to_k=typemax(Int))
 
-Per-ZUPT-epoch view of how much position-correction authority the ZUPT actually
-has. Position is never directly observed in a ZUPT-aided INS: the only channel
-that walks back the error accumulated during the swing phase is the
-position<->velocity cross-covariance, through the position rows of the ZUPT gain
-
-    K[1:3, :] = P[1:3, 4:6] * S^-1,    S = P[4:6,4:6] + R_meas
-
-so `K_pos` is the quantity a GP covariance update starves when it shrinks the
-absolute `P[1:3,1:3]`. `dpos` is the position correction that gain actually
-delivered at each epoch, and `cum_dpos` its running total -- the integrated
-shortfall is what shows up as position RMSE.
-
-`from_k`/`to_k` restrict to the epochs in `from_k <= k <= to_k`. That window is
-how one run is split into its two phases: the train half, where the mocap update
-shrinks `P`, and the test half, where the GP correction does (or does not).
-Attitude counterparts are returned alongside as a control: they should be much
-less affected.
+Per-ZUPT-epoch position gain `K_pos` (`‖K[1:3,:]‖`), position covariance, applied
+correction `dpos` and its cumulative sum, with attitude counterparts as a control,
+over epochs `from_k <= k <= to_k`.
 """
 function zupt_gain_series(diagnostics::StepDiagnostics; from_k::Int=1,
     to_k::Int=typemax(Int))
@@ -317,11 +259,7 @@ function zupt_gain_series(diagnostics::StepDiagnostics; from_k::Int=1,
 end
 
 # =====================================================================
-# 3. Independence assumption, measured directly
-# =====================================================================
-
-# =====================================================================
-# 4. Error summaries
+# 3. Error summaries
 # =====================================================================
 
 function rmse_summary(x::AbstractMatrix, quat::AbstractMatrix, gt_traj;
@@ -335,6 +273,3 @@ function rmse_summary(x::AbstractMatrix, quat::AbstractMatrix, gt_traj;
         yaw=sqrt(mean(abs2, ey)), final_pos=ep[end])
 end
 
-# =====================================================================
-# 5. Measurement-noise inflation sweep
-# =====================================================================

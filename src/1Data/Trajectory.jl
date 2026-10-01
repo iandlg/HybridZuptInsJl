@@ -78,7 +78,6 @@ function read_raw_trajectory(::ANG2, dir::AbstractString, id::Int, kwargs...)
     df = CSV.read(
         path, DataFrame;
         header=false,
-        # skipto=2,
         delim=(' '),
         ignorerepeated=true,   # treat multiple spaces as one delimiter
         missingstring=""
@@ -166,7 +165,6 @@ function read_raw_trajectory(::DCSC, dir::AbstractString, id::Int, kwargs...)
     N = size(data, 1)
     t = Vector{Float64}(data[:, 1])
     @show t[1]
-    # quat = data[:, [5, 2, 3, 4]]'          # (4, N)
     C = [
         1.0 0.0 0.0
         0.0 0.0 -1.0

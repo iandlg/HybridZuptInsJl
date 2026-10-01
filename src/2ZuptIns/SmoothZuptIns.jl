@@ -131,7 +131,6 @@ function smoothed_zupt_aided_ins(
     seg_start = 2          # first index to process (1-based, offset for n-1)
     seg_end = N
     step_detector = StepDetector()
-    # step_detector = CovarianceSegmentDetector(; thrsld=0.025, counter_limit=10)
     step_seg = Int[]
 
     while true

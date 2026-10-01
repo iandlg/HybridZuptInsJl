@@ -1,35 +1,15 @@
-### How much online mocap does the correction need before it helps on strides it has
-### never seen?
-###
-### This is 1_perf_results.jl's question with its confound removed. There the x axis is
-### `train_ratio`, which also decides where the evaluation window starts
-### (`run_online_correction_sweep` scores `corr_traj[floor(r*N_s):end]`), so more
-### training also buys a shorter, later, easier test — and a ZUPT-INS drifts with
-### open-loop distance, so the curve falls whether or not anything was learned. Its
-### columns are therefore not comparable with each other; the paired contrast inside one
-### column still is. See notes/011.
-###
-### Here the test window is a FIXED number of strides at the end of the walk and the
-### budget is the window of ground-truth strides immediately before it:
+### How much online mocap does the correction need before it helps on unseen strides?
+### Unlike 1_perf_results.jl (whose train_ratio also moves the test window, notes/011),
+### the test window here is a fixed `n_test` strides at the end of the walk and the budget
+### is the `b` mocap strides just before it:
 ###
 ###   stride:  1 ............ ks-b .... ks | ks+1 ...... N
-###   run:     .   not run   . [start on mocap ...................]
 ###   mocap:                  [==== b ====] |   none (test)
 ###   score:                                 [=== n_test ==]
 ###
-### `β` lives in the corrector's error state and the mocap pose update is what learns it
-### (JointStrideEstimators.jl), so the budget IS the mocap. Each run starts at `ks-b` on
-### the mocap pose: run from stride 1, the open-loop prefix leaked into the test window
-### (the correctors put the whole prefix drift into `β` at the first fix, and the "ZUPT
-### only" filter kept part of the prefix heading error). Budget 0 starts at the split and
-### runs open loop: the absolute figure's leftmost group, every estimator. The heading entering the
-### test window still depends on the budget, so the relative figures pair "ZUPT only"
-### within a budget; `learning_curve_contrast` prints how much that baseline moved.
-###
-### What it does NOT answer: what happens when ground truth is lost mid-walk and the
-### walk continues for a variable distance. That is 1_perf_results.jl's.
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+### Each run starts on the mocap pose at `ks-b` (budget 0: at the split, open loop).
+### "ZUPT only" is re-run and paired per budget.
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
@@ -64,7 +44,7 @@ filter_tag = "V4"
 
 const BASE_ESTIMATOR = "ZUPT only"
 estimators = OrderedDict(
-    BASE_ESTIMATOR => HybridZuptInsJl.BaseEstimator,
+    BASE_ESTIMATOR => StrideGP.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
@@ -86,10 +66,10 @@ const CSV_PREFIX = "learning_curve"
 
 ## 4. Run the sweep and save the scores, or read a finished run back
 if isnothing(results_csv)
-    aligned = HybridZuptInsJl.collect_aligned_trajectories(
+    aligned = StrideGP.collect_aligned_trajectories(
         OrderedDict{String,Tuple{String,Vector{Int}}}(data_key => (data_dir(data_key), ids)))
 
-    results_df = HybridZuptInsJl.run_online_learning_curve(
+    results_df = StrideGP.run_online_learning_curve(
         aligned, FRAME, FEATURE_TYPE, hsgp_p, vcat(0, BUDGETS), estimators, output_channels;
         n_test_strides=N_TEST_STRIDES,
         estimator_alloc=300,
@@ -190,7 +170,7 @@ function print_latex_median_table(paired::DataFrame, metric::Symbol)
 end
 
 for metric in (:rmse, :rmse_yaw)
-    paired = HybridZuptInsJl.learning_curve_contrast(
+    paired = StrideGP.learning_curve_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
     paired = paired[paired.train_strides .> 0, :]
     print_latex_median_table(paired, metric)
@@ -206,7 +186,7 @@ for metric in (:rmse, :rmse_yaw)
         "$(length(full_trials)) trials at every budget")
 
     results_figure() do
-        HybridZuptInsJl.plot_learning_curve_relative_change(
+        StrideGP.plot_learning_curve_relative_change(
             paired, DATASET;
             metric=metric,
             show_outliers=true,
@@ -216,7 +196,7 @@ for metric in (:rmse, :rmse_yaw)
     end
 
     results_figure() do
-        HybridZuptInsJl.plot_learning_curve_absolute(
+        StrideGP.plot_learning_curve_absolute(
             results_df, DATASET;
             metric=metric,
             show_outliers=true,

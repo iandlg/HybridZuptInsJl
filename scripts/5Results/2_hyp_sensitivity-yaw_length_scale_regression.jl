@@ -1,28 +1,10 @@
-# Section 2 (sensitivity), companion figure: what the yaw length scale actually
-# does to the regressed yaw correction.
-#
-# WHY THIS EXISTS. Two results from neighbouring sections sit awkwardly together:
-#
-#   * 2_hyp_sensitivity-param_sensitivity.jl finds the yaw length scale ℓ_SE to be
-#     the most consequential hyperparameter in the sweep, and finds the trained
-#     value sitting on a local minimum -- perturbing it either way moves RMSE.
-#   * 3_yaw_channel-cst_v_hsgp_yaw_correction.jl finds that, at the trained
-#     value, correcting only the yaw channel with the HSGP gives essentially the
-#     same final RMSE as a constant (static) correction.
-#
-# Taken together those read as a contradiction: how can the most sensitive
-# parameter be sitting at a value where the model it parameterises is worth no
-# more than a constant? This figure is the hint at the answer -- it shows the
-# regressed yaw output itself at ℓ_SE below, at, and above the trained value,
-# with the static correction on the same axes for reference.
-#
-# SCOPE. One trial, one noise realisation, three length scales. This is an
-# illustration for the narrative, NOT a measurement: nothing here is averaged
-# over trials and no claim about magnitudes should rest on it. The quantitative
-# statements belong to the two scripts named above.
+# Section 2 (sensitivity), companion figure: the regressed yaw correction at the yaw
+# length scale below, at and above the trained value, with the static correction for
+# reference. Illustrates why ℓ_SE is the most sensitive hyperparameter
+# (2_hyp_sensitivity-param_sensitivity.jl) although HSGP yaw ≈ static yaw in final RMSE
+# (3_yaw_channel-cst_v_hsgp_yaw_correction.jl). One trial: an illustration, not a measurement.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, Printf
 using CairoMakie: rich, subscript, RGBAf
@@ -57,19 +39,19 @@ log10_offsets = [-1.0, 0.0, 1.0]
 
 base_ls = hsgp_p.hp.yaw[LENGTH_SCALE_IDX]
 
-function params_with_yaw_length_scale(base::HybridZuptInsJl.HsgpParameters, ls::Float64)
-    new_hp = HybridZuptInsJl.modify_sehp(base.hp, :yaw, LENGTH_SCALE_IDX, ls)
-    return HybridZuptInsJl.basecopy(base; new_hp=new_hp)
+function params_with_yaw_length_scale(base::StrideGP.HsgpParameters, ls::Float64)
+    new_hp = StrideGP.modify_sehp(base.hp, :yaw, LENGTH_SCALE_IDX, ls)
+    return StrideGP.basecopy(base; new_hp=new_hp)
 end
 
 ## 4. Run the filter once per method
 ins_traj_aligned, gt_traj_aligned, zupt, segs, inertial_updated, sim_config_updated =
-    HybridZuptInsJl.compute_aligned_ins_trajectory(data_dir_path, trial_id)
+    StrideGP.compute_aligned_ins_trajectory(data_dir_path, trial_id)
 
 x_init = vcat(
     ins_traj_aligned.pos[:, 1],
     ins_traj_aligned.vel[:, 1],
-    HybridZuptInsJl.matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
+    StrideGP.matrix_to_euler(ins_traj_aligned.R_nb[:, :, 1])
 )
 
 N = length(inertial_updated)
@@ -84,7 +66,7 @@ filter_tag = "V4"
 # Static first so it reads as the reference the HSGP variants are compared against.
 # Keys stay plain ASCII -- they index the colour and label maps below; the rendered
 # names live in `series_labels`.
-estimators = OrderedDict{String,HybridZuptInsJl.AbstractEstimator}(
+estimators = OrderedDict{String,StrideGP.AbstractEstimator}(
     "Static" => CORRECTORS[filter_tag].static(window; params=hsgp_p, corrected_channels=output_channels),
 )
 series_labels = Dict{String,Any}("Static" => "Static")
@@ -98,14 +80,14 @@ series_labels = Dict{String,Any}("Static" => "Static")
 # The trained value is solid and heaviest; the two perturbations are dashed and dotted,
 # thinner, and slightly faded. That ranks them -- one is the setting the model actually
 # uses, the others are excursions from it -- rather than presenting three equals.
-hsgp_color = HybridZuptInsJl.method_color("HSGP")
+hsgp_color = StrideGP.method_color("HSGP")
 faded(c, a) = RGBAf(c.r, c.g, c.b, a)
 
 variant_style = Dict(-1.0 => :dot, 0.0 => :solid, 1.0 => :dash)
 
 series_styles = Dict{String,Any}("Static" => :solid)
 series_widths = Dict{String,Any}("Static" => 2.0)
-series_colors = Dict{String,Any}("Static" => HybridZuptInsJl.method_color("Static"))
+series_colors = Dict{String,Any}("Static" => StrideGP.method_color("Static"))
 
 for offset in log10_offsets
     mult = 10.0^offset
@@ -120,14 +102,14 @@ for offset in log10_offsets
     # in the sensitivity sweep figure, so "×0.1" here and "×0.1" there are the same point
     # and a reader can carry one figure onto the other.
     series_labels[key] = rich("HSGP ℓ", subscript("s"), " ",
-        HybridZuptInsJl.hp_multiplier_label(mult),
+        StrideGP.hp_multiplier_label(mult),
         trained ? "" : "")
     series_styles[key] = get(variant_style, offset, :solid)
     series_widths[key] = trained ? 2.0 : 1.2
     series_colors[key] = trained ? hsgp_color : faded(hsgp_color, 0.95)
 end
 
-predictions = OrderedDict{String,HybridZuptInsJl.CorrectionIO}()
+predictions = OrderedDict{String,StrideGP.CorrectionIO}()
 target = nothing
 
 for (label, estimator) in estimators
@@ -154,7 +136,7 @@ const SECTION = "2_HypSensitivity/YawLengthScaleRegression"
 # range is the scale they should be judged at; the divergent series simply runs off
 # the top of the panel, which is itself the point being made about it.
 results_figure() do
-    HybridZuptInsJl.plot_regression_comparison(predictions, target;
+    StrideGP.plot_regression_comparison(predictions, target;
         channel=4, segment=:full, train_ratio=train_ratio,
         colors=series_colors, labels=series_labels,
         linestyles=series_styles, linewidths=series_widths, clip_quantile=1.1,
@@ -162,26 +144,13 @@ results_figure() do
         save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)$(trial_id)"))
 end
 
-# Companion: unclipped, with the predictive bands and the numbers, so the figure
-# above is auditable rather than something the reader has to take on trust.
-# results_figure() do
-#     HybridZuptInsJl.plot_regression_comparison(predictions, target;
-#         channel=4, segment=:test, train_ratio=train_ratio,
-#         colors=series_colors, labels=series_labels,
-#         linestyles=series_styles, linewidths=series_widths,
-#         show_std=true, show_rmse=true, show_mean_std=true,
-#         dataset=data_key, trial_id=trial_id,
-#         save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)$(trial_id)_unclipped"))
-# end
-
 # Zoomed view: 40 s of the test segment, enough strides to see the shape of each
 # correction without the whole segment compressed into a few hundred pixels.
 results_figure() do
-    HybridZuptInsJl.plot_regression_comparison(predictions, target;
+    StrideGP.plot_regression_comparison(predictions, target;
         channel=4, segment=:full, train_ratio=train_ratio,
         colors=series_colors, labels=series_labels,
         linestyles=series_styles, linewidths=series_widths, clip_quantile=0.95,
-        # time_window=(400.0, 440.0),
         figsize=(900, 300),
         dataset=data_key, trial_id=trial_id, show_std=false,
         save_path=stamped(SECTION, "yaw_length_scale_$(filter_tag)_process_only_key$(hsgp_p_key)_$(data_key)$(trial_id)_zoom"))

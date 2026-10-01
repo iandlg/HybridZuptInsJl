@@ -14,7 +14,7 @@ function collect_trial_io_online(
     corrector::AbstractEstimator=BaseEstimator(300)
 )::Optional{Tuple{CorrectionIO,CorrectionIO,Trajectory,Trajectory,Vector{Int}}}
     try
-        ins_traj_aligned, gt_traj_aligned, _, _, inertial_updated, sim_config_updated = HybridZuptInsJl.compute_aligned_ins_trajectory(
+        ins_traj_aligned, gt_traj_aligned, _, _, inertial_updated, sim_config_updated = compute_aligned_ins_trajectory(
             data_dir, trial_id
         )
         N = length(inertial_updated)
@@ -133,16 +133,9 @@ end
 """
     mahal_keep(data, keep_fraction) -> BitVector
 
-Keep-mask retaining the `keep_fraction` of samples closest to the centre of the
-joint cloud, cutting at the empirical `keep_fraction` quantile of the squared
-Mahalanobis distance.
-
-Empirical rather than χ²: `quantile(Chisq(d), alpha)` only retains `alpha` of the
-samples if D² really is χ²_d, which needs the data to be Gaussian *and* μ, Σ to be
-estimated independently of it. Neither holds here — outliers inflate the Σ computed
-from the same sample and so partly mask themselves — so a χ² `alpha` behaves as an
-opaque distance whose realized trim varies with the data and with `d`. The
-empirical quantile keeps exactly the fraction it names, in any dimension.
+Keep-mask for the `keep_fraction` of samples with the smallest squared Mahalanobis
+distance. Cuts at the empirical quantile rather than χ², so it retains exactly that
+fraction even when the data are not Gaussian.
 """
 function mahal_keep(data::Matrix{Float64}, keep_fraction::Float64)
     0 < keep_fraction <= 1 ||
@@ -153,38 +146,14 @@ end
 
 
 """
-    remove_outliers(input_io::CorrectionIO, output_io::CorrectionIO;
-                    method="zscore", dims=:both,
-                    threshold=3.0, keep_fraction=0.85)
+    remove_outliers(input_io, output_io; method="zscore", dims=:both,
+                    threshold=3.0, keep_fraction=0.85) -> (input_clean, output_clean)
 
-Remove outlier samples from paired input/output `CorrectionIO` data. Samples are
-dropped from *both* objects together, so the two stay row-aligned.
+Drop outlier samples from both `CorrectionIO`s together, keeping them row-aligned.
 
-# Arguments
-- `input_io`, `output_io`: data matrices (features x samples) plus aligned time vectors.
-- `method`: `"zscore"` (per-channel, marginal) or `"mahalanobis"` (joint, accounts
-  for correlation between channels). `"iqr"` is not implemented.
-- `dims`: where to look (`:input`, `:output`, or `:both`). `:both` drops a sample
-  that is an outlier in *either* space, so the two cuts compound — the retained
-  fraction is smaller than either one alone.
-- `threshold`: `"zscore"` only. Absolute z-score above which a sample is an outlier.
-- `keep_fraction`: `"mahalanobis"` only. Fraction of samples retained, cut at that
-  empirical quantile of the squared Mahalanobis distance — see [`mahal_keep`](@ref).
-
-# Returns
-- `(input_clean, output_clean)`: new `CorrectionIO` objects with outliers removed.
-
-# Example
-```julia
-# per-channel z-score
-input_clean, output_clean = remove_outliers(input_io, output_io;
-                                            method="zscore", threshold=3.0, dims=:both)
-
-# keep the innermost 85% of the joint output cloud
-input_clean, output_clean = remove_outliers(input_io, output_io;
-                                            method="mahalanobis", dims=:output,
-                                            keep_fraction=0.85)
-```
+- `method`: `"zscore"` (per channel, uses `threshold`) or `"mahalanobis"` (joint, uses
+  `keep_fraction`, see [`mahal_keep`](@ref)).
+- `dims`: `:input`, `:output` or `:both`; `:both` drops a sample flagged in either space.
 """
 function remove_outliers(
     input_io::CorrectionIO, output_io::CorrectionIO;
@@ -247,24 +216,12 @@ function remove_outliers(
 end
 
 """
-    compute_input_preprocessing(data; normalize_x=true, margin=0.5)
+    compute_input_preprocessing(data; normalize_x=true, margin=0.5) -> NamedTuple
 
-Compute normalisation constants and a normalised‑space bounding box for input features.
-
-# Arguments
-- `data::AbstractMatrix`: input matrix of size `(d, N)` (features × samples).
-- `normalize_x::Bool`: if `true`, subtract mean and divide by standard deviation.
-- `margin::Real`: fraction of the minimum feature range added to the bounding box
-  (applied *after* possible normalisation).
-
-# Returns
-A `NamedTuple` with fields:
-- `μ`: mean vector of length `d` (zero if `normalize_x = false`).
-- `σ`: standard deviation vector of length `d` (one if `normalize_x = false`).
-- `LL_norm`: `2×d` matrix; first row = lower bound, second row = upper bound
-  of the bounding box in the (possibly normalised) space.
-- `mid_norm`: midpoint of the bounding box, `1×d`.
-- `Lvec_norm`: half‑width of the bounding box, `1×d`.
+Normalisation constants and HSGP bounding box for a `(d, N)` input matrix. Returns
+`μ`, `σ` (identity if `!normalize_x`), `LL_norm` (`2×d` lower/upper bounds in normalised
+space, widened by `margin` × the smallest feature range), `mid_norm` and `Lvec_norm`
+(box midpoint and half-width).
 """
 function compute_input_preprocessing(data::AbstractMatrix; normalize_x=true, margin=0.5)
     d = size(data, 1)
@@ -290,18 +247,9 @@ function compute_input_preprocessing(data::AbstractMatrix; normalize_x=true, mar
 end
 
 """
-    compute_output_normalisation(data; normalize_y=true)
+    compute_output_normalisation(data; normalize_y=true) -> (; μ, σ)
 
-Compute normalisation constants for output variables.
-
-# Arguments
-- `data::AbstractMatrix`: output matrix of size `(d_out, N)`.
-- `normalize_y::Bool`: if `true`, subtract mean and divide by standard deviation.
-
-# Returns
-A `NamedTuple` with fields:
-- `μ`: mean vector (zero if `normalize_y = false`).
-- `σ`: standard deviation vector (one if `normalize_y = false`).
+Per-channel mean and std of a `(d_out, N)` output matrix (zeros/ones if `!normalize_y`).
 """
 function compute_output_normalisation(data::AbstractMatrix; normalize_y=true)
     if normalize_y
@@ -353,12 +301,8 @@ end
 """
     is_noiseless(spec::NoiseSpec) -> Bool
 
-`true` when `spec` adds no randomness at all (both stds are `nothing` or all-zero),
-so repeat draws would produce bit-identical runs. Used by
-`run_online_correction_sweep` to run such specs once instead of once per seed.
-
-Note a nonzero *bias* with zero std is still noiseless in this sense: the
-perturbation is deterministic, so extra draws buy nothing.
+`true` when `spec` adds no randomness (stds `nothing` or zero; a bias alone is
+deterministic), so the sweep runs it once instead of once per seed.
 """
 is_noiseless(spec::NoiseSpec)::Bool =
     (isnothing(spec.pos_std) || all(iszero, spec.pos_std)) &&
@@ -367,19 +311,10 @@ is_noiseless(spec::NoiseSpec)::Bool =
 """
     matched_gt_sigma_config(cfg::InsConfig, spec::NoiseSpec) -> InsConfig
 
-A copy of `cfg` whose `sigma_groundtruth` is `hypot(clean, injected)`, i.e. the R a
-filter should be given once `spec`'s noise has been added to the ground truth it is
-handed. Leaving the clean value in place instead means a `pos_std=1.0` run is given an
-R ~100x too tight, which tests whether a filter survives a mis-specified R -- won by
-construction by the correctors that re-estimate it online -- rather than which
-correction model is better.
-
-`sigma_groundtruth` reaches the ground-truth stride covariance in `stride_error`, the
-mocap fix's `Σy`, and V4's initial corrector covariance when it starts on mocap, so
-raising it here keeps all three consistent.
-
-Only the yaw component of the injected attitude noise enters the 4th channel: roll and
-pitch reach the target only through the local frame.
+Copy of `cfg` with `sigma_groundtruth = hypot(clean, injected)`: the R a filter should
+get once `spec`'s noise is in its ground truth. This feeds the ground-truth stride
+covariance, the mocap `Σy` and V4's initial corrector covariance. Only the yaw part of
+the attitude noise enters channel 4.
 """
 function matched_gt_sigma_config(cfg::InsConfig, spec::NoiseSpec)::InsConfig
     σ = sigma_groundtruth_array(cfg)
@@ -392,91 +327,29 @@ function matched_gt_sigma_config(cfg::InsConfig, spec::NoiseSpec)::InsConfig
 end
 
 """
-    function run_online_correction_sweep(
-        aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
-        frame::ReferenceFrame,
-        feature_type::FeatureType,
-        hsgp_params::HsgpParameters,
-        train_ratios::AbstractVector{<:Real},
-        estimators::AbstractDict{<:AbstractString,<:Type},
-        output_channels::Vector{Symbol};
-        step_detector_factory::Type=StepDetector,
-        estimator_alloc::Int=300,
-        estimator_kwargs::NamedTuple=(;),
-        pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
-        pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
-        att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
-        att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
-    )::DataFrame
+    run_online_correction_sweep(aligned, frame, feature_type, hsgp_params, train_ratios,
+                                estimators, output_channels; kwargs...) -> DataFrame
 
-For every `(dataset_name, trial_id)` pair in `aligned` (as produced by
-`collect_aligned_trajectories`), every `train_ratio` in `train_ratios`, and every
-estimator type in `estimators`, run `correction_filter` (default `hybrid_zupt_aided_insv4`) and record the raw
-outputs together with the resulting horizontal RMSE / RMSE-rate.
+Run `correction_filter` (default `hybrid_zupt_aided_insv4`) for every trial in `aligned`
+(from `collect_aligned_trajectories`) × `train_ratio` × noise spec × seed × estimator,
+and record the RMSE metrics.
 
-# Arguments
-- `aligned`: `dataset_name => trial_id => NamedTuple` as returned by
-  `collect_aligned_trajectories` (needs `inertial_updated`, `sim_config_updated`,
-  `gt_traj_aligned`, `x_init`).
-- `frame`, `feature_type`: passed straight to `correction_filter`.
-- `hsgp_params`: `HsgpParameters` passed as `params=` to estimator constructors that
-  need it (ignored via `kwargs...` by estimators that don't, e.g. `BaseEstimator`).
-- `train_ratios`: vector of fractions in `[0,1]` controlling how much of the trial has
-  ground truth available (`gt_available[n] = n <= floor(train_ratio*N)`). Order is
-  preserved in `train_ratio_order`.
-- `estimators`: `OrderedDict{String,Type}` name => estimator type, e.g.
-  `OrderedDict("HSGP" => JointStrideHsgpEstimator, "Base" => BaseEstimator)`. Types are
-  constructed as `T(estimator_alloc; params=hsgp_params, corrected_channels=output_channels,
-  estimator_kwargs...)`. Order is preserved in `estimator_order`.
-- `estimator_kwargs`: extra constructor keywords, the same for every estimator in the sweep —
-  one sweep call is one setting. Every estimator constructor ends in `kwargs...`, so a keyword
-  only some of them read is silently ignored by the rest, `BaseEstimator` included. To compare two settings, call the sweep once per setting and `vcat` the frames with
-  the setting written into `estimator`.
-- `output_channels`: e.g. `[:pos_1, :pos_2, :yaw]`, forwarded as `corrected_channels`.
-- `seeds`: one noise realisation per seed, per `(trial, train_ratio, noise_spec)`. Each
-  realisation comes from its own `Xoshiro(seed)`, so a seed always means the same draw
-  no matter what else the sweep contains or in what order it runs — add a trial, drop a
-  noise spec, re-run one cell alone, and the rest is unchanged. A single seed (the
-  default) gives one realisation per cell, so the spread across rows is walk-to-walk
-  variability; more seeds add replicates of the *noise* on top, recorded in the `seed`
-  column. Specs for which `is_noiseless` holds are run once regardless (the repeats
-  would be identical), under the first seed.
-
-  The seed loop sits outside the estimator loop, so every estimator in a cell sees the
-  **same** realisation — that is what makes `paired_estimator_contrast` paired.
-  Different trials at the same seed share one stream, and since `randn` is drawn as
-  `3 x N` with `N` the trial length, shorter trials get a prefix of what longer ones
-  get: draws are identical *within* a cell by design, and only partly independent
-  *across* trials.
-- `match_gt_sigma`: tell the filters how noisy the ground truth they are handed actually
-  is, via [`matched_gt_sigma_config`](@ref) — the same R for every estimator in the cell,
-  built once beside the noise draw. `false` (the default, and what every run before it
-  used) leaves the trial's clean value in place, which also degrades the "ZUPT only"
-  baseline the others are scored against.
-- `posyaw_measurement_update`: forwarded to the filter. `false` gives the dead-reckoning
-  reference — the corrector with no mocap fix at all, which is the bound worth knowing when
-  the fixes are noisy enough to be worth ignoring.
+- `train_ratios`: ground truth is available for `n <= floor(train_ratio*N)`.
+- `estimators`: name => type, constructed as `T(estimator_alloc; params=hsgp_params,
+  corrected_channels=output_channels, estimator_kwargs...)`. Constructors swallow
+  unknown keywords, so to compare two settings run one sweep per setting.
+- `seeds`: each noise draw comes from its own `Xoshiro(seed)`, drawn outside the
+  estimator loop so every estimator in a cell sees the same realisation (this is what
+  `paired_estimator_contrast` pairs on). Noiseless specs run once.
+- `match_gt_sigma`: give the filter the R matching the injected noise
+  ([`matched_gt_sigma_config`](@ref)); `false` keeps the trial's clean R.
+- `posyaw_measurement_update`: `false` gives the no-mocap dead-reckoning reference.
 - `keep_artifacts`: keep the raw `zupt`/`step_seg`/`corr_traj`/`io_data`/`model` objects
-  in the returned frame. They cost roughly **2.5 MB per row**, which a one-draw sweep
-  can afford and a Monte-Carlo one cannot: 11 trials x 6 specs x 10 draws x 3 estimators
-  is ~2000 rows, i.e. several GB of trajectories nothing downstream reads. Pass `false`
-  when only the metric columns are wanted; the columns stay in place, filled with
-  `nothing`.
+  (~2.5 MB per row); `false` fills those columns with `nothing`.
 
-# Returns
-- `DataFrame` with columns:
-  `dataset_name, trial_id, train_ratio, train_ratio_order, estimator, estimator_order,
-   noise_spec_tag, noise_spec_order, seed,
-   gt_sigma_pos, gt_sigma_yaw,
-   zupt, step_seg, corr_traj, io_data, model,
-   rmse, rmse_rate, rmse_yaw`
-  where `gt_sigma_pos`/`gt_sigma_yaw` are the R the run was *given* (see
-  `match_gt_sigma`), as opposed to `pos_std`/`att_std`, which are the noise it was given.
-  where `zupt`, `step_seg`, `corr_traj`, `io_data`, `model` hold the raw objects
-  returned by `correction_filter` (`Any`-typed columns — no serialization).
-  `estimator_order`/`train_ratio_order` are 1-based indices matching the iteration
-  order of `estimators`/`train_ratios`, useful for plotting in a consistent order.
-  Failed `(trial, train_ratio, estimator)` combinations are skipped with a `@warn`.
+Rows carry the trial keys, `*_order` columns (iteration order, for plotting), `seed`,
+`gt_sigma_pos`/`gt_sigma_yaw` (the R given), the artifacts, and `rmse`, `rmse_rate`,
+`rmse_yaw`. Failed runs are skipped with a `@warn`.
 """
 function run_online_correction_sweep(
     aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
@@ -503,10 +376,6 @@ function run_online_correction_sweep(
     # dead-reckoning reference: what the corrector does when it ignores ground
     # truth entirely.
     posyaw_measurement_update::Bool=true,
-    # pos_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
-    # pos_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
-    # att_std_vec::AbstractVector{<:Union{Nothing,Float64,AbstractVector{Float64}}}=[nothing],
-    # att_bias_vec::AbstractVector{<:AbstractVector{Float64}}=[zeros(3)],
 )::DataFrame
 
     isempty(seeds) && throw(ArgumentError("seeds must not be empty"))
@@ -649,10 +518,9 @@ end
     run_online_nees_sweep(aligned, frame, feature_type, hsgp_params, train_ratios,
         estimators, output_channels; estimator_alloc, correction_filter) -> DataFrame
 
-`run_online_correction_sweep`'s design (same `gt_available`, clean ground truth), scored
-on consistency instead of error: per footfall, the position NEES (3 dof) and yaw NEES
-(1 dof) of the corrector's own state and `Σ` against ground truth. One row per footfall,
-`phase` is `"train"` while mocap is available at that footfall and `"test"` after.
+Same runs as `run_online_correction_sweep` (clean ground truth), scored on consistency:
+one row per footfall with the corrector's position NEES (3 dof) and yaw NEES (1 dof),
+`phase` `"train"` while mocap is available and `"test"` after.
 """
 function run_online_nees_sweep(
     aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
@@ -707,9 +575,8 @@ end
 """
     nees_summary(df) -> DataFrame
 
-Per run and phase of a `run_online_nees_sweep` frame: footfall count, ANEES (mean),
-median NEES, and the fraction of footfalls inside the per-sample 95% χ² envelope, for
-position (3 dof) and yaw (1 dof).
+Per run and phase of a `run_online_nees_sweep` frame: footfall count, ANEES, median NEES
+and the fraction inside the 95% χ² envelope, for position and yaw.
 """
 function nees_summary(df::DataFrame)::DataFrame
     inside(v, dof) = consistency_ratio(v, quantile(Chisq(dof), 0.025), quantile(Chisq(dof), 0.975))
@@ -746,33 +613,12 @@ end
     paired_estimator_contrast(df; metric=:rmse_rate, reference_estimator="ZUPT only",
                               train_ratios=nothing, noise_spec_tags=nothing) -> DataFrame
 
-Per-trial change in `metric` relative to `reference_estimator`, for every noise spec.
+Per-trial change in `metric` relative to `reference_estimator`, paired on the same
+`(dataset, trial, train_ratio, noise_spec, seed)` cell. `train_ratios` and
+`noise_spec_tags` filter rows (not the pairing); a value missing from `df` is an error.
 
-Each row pairs one estimator against the reference on the **same**
-`(dataset, trial, train_ratio, noise_spec, seed)` cell — the identical noise
-realisation, which `run_online_correction_sweep` guarantees by drawing the noise
-outside the estimator loop. The reference estimator itself is not in the output: it
-is the zero line.
-
-`train_ratios` keeps only those ratios, e.g. `train_ratios=[0.1, 0.5, 0.9]` to plot
-three groups out of a nine-ratio sweep. It is a filter on rows, not on the pairing:
-every pair is still formed within one train_ratio, so dropping ratios cannot change
-the pairs that survive. A ratio that is not in `df` is an error rather than an empty
-group — asking for 0.15 out of a 0.1-step sweep is a typo, not a request.
-
-`noise_spec_tags` does the same for the noise axis, keeping only those specs by
-their `tag`, e.g. to plot the clean reference and the two position-only levels out
-of an eight-spec sweep. Same rules: a filter on rows, not on the pairing, and a tag
-that is not in `df` is an error rather than an empty group.
-
-# Returns
-`DataFrame` with the trial keys plus `estimator`, `noise_spec_tag`, `seed`, and:
-- `value` — the estimator's metric,
-- `ref_value` — the reference estimator's metric on that same cell,
-- `delta = value - ref_value` — in the metric's own units,
-- `rel_change_pct = 100 (value - ref_value) / |ref_value|` — the quantity `plot_noise_paired_relative_change` displays.
-
-Negative means the estimator beat the reference on that trial.
+Returns the trial keys plus `estimator`, `noise_spec_tag`, `seed`, `value`, `ref_value`,
+`delta` and `rel_change_pct`. Negative means the estimator beat the reference.
 """
 function paired_estimator_contrast(
     df::DataFrame;
@@ -872,19 +718,12 @@ end
     run_online_learning_curve(aligned, frame, feature_type, hsgp_params, budgets,
                               estimators, output_channels; n_test_strides, ...) -> DataFrame
 
-For every `(dataset_name, trial_id)` in `aligned`, every budget in `budgets` and every
-estimator in `estimators`, run `correction_filter` from the start of the `budget` strides
-before the split, with mocap over exactly those strides, and score the result on the last
-`n_test_strides` strides.
+For every trial × budget × estimator, run `correction_filter` with mocap over exactly
+`budget` strides before the split and score on the last `n_test_strides` strides.
 
-`budgets` are stride counts: budget `b` starts the run at `step_seg[k_split - b]` on the
-mocap pose and marks the closed sample range up to `step_seg[k_split]`, i.e. `b+1`
-footfall fixes bounding exactly `b` ground-truth strides. Budget 0 starts at the split
-and runs open loop. A budget larger than a trial's pre-split prefix is skipped for that
-trial rather than clamped, so the wide end of the axis can rest on fewer trials.
-
-`estimator_kwargs` are extra constructor keywords, the same for every estimator — one
-call is one setting, as in [`run_online_correction_sweep`](@ref).
+Budget `b` starts on the mocap pose at `step_seg[k_split - b]` (`b+1` fixes bounding
+`b` strides); budget 0 starts at the split open loop. A budget longer than a trial's
+pre-split prefix is skipped for that trial, not clamped.
 """
 function run_online_learning_curve(
     aligned::OrderedDict{String,OrderedDict{Int,NamedTuple}},
@@ -1054,11 +893,8 @@ const _LC_TRIAL_KEYS = [:dataset_name, :dataset_order, :trial_id,
     learning_curve_contrast(df; metric=:rmse, reference_estimator="ZUPT only") -> DataFrame
 
 Per-trial change in `metric` against `reference_estimator`, paired within one budget.
-
-The reference is re-run at every budget because under V4 the mocap window is the
-budget, so it is only *near*-budget-independent: the last fix pins its pose but not its
-covariance. Its spread across budgets is reported here rather than assumed — a large
-spread means mocap is reaching the test window.
+The reference is re-run per budget (its covariance depends on the mocap window) and
+its spread across budgets is reported.
 
 Returns the trial keys plus `estimator`, `estimator_order`, `value`, `ref_value`,
 `delta` and `rel_change_pct`. Negative means the estimator beat the baseline.

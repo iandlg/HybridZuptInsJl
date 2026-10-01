@@ -1,21 +1,9 @@
 """
     ParamSpec(name, type, get_current, set_new, value_generator, probe_kind, probe_unit)
 
-One swept parameter. `probe_kind`/`probe_unit` record *how* the sweep moves it,
-so the frame can carry a probe coordinate that does not have to be re-derived
-from `tested_value / base_value` downstream:
-
-- `:multiplicative` -- the probe is `tested / base`, a multiplier. Correct for a
-  scale parameter (positive, unit-equivariant, no fixed point): the GP length
-  scales and signal variances, and the input std.
-- `:additive` -- the probe is `(tested - base) / probe_unit(params)`, an offset
-  in units of `probe_unit`. Correct for a location parameter, where a multiplier
-  is sized by the base value rather than by anything physical, cannot cross
-  zero, reverses direction on a negative base, and fixes zero.
-
-`probe_unit` is a function of the base `HsgpParameters` so a location can be
-quoted in the scale that matches it -- `mu_x[d]` in units of `sigma_x[d]` -- and
-is evaluated once, against the unperturbed parameters.
+One swept parameter. `probe_kind` is `:multiplicative` (probe = `tested / base`, for
+scale parameters) or `:additive` (probe = `(tested - base) / probe_unit(params)`, for
+location parameters). `probe_unit` is evaluated once on the unperturbed parameters.
 """
 struct ParamSpec
     name::String
@@ -35,9 +23,8 @@ end
 """
     probe_coordinate(spec, base_params, base_value, tested_value) -> Float64
 
-The swept parameter's position on its own natural axis: a multiplier for a scale
-parameter, an offset in `probe_unit` for a location one. Unperturbed is `1.0`
-and `0.0` respectively.
+Position of the swept parameter on its natural axis: a multiplier for a scale
+parameter (unperturbed `1.0`), an offset in `probe_unit` for a location (`0.0`).
 """
 function probe_coordinate(spec::ParamSpec, base_params::HsgpParameters,
     base_value::Float64, tested_value::Float64)::Float64
@@ -198,20 +185,10 @@ end
 """
     make_hp_param_grid(base_hp, output_channel_idxs; log_range, n_steps, include_noise=true)
 
-Build the one-at-a-time sweep specs for the GP hyperparameters of each requested
-output channel.
-
-`include_noise=false` drops the `noise` (σ_n) hyperparameter from the sweep.
-That is the useful setting whenever the evaluator runs with
-`pred_includes_noise=false`, because σ_n is then loaded into the estimator and
-never read: every one of its rows returns a bit-identical RMSE, and the result
-is a flat line that looks like an insensitivity finding but is a dead knob.
-Excluding it is honest about not having tested it; sweeping it and plotting the
-flat line is not.
-
-Parameter *names* keep the true index into the channel vector (`yaw[2]` is the
-length scale whether or not noise was swept), so names stay comparable across
-runs; only the grid layout closes up.
+One-at-a-time sweep specs for the GP hyperparameters of each output channel.
+`include_noise=false` drops σ_n, which is never read when the evaluator runs with
+`pred_includes_noise=false`. Names keep the true channel index (`yaw[2]` is always the
+length scale).
 """
 function make_hp_param_grid(
     base_hp::SeHyperparams, output_channel_idxs::Vector{Int};
@@ -277,30 +254,13 @@ end
     make_stats_param_grid(base_params; output_channel_idxs, log_range, n_steps,
                           include_input_params=true, include_output_params=true)
 
-One-at-a-time sweep specs for the *normalisation statistics* rather than the GP
-hyperparameters: the input mean and std that standardise a feature before it
-reaches the kernel, the centering offset (`mid_norm`) that places the HSGP
-domain around it, and the output mean/std that scale the prediction back.
+One-at-a-time sweep specs for the normalisation statistics (input mean/std, `mid_norm`
+centering, output mean/std). Same `ParamSpec` type as [`make_hp_param_grid`](@ref), so
+both can be `vcat`ed into one `vary_hsgp_parameters` call.
 
-The specs are interchangeable with [`make_hp_param_grid`](@ref)'s -- same
-`ParamSpec` type, same baseline -- so
-`vary_hsgp_parameters(params, f, vcat(hp_specs, stat_specs))` sweeps both
-families against one baseline evaluation and the signed-range figure can rank a
-length scale against an input std. The `ParamGrid` is per family, because it is
-only the panel layout for [`plot_hp_sensitivity`](@ref).
-
-The grid is *not* the same for every family. `input_std` is a scale and keeps the
-multiplicative `log_range` sweep; `input_mean` and `input_center` are locations
-and get an additive `delta_range` sweep, in units of the matching `sigma_x` and
-of normalised space respectively. Both then move normalised space by
-`dz = -delta`, so the two location families share one axis and neither is sized
-by its own base value. `output_mean` is fitted to exactly zero, which no
-multiplicative probe can move; leave `include_output_params=false` unless it is
-given an additive spec too.
-
-Group names double as the `type` column, so each family gets its own symbol and
-colour in the figures ([`_PARAM_KINDS`](@ref)). Output families have no label
-entry and render under their raw names if swept.
+`input_std` is swept multiplicatively over `log_range`; `input_mean` and `input_center`
+additively over `delta_range` (in `sigma_x` and normalised units). `output_mean` is
+fitted to zero, so leave `include_output_params=false` unless it gets an additive spec.
 """
 function make_stats_param_grid(base_params::HsgpParameters;
     output_channel_idxs::Vector{Int}=[1, 2, 3, 4],
@@ -414,19 +374,12 @@ end
 """
     vary_hsgp_parameters(base_params, rmse_func, param_specs; reference_rmse, include_baseline=true)
 
-Sweep every spec one at a time, scoring each probe against `reference_rmse` --
-the trial's ZUPT-only (`BaseEstimator`) RMSE. The `"baseline"` row is the
-trained parameters, scored against the same reference.
+Sweep every spec one at a time and score it against `reference_rmse` (the trial's
+ZUPT-only RMSE). The `"baseline"` row is the trained parameters.
 
-Columns: `parameter`, `type`, `base_value`, `tested_value`, `rmse`,
-`reference_rmse`, `rmse_ratio`, `relative_change` (a *fraction*, not a percent;
-negative means the corrector beat ZUPT only), plus `probe` and `probe_kind`.
-
-`probe` is the parameter's position on its own natural axis --
-[`probe_coordinate`](@ref) -- computed here, where the generator that produced
-the value is in scope. Downstream plotting reads that column instead of
-recovering a multiplier as `tested_value / base_value`, which is undefined at a
-zero base and points the wrong way at a negative one.
+Columns: `parameter`, `type`, `base_value`, `tested_value`, `rmse`, `reference_rmse`,
+`rmse_ratio`, `relative_change` (a fraction; negative beats ZUPT only), `probe`
+([`probe_coordinate`](@ref)) and `probe_kind`.
 """
 function vary_hsgp_parameters(
     base_params::HsgpParameters,
@@ -501,11 +454,8 @@ end
 """
     raw_features(data_dir, trial_id; ref_frame, feature_type) -> Matrix{Float64}
 
-The trial's raw (un-normalised) stride features, `d x N`.
-
-One pass of [`collect_trial_io_online`](@ref), whose second return value is the
-input `CorrectionIO`. `train_ratio` is left at 0 because the features are a
-property of the segmentation, not of how much ground truth the filter was given.
+The trial's raw (un-normalised) `d x N` stride features, from one
+[`collect_trial_io_online`](@ref) pass.
 """
 function raw_features(data_dir::AbstractString, trial_id::Int;
     ref_frame::ReferenceFrame, feature_type::FeatureType)::Matrix{Float64}
@@ -518,13 +468,8 @@ end
 """
     normalised_features(X, params, feature_type) -> Matrix{Float64}
 
-Push raw features `X` (`d x N`) through the estimator's own normalisation:
-`z = (x - mu)/sigma - c`, with the angle dimension wrapped between the mean
-subtraction and the division.
-
-Calls [`normalize_feature!`](@ref) column by column rather than writing the
-arithmetic out again, because the wrap is easy to omit and the result would then
-disagree with what the filter actually evaluated.
+Raw features `X` (`d x N`) through the estimator's own normalisation
+([`normalize_feature!`](@ref), including the angle wrap).
 """
 function normalised_features(X::AbstractMatrix{Float64}, params::HsgpParameters,
     feature_type::FeatureType)::Matrix{Float64}
@@ -541,22 +486,9 @@ end
 """
     box_occupancy(X, params, feature_type) -> NamedTuple
 
-Where the normalised features sit relative to the fixed HSGP domain `+-LL`.
-
-`LL` is a stored field of `HsgpParameters`, derived once from the *training*
-feature spread with a margin (`compute_input_preprocessing`), and it is **not**
-rescaled when the normalisation statistics are perturbed. So a sweep of
-`sigma_x` dilates `z` inside a box that does not move, and past a certain
-multiplier the features simply leave it -- where the Dirichlet sinusoid basis
-cannot represent them. This function is what turns that from an assertion into a
-measured crossing point.
-
-Fields:
-- `frac_outside` -- fraction of strides with any `|z_d| > LL_d`.
-- `max_z_ratio`  -- `max(|z_d| / LL_d)` over all dims and strides; `> 1` means at
-  least one stride is outside.
-- `z_std`, `z_mean` -- per-dimension, which show the other end of the sweep:
-  large `sigma_x` collapses `z` onto `-c` and the GP returns a constant.
+Where the normalised features sit relative to the fixed HSGP domain `±LL` (which does
+not move when the normalisation is perturbed). Fields: `frac_outside` (fraction of
+strides with any `|z_d| > LL_d`), `max_z_ratio` (`max |z_d| / LL_d`), `z_std`, `z_mean`.
 """
 function box_occupancy(X::AbstractMatrix{Float64}, params::HsgpParameters,
     feature_type::FeatureType)
@@ -573,14 +505,9 @@ end
 """
     box_exit_frame(X, base_params, param_specs, feature_type) -> DataFrame
 
-[`box_occupancy`](@ref) at every value the sweep tests, for the specs that change
-the normalisation. Costs no filter runs -- `z` is a closed-form function of
-`(mu_x, sigma_x, c_x)` -- so it can be computed at full resolution alongside a
-coarse RMSE sweep.
-
-Joins the sweep frame on `(parameter, tested_value)`. Columns: `parameter`,
-`type`, `base_value`, `tested_value`, `probe`, `probe_kind`, `frac_outside`,
-`max_z_ratio`, plus `z_std_d`/`z_mean_d` for the perturbed dimension `d`.
+[`box_occupancy`](@ref) at every value the sweep tests, for the specs that change the
+normalisation (closed form, no filter runs). Joins the sweep frame on
+`(parameter, tested_value)`.
 """
 function box_exit_frame(X::AbstractMatrix{Float64}, base_params::HsgpParameters,
     param_specs::Vector{ParamSpec}, feature_type::FeatureType)::DataFrame
@@ -622,14 +549,8 @@ end
 """
     box_exit_points(box_df) -> DataFrame
 
-Reduce [`box_exit_frame`](@ref) to the answer worth quoting: for each
-normalisation parameter and each direction of its probe, the probe value at which
-the features first leave the fixed domain.
-
-`exit_probe` is where `max_z_ratio` first exceeds 1 -- the first stride outside
-the box; `half_out_probe` is where `frac_outside` first exceeds 0.5. `missing`
-means the crossing never happens within the swept range, which is itself the
-result for a parameter that stays inside the box throughout.
+Per normalisation parameter and probe direction: `exit_probe` (first `max_z_ratio > 1`)
+and `half_out_probe` (first `frac_outside > 0.5`); `missing` if never crossed.
 """
 function box_exit_points(box_df::DataFrame)::DataFrame
     rows = []
@@ -659,21 +580,9 @@ end
     sweep_over_trials(base_params, param_specs, make_evaluator, reference_rmse, trial_ids;
                       include_baseline=true, checkpoint_dir=nothing) -> DataFrame
 
-Repeat [`vary_hsgp_parameters`](@ref) once per trial and stack the frames with a
-`trial_id` column.
-
-`make_evaluator(trial_id)` builds that trial's RMSE closure and
-`reference_rmse(trial_id)` returns that trial's ZUPT-only RMSE. Each trial is
-scored against **its own** ZUPT-only run, so `relative_change` is a within-trial
-contrast and the design is paired: 0 is "no better than ZUPT only", and the
-unperturbed probe sits at the trained corrector's own improvement.
-
-The across-trial spread at each probe is the usable reading: a probe whose band
-stays below 0 still beats ZUPT only in every trial, and the distance from the
-identity probe is what the perturbation cost.
-
-`checkpoint_dir` writes each trial's frame as it completes, so a long run
-survives a crash and can be replotted without recomputing.
+[`vary_hsgp_parameters`](@ref) per trial, stacked with a `trial_id` column. Each trial is
+scored against its own ZUPT-only RMSE (`reference_rmse(trial_id)`), so the design is
+paired. `checkpoint_dir` saves each trial's frame as it completes.
 """
 function sweep_over_trials(
     base_params::HsgpParameters,
@@ -703,13 +612,8 @@ end
 """
     sign_test_p(k, n) -> Float64
 
-Two-sided exact binomial sign test: the probability of a split at least as
-lopsided as `k` of `n` under p = 0.5.
-
-The sweep is paired -- every trial is scored against its own baseline -- so the
-question "did this perturbation move RMSE the same way in every trial" is a sign
-test on `n` paired observations, and needs no assumption about the (very
-skewed, see notes/009 section 6) distribution of the changes themselves.
+Two-sided exact binomial sign test: probability of a split at least as lopsided as
+`k` of `n` under p = 0.5.
 """
 function sign_test_p(k::Int, n::Int)::Float64
     n == 0 && return 1.0
@@ -720,20 +624,10 @@ end
 """
     probe_agreement(df) -> DataFrame
 
-Reduce a [`sweep_over_trials`](@ref) frame to one row per parameter: how far the
-across-trial median moved, and whether the trials agreed about it.
-
-Columns: `parameter`, `type`, `probe_kind`, `span` (range of the across-trial
-median curve), `worst_probe` (the non-identity probe with the highest median,
-i.e. the most damaging setting), `median_pct`, `q25`, `q75` (across trials at
-`worst_probe`), `n_agree`, `n_trials`, `p_value`.
-
-`n_agree` is the majority count `max(k, n-k)` over the sign of the change
-against ZUPT only, and `p_value` is [`sign_test_p`](@ref) on it: whether the
-trials agree that the most damaging setting still beats (or no longer beats)
-ZUPT only.
-
-All percentages, matching the plotting layer and `relative_change * 100`.
+One row per parameter of a [`sweep_over_trials`](@ref) frame: `span` of the median
+curve, `worst_probe` (highest median), `median_pct`/`q25`/`q75` there, and `n_agree`
+of `n_trials` on the sign of the change with its [`sign_test_p`](@ref) `p_value`.
+All in percent.
 """
 function probe_agreement(df::DataFrame)::DataFrame
     work = df[df.parameter .!= "baseline", :]
@@ -774,14 +668,8 @@ end
 """
     box_exit_over_trials(data_dir, trial_ids, base_params, param_specs, feature_type) -> DataFrame
 
-[`box_exit_frame`](@ref) for each trial, stacked with a `trial_id` column.
-
-The domain boundary is not a constant: across the 11 ANG2 trials the multiplier
-at which `sigma_x` carries the features outside `±LL` ranges ×0.13 to ×0.47, and
-one trial is already outside before any perturbation. Shading a single trial's
-boundary as though it were *the* boundary would misstate that, and the
-diagnostic is closed-form in the normalisation statistics, so every trial costs
-one feature extraction and no filter runs.
+[`box_exit_frame`](@ref) per trial, stacked with a `trial_id` column (the domain
+boundary differs between trials).
 """
 function box_exit_over_trials(
     data_dir::AbstractString,
@@ -804,14 +692,8 @@ end
 """
     box_outside_spans(box_df, parameter; level=0.5) -> Vector{Tuple{Float64,Float64}}
 
-The contiguous probe intervals over which at least `level` of the trials have
-features outside `±LL`.
-
-Returned as intervals rather than a single threshold because a *location*
-parameter leaves the domain at both ends of its probe, so there are two spans
-and a lone exit point would describe neither. A parameter that never leaves
-returns an empty vector, which is a result in its own right and the caller is
-expected to say so rather than draw nothing.
+Contiguous probe intervals over which at least `level` of the trials have features
+outside `±LL`. Empty if the parameter never leaves the domain.
 """
 function box_outside_spans(box_df::DataFrame, parameter::AbstractString;
     level::Real=0.5)::Vector{Tuple{Float64,Float64}}
@@ -843,19 +725,8 @@ end
 """
     probe_extremes_by_trial(df) -> DataFrame
 
-For each parameter and each trial, the two extremes of that trial's sweep:
-
-    best  = minimum over probes of the RMSE change   (the most a setting improved)
-    worst = maximum over probes of the RMSE change   (the most one degraded)
-
-Columns: `parameter`, `type`, `trial_id`, `best`, `worst`, as percentages.
-
-Both are the same kind of number -- a per-trial extreme in percent of that
-trial's ZUPT-only RMSE -- which is what lets the ranking figure draw them as two
-box plots on one signed axis.
-
-The identity probe reproduces the trained corrector, so `best <= trained <= worst`
-per trial; `best` equals the trained value exactly when no tested setting beat it.
+Per parameter and trial, `best` (min) and `worst` (max) RMSE change over the probes, in
+percent of that trial's ZUPT-only RMSE.
 """
 function probe_extremes_by_trial(df::DataFrame)::DataFrame
     work = df[df.parameter .!= "baseline", :]
@@ -873,21 +744,9 @@ end
 """
     probe_extremes_summary(df) -> DataFrame
 
-Box geometry for [`probe_extremes_by_trial`](@ref), long form: one row per
-parameter per side, `side` being `"best"` or `"worst"`.
-
-Columns: `parameter`, `type`, `side`, `q25`, `med`, `q75`, `whisker_lo`,
-`whisker_hi`, `n_trials`, `gap`, `worst_med`. Whiskers are Tukey's -- the
-furthest sample still within `1.5 x IQR` of the box -- so the plotting layer does
-no statistics of its own and every number in the figure is also in the saved CSV.
-
-`worst_med = median(worst)` is carried on both rows of a parameter and is the
-sort key, descending: the parameter whose typical *worst* setting costs the most
-comes first. That is the ranking to read as a risk: how much a bad value of this
-parameter costs if you get it wrong. `gap = median(worst) - median(best)` is
-still carried -- how far apart the typical best and worst settings are -- but it
-mixes in how much there was to gain, so a parameter with a large upside ranked
-above one that is merely dangerous.
+Box geometry of [`probe_extremes_by_trial`](@ref), one row per parameter and `side`
+(`"best"`/`"worst"`): `q25`, `med`, `q75`, Tukey whiskers, `n_trials`,
+`gap = median(worst) - median(best)` and `worst_med`, the descending sort key.
 """
 function probe_extremes_summary(df::DataFrame)::DataFrame
     ext = probe_extremes_by_trial(df)

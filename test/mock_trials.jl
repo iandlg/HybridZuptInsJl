@@ -63,7 +63,7 @@ function write_mock_dcsc(dst::AbstractString, id::Int; seconds::Real, margin::Re
     t0 = (field(imu[n_header+1], 1) - 1) / 100
     copy_rows(l -> (field(l, 1) - 1) / 100 <= t0 + seconds,
         joinpath(src, sub, "IMURaw.txt"), joinpath(dst, sub, "IMURaw.txt"); n_header=n_header)
-    _, _, lag = HybridZuptInsJl.synchronize(HybridZuptInsJl.InertialData(src, id), HybridZuptInsJl.Trajectory(src, id))
+    _, _, lag = StrideGP.synchronize(StrideGP.InertialData(src, id), StrideGP.Trajectory(src, id))
     opti = only(filter(endswith(".csv"), readdir(joinpath(src, sub, "OptiTrackOutput"))))
     copy_rows(l -> field(l, 2) <= t0 + seconds - lag + margin,
         joinpath(src, sub, "OptiTrackOutput", opti), joinpath(dst, sub, "OptiTrackOutput", opti); n_header=7)
@@ -84,6 +84,6 @@ function mock_dataset(key::AbstractString, ids::Vector{Int}; seconds::Real)::Str
     dst = mktempdir()
     writer = Dict("ANG2" => write_mock_ang2, "DCSC" => write_mock_dcsc)[key]
     foreach(id -> writer(dst, id; seconds=seconds), ids)
-    HybridZuptInsJl._DIR_TO_SOURCE[dst] = HybridZuptInsJl.resolve_source(DATA_DIRS[key])
+    StrideGP._DIR_TO_SOURCE[dst] = StrideGP.resolve_source(DATA_DIRS[key])
     return dst
 end

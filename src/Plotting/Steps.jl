@@ -1,19 +1,8 @@
 """
-    plot_step_lengths(trajs::Union{Vector{Trajectory}, Trajectory},
-                      gt_traj::Trajectory, segs::Vector{Int})
+    plot_step_lengths(trajs, gt_traj, segs) -> Figure
 
-Plot the 3D step lengths between consecutive step‑end indices for one or more estimated
-trajectories and the ground truth.
-
-# Arguments
-- `trajs`: Either a single `Trajectory` (wrapped into a 1‑element vector) or a vector
-  of `Trajectory` objects. Each trajectory may have a `name` field used in the legend.
-- `gt_traj`: Ground truth `Trajectory`.
-- `segs`: Vector of indices (1‑based) where each step ends. Step lengths are computed
-  between `segs[i]` and `segs[i+1]`.
-
-# Returns
-- A `Figure` object with a single axis showing step lengths over time.
+3D step lengths between consecutive step ends `segs` for one or more `Trajectory`s and
+the ground truth.
 """
 function plot_step_lengths(
     trajs::Union{Vector{Trajectory},Trajectory},

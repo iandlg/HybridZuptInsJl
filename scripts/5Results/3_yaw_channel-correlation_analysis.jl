@@ -2,8 +2,7 @@
 # features actually explain? Low input/output correlation on the yaw channel is
 # the justification for treating yaw differently from x/y.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames, Statistics
 
@@ -18,15 +17,15 @@ ids = trial_ids(data_key)
 
 
 frames = [
-    # HybridZuptInsJl.BODY,
-    HybridZuptInsJl.HEADING
+    # StrideGP.BODY,
+    StrideGP.HEADING
 ]
 feature_types = [
-    # HybridZuptInsJl.THREED_STEP,
-    # HybridZuptInsJl.TWOD_STEP_DT,
-    # HybridZuptInsJl.THREED_STEP_DT,
-    HybridZuptInsJl.TWOD_STEP_YAW,
-    # HybridZuptInsJl.THREED_STEP_DT_YAW
+    # StrideGP.THREED_STEP,
+    # StrideGP.TWOD_STEP_DT,
+    # StrideGP.THREED_STEP_DT,
+    StrideGP.TWOD_STEP_YAW,
+    # StrideGP.THREED_STEP_DT_YAW
 ]
 
 # Channels kept by the row selection below, in the same order. Named once so the
@@ -38,18 +37,18 @@ results = []
 for frame in frames
     for ft in feature_types
         # Load data
-        dataset = HybridZuptInsJl.collect_dataset(
+        dataset = StrideGP.collect_dataset(
             data_dir_path, ids;
             frame=frame,
             feature_type=ft,
         )
         data_vec = [dataset[id] for id in keys(dataset)]
 
-        input_io = HybridZuptInsJl.concatenate_io([res[2] for res in data_vec])
-        output_io = HybridZuptInsJl.concatenate_io([res[1] for res in data_vec])
+        input_io = StrideGP.concatenate_io([res[2] for res in data_vec])
+        output_io = StrideGP.concatenate_io([res[1] for res in data_vec])
 
         # Consider only x, y yaw corrections
-        output_io = HybridZuptInsJl.CorrectionIO(
+        output_io = StrideGP.CorrectionIO(
             output_io.t, output_io.data[OUTPUT_CHANNELS, :], output_io.data_std[OUTPUT_CHANNELS, :]
         )
 
@@ -57,12 +56,12 @@ for frame in frames
         # 2.5% trim directly and actually delivers it -- the chi-squared cut assumed D²
         # was χ²_d, which these residuals are not, so it removed fewer points than the
         # 0.975 suggested. This figure therefore changes slightly on a re-run.
-        input_io, output_io = HybridZuptInsJl.remove_outliers(input_io, output_io;
+        input_io, output_io = StrideGP.remove_outliers(input_io, output_io;
             method="mahalanobis", threshold=3.0, keep_fraction=0.85, dims=:output)
 
 
         # Compute training IO and CCA (reuse run_correlation_analysis but only return CCA results)
-        fig, canonical_corrs, _ = HybridZuptInsJl.run_correlation_analysis(input_io, output_io;
+        fig, canonical_corrs, _ = StrideGP.run_correlation_analysis(input_io, output_io;
             feature_type=ft, output_labels=OUTPUT_LABELS)
         k = length(canonical_corrs)
         score1 = canonical_corrs[1]                     # first canonical correlation
@@ -94,7 +93,7 @@ display(df)
 # Same trials, same outlier trim and same channel slice as the input/output
 # heatmap: this reads the output_io each loop iteration pushed rather than
 # reloading, so the two figures cannot describe different data.
-output_corr = [(r[1], r[2], HybridZuptInsJl.compute_correlation_matrix(r[7].data, r[7].data))
+output_corr = [(r[1], r[2], StrideGP.compute_correlation_matrix(r[7].data, r[7].data))
                for r in results]
 
 for (frame, ft, corr_mat) in output_corr
@@ -116,7 +115,7 @@ results_figure() do
     # Built inside the theme block, unlike the figure above, which
     # run_correlation_analysis constructs back in the loop: Makie resolves a theme
     # when a figure is created, not when it is saved.
-    fig = HybridZuptInsJl.plot_correlation_heatmap(
+    fig = StrideGP.plot_correlation_heatmap(
         output_corr[end][3], OUTPUT_LABELS, OUTPUT_LABELS;
         figsize=(500, 450),
         xlabel="Output corrections",

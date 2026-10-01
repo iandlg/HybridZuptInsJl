@@ -32,7 +32,7 @@ function _grouped_boxplot!(
     # the multi-track figure never declares it as a series at all, so any positional
     # scheme shifts every remaining estimator onto its neighbour's colour. Wong 1/2/3
     # belong to ZUPT only / Static / HSGP by convention -- one table, in
-    # `_METHOD_COLOR_INDICES` (Plotting/OfflineCorrection.jl).
+    # `_METHOD_COLOR_INDICES` (Plotting/Regression.jl).
     # `series_colors` overrides the table for series it names, for figures whose
     # series are variants of a method ("HSGP (split)") rather than methods: those miss
     # the table and would all land on one fallback grey. Everything else is unchanged.
@@ -80,26 +80,10 @@ function _grouped_boxplot!(
 end
 
 """
-    plot_noise_paired_relative_change(paired::DataFrame, dataset_name::AbstractString;
-                                      save_path::Union{String,Nothing}=nothing)
+    plot_noise_paired_relative_change(paired, dataset_name; value_col=:rel_change_pct,
+        metric=:rmse_rate, show_points=false, save_path=nothing)
 
-The paired counterpart of `plot_noise_sweep_boxplots`: same noise specs on the x axis,
-but each box holds the per-trial **relative change against the reference estimator**
-(from `paired_estimator_contrast`), in percent, with a reference line at zero. The
-reference estimator has no box — it is the zero line.
-
-Because each point is a difference taken within one trial, walk-to-walk difficulty
-cancels, so a box sitting clear of zero is a consistent effect — a claim the unpaired
-figure cannot support.
-
-# Arguments
-- `paired`: output of `paired_estimator_contrast`.
-- `dataset_name`: which `dataset_name` to filter to.
-- `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
-- `metric`: only used to name the quantity in the axis label.
-- `show_points`: overlay the individual trials on each box.
-- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
-  when the document's own caption carries the same information.
+As [`plot_train_ratio_paired_relative_change`](@ref), one group per noise spec.
 """
 function plot_noise_paired_relative_change(
     paired::DataFrame,
@@ -107,11 +91,9 @@ function plot_noise_paired_relative_change(
     value_col::Symbol=:rel_change_pct,
     metric::Symbol=:rmse_rate,
     _ylims::Union{Tuple{Float64,Float64}}=nothing,
-    # reference_label::AbstractString="baseline",
     save_path::Union{String,Nothing}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
-    # show_subtitle::Bool=true,
     figsize::Tuple{Int,Int}=(900, 600)
 )
     check_metric(metric)
@@ -124,15 +106,8 @@ function plot_noise_paired_relative_change(
     as_pct = value_col === :rel_change_pct
     fig = Figure(size=figsize)
     ax = Axis(fig[1, 1],
-        # Kept short on purpose: spelling the formula out here overflows the axis
-        # once `reference_label` is a real estimator name. The subtitle carries it.
         ylabel=as_pct ? rich("relative change in ", metric_symbol(metric), " [%]") :
                rich("change in ", metric_label(metric)),
-        # title="Paired per-trial change vs \"$reference_label\" — $dataset_name",
-        # subtitle=(!show_subtitle ? "" :
-        #           as_pct ? "(estimator − $reference_label) / |$reference_label|, per trial" :
-        #           "estimator − $reference_label, per trial"
-        # ),
         subtitlesize=10,
         xticklabelsize=14,
         xticklabelrotation=π / 6,
@@ -157,22 +132,9 @@ end
 """
     plot_multi_track_training_quality(df; metric=:rmse_rate, save_path=nothing)
 
-One panel per test track: `metric` against the **number** of accumulated training tracks,
-estimators side by side, with the untrained baseline as a dashed line in its own method
-colour. Reading along the x axis answers the question the experiment exists for — whether
-more (noisy) training data buys back the performance the noise costs — and the baseline
-line is what "buys back" is measured against, so it is drawn first and leads the legend.
-
-Each box spans the repeats in `df`, i.e. the `seed` column of
-`multi_track_training_analysis`: one random accumulation order per seed. Up to the last
-group a box also spans which *subset* of tracks a permutation happened to reach first; in
-the last group every repeat has trained on the same set, so the box there is order
-sensitivity alone and should be near-degenerate. At one seed a box is a single point.
-
-WAS: a bar chart of `first(...)`, one unreplicated number per cell annotated to two
-decimals, with the x axis labelled by the comma-separated track ids of one arbitrary
-accumulation order — a labelling that is not even well defined once the order is randomised
-per repeat.
+One panel per test track of a `multi_track_training_analysis` frame: `metric` against the
+number of accumulated training tracks, estimators side by side, untrained baseline
+dashed. Boxes span the order seeds; at the last group all seeds share one training set.
 """
 function plot_multi_track_training_quality(
     df::DataFrame;
@@ -260,25 +222,9 @@ end
 """
     plot_multi_track_training_noise_panels(df, test_id; metric=:rmse, save_path=nothing)
 
-One panel per noise specification, all showing the **same** test track: `metric` against
-the number of accumulated training tracks, estimators side by side, with the untrained
-baseline as a dashed line in its own method colour. This is
-[`plot_multi_track_training_quality`](@ref) faceted the other way round — that figure
-holds the noise spec fixed and varies the test track, this one holds the test track fixed
-and varies the noise, which is the comparison the experiment exists for: how the same
-recovery curve changes as the training ground truth gets worse.
-
-`df` is several `multi_track_training_analysis` frames stacked, each carrying the
-`noise_spec_tag` / `noise_spec_order` columns that say which panel it is and where the
-panel goes. The sweep does not produce those columns — one run is one noise spec — so the
-caller adds them when it loads the per-spec tables.
-
-The baseline is the same number in every panel (training noise cannot touch a test track
-whose GT stays clean), which is the cross-check that the panels really are one test track.
-
-The y axis is linked and linear across panels, as in the sibling figure: the panels span
-a factor of ~20 in `metric`, so the clean panel reads nearly flat against the noisy ones
-— that compression is the cost of the noise and is the thing being shown.
+[`plot_multi_track_training_quality`](@ref) faceted by noise spec for one test track,
+on a linked linear y axis. `df` is several `multi_track_training_analysis` frames
+stacked, with the caller adding `noise_spec_tag`/`noise_spec_order`.
 """
 function plot_multi_track_training_noise_panels(
     df::DataFrame,
@@ -322,7 +268,6 @@ function plot_multi_track_training_noise_panels(
             title=string(spec),
             xlabel="Training tracks accumulated",
             ylabel=metric_label(metric),
-            # yscale=log10,
             xgridvisible=false)
         push!(axs, ax)
 

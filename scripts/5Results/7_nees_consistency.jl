@@ -8,8 +8,7 @@
 ### Knobs from the environment, so an unattended run needs no edit:
 ###   DATA_KEY=DCSC TRAIN_RATIOS=0.3,0.6 julialauncher --project=. -t 1 scripts/5Results/7_nees_consistency.jl
 ###   RESULTS_CSV=nees_footfalls_<stem>.csv ...   re-plots a finished run
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames, Statistics, Printf
 import CSV
@@ -28,7 +27,7 @@ results_csv = get(ENV, "RESULTS_CSV", nothing)
 ## 2. Filter, correctors, hyperparameters
 filter_tag = "V4"
 estimators = OrderedDict(
-    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "ZUPT only" => StrideGP.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
@@ -39,9 +38,9 @@ output_channels = [:pos_1, :pos_2, :yaw]
 
 ## 3. Run the sweep and save the per-footfall NEES, or read a finished run back
 if isnothing(results_csv)
-    aligned = HybridZuptInsJl.collect_aligned_trajectories(
+    aligned = StrideGP.collect_aligned_trajectories(
         OrderedDict{String,Tuple{String,Vector{Int}}}(data_key => (data_dir(data_key), ids)))
-    footfalls = HybridZuptInsJl.run_online_nees_sweep(
+    footfalls = StrideGP.run_online_nees_sweep(
         aligned, FRAME, FEATURE_TYPE, hsgp_p, train_ratios, estimators, output_channels;
         estimator_alloc=300,
         correction_filter=CORRECTION_FILTERS[filter_tag])
@@ -56,7 +55,7 @@ else
     @info "Loaded per-footfall NEES: $csv_path" nrow(footfalls)
 end
 
-summary = HybridZuptInsJl.nees_summary(footfalls)
+summary = StrideGP.nees_summary(footfalls)
 CSV.write(results_path(DATA_SECTION, "nees_summary_$(run_stem).csv"), summary)
 
 ## 4. Median over trials of each run's ANEES and fraction inside the 95% envelope.
@@ -75,7 +74,7 @@ end
 
 ## 5. Figure, named after the CSV it was plotted from
 results_figure() do
-    HybridZuptInsJl.plot_nees_train_ratio(summary, first(unique(summary.dataset_name));
+    StrideGP.plot_nees_train_ratio(summary, first(unique(summary.dataset_name));
         phase="test",
         save_path=results_path(SECTION, "nees_$(run_stem).pdf"))
 end

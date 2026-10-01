@@ -1,13 +1,7 @@
 """
-Probe-aware sensitivity figures.
-
-Reads the `probe` / `probe_kind` columns `vary_hsgp_parameters` emits, so a
-location parameter is drawn on the additive axis it was actually swept on, and
-draws the across-trial band that `sweep_over_trials` produces.
-
-Shared vocabulary -- the `[symbol]_k` labels, colours, percent tick format,
-multiplier ticks -- comes from `OnlineHpSensitivity.jl` rather than being
-restated here.
+Probe-aware sensitivity figures: read the `probe`/`probe_kind` columns of
+`vary_hsgp_parameters` and the across-trial bands of `sweep_over_trials`. Shared labels,
+colours and tick formats come from `OnlineHpSensitivity.jl`.
 """
 
 # Same wording as the paired-comparison figures; the reference is ZUPT only.
@@ -77,12 +71,8 @@ end
 """
     _draw_probe_panel!(ax, sub; color, markersize, linewidth, max_ticks) -> (probes, med)
 
-One parameter's sensitivity curve on its own probe axis: across-trial median with
-an inter-quartile band, percent RMSE change against `probe`.
-
-Unlike `_draw_hp_panel!` this never divides by `base_value`, so it is defined for
-a parameter fitted to zero and points the same way for a negative base as for a
-positive one.
+One parameter's across-trial median and IQR band of percent RMSE change against its
+`probe` coordinate.
 """
 function _draw_probe_panel!(ax::Axis, sub::AbstractDataFrame;
     color=Makie.wong_colors()[1], markersize::Real=6, linewidth::Real=2,
@@ -107,14 +97,8 @@ end
 """
     plot_probe_sensitivity(df, grid; save_path=nothing, max_ticks=5)
 
-One panel per swept parameter, laid out by `grid`, each on its own probe axis:
-`log10` multiplier for the scale families, linear offset for the locations.
-
-This is the figure the typed probe was for. Under the old multiplicative sweep a
-row of location panels shared an axis label that meant a different excursion in
-every panel -- `μ_x[1]` at ×10 is a 13-standard-deviation shift and `μ_x[3]` at
-×10 is less than one -- and the `c_x[3]` panel ran right to left because its base
-is negative. Here every panel of a family is the same probe in the same units.
+One panel per swept parameter, laid out by `grid`, each on its own probe axis: `log10`
+multiplier for scale families, linear offset for locations.
 """
 function plot_probe_sensitivity(
     df::DataFrame, grid::ParamGrid;
@@ -155,23 +139,9 @@ end
 """
     plot_box_exit(df, box_df; save_path=nothing, max_ticks=5)
 
-Where the normalised features leave the fixed HSGP domain, against what the same
-perturbation does to RMSE.
-
-One panel per input-normalisation parameter. Left axis: across-trial median RMSE
-change with its inter-quartile band. Right axis: the fraction of strides with any
-`|z_d| > LL_d`. A dashed rule marks where `max_z_ratio` first crosses 1.
-
-The point of the figure: `LL` is a stored field, fixed at training time, and is
-*not* rescaled when `σ_x` is perturbed. So the outer end of a `σ_x` sweep is not
-a length-scale result, it is the features leaving a box that did not move -- and
-the rule says at exactly which multiplier. A panel with no rule is the other
-useful outcome: that parameter stayed inside the domain over the whole probe, so
-whatever RMSE did there is sensitivity rather than a basis-truncation artifact.
-
-`box_df` may be swept over a wider probe range than `df` -- it costs no filter
-runs -- in which case the left axis is drawn over the RMSE range and the right
-axis over the full box range.
+One panel per input-normalisation parameter: across-trial median RMSE change with IQR
+band (left axis), fraction of strides outside `±LL` (right axis), and a dashed rule where
+`max_z_ratio` first crosses 1. `box_df` may cover a wider probe range than `df`.
 """
 function plot_box_exit(df::DataFrame, box_df::DataFrame;
     save_path::Union{String,Nothing}=nothing, max_ticks::Int=5)
@@ -252,12 +222,8 @@ end
 """
     _clip_marks!(ax, y, lo_val, hi_val; color, xlo, xhi)
 
-Arrowheads at the frame wherever a row has a mark outside `[xlo, xhi]`.
-
-The x limits are set from the box medians (see [`plot_probe_ranking`](@ref)), so
-whiskers and outliers routinely leave the frame — the input std rows carry a q75
-near +100 against a median of +41. Makie clips them silently; these say a mark was
-cut rather than letting the row look bounded.
+Arrowheads at the frame for each row with a mark outside `[xlo, xhi]`, so clipped
+whiskers don't look bounded.
 """
 function _clip_marks!(ax::Axis, y::Real, lo_val::Real, hi_val::Real;
     color, xlo::Real, xhi::Real)
@@ -275,43 +241,12 @@ end
     plot_probe_ranking(df; xlims=nothing, save_path=nothing, log_scale=false,
                        sides=(:best, :worst), figsize=(940, 560))
 
-`sides` picks which boxes to draw: `(:best, :worst)`, `(:worst,)` or `(:best,)`.
-Row order is always by the worst-side median.
+Overview ranking: per parameter, boxplots over trials of the best and worst RMSE change
+([`probe_extremes_by_trial`](@ref)) against ZUPT only, rows sorted by the worst-side
+median. A dotted line marks the trained corrector's median. `sides` picks the boxes.
 
-Which parameters move RMSE, by how much, and in which direction. The overview
-figure, and the one to read first.
-
-Two boxes per parameter over the trials, both of the same quantity -- a
-**per-trial extreme** of the RMSE change (`probe_extremes_by_trial`) -- drawn on
-one row and told apart by which side of zero they fall. Rows are sorted by the
-median of the **worst** side, largest at top: the parameter whose typical worst
-setting costs the most RMSE comes first, so the figure reads top-down as "how
-much does getting this one wrong cost". (The sort key is `worst_med` in
-[`probe_extremes_summary`](@ref); the earlier best-to-worst `gap` ranked a
-parameter with a large upside above one that is merely dangerous.)
-
-Changes are against each trial's ZUPT-only RMSE, so the dashed zero line is
-"no correction". `best` is the minimum over probes and `worst` the maximum, and
-the identity probe is the trained corrector, so `best <= trained <= worst` per
-trial. The dotted line is the across-trial median of the trained corrector (the
-`"baseline"` rows), and separates the two sides; a worst-case box crossing zero
-is a setting that makes the correction worse than none.
-
-**X limits come from the box medians, not from the boxes or whiskers.** The input
-std rows carry a q75 near +100 while every median fits inside -6% to +41%, so
-letting the boxes set the scale reintroduces exactly the compression this figure
-was rebuilt to remove. Anything past the frame is clipped and marked with an
-arrowhead, and `_ranking.csv` carries the untruncated numbers.
-
-The boxes are Makie's `boxplot!`, the same mark the paired-comparison figures use
-(`_grouped_boxplot!`), so this figure reads in the chapter's usual visual language.
-It hands `boxplot!` the per-trial values from [`probe_extremes_by_trial`](@ref) and
-lets it reduce them, which cannot disagree with the saved CSV: Makie takes its
-quartiles from `Statistics.quantile` and its whiskers from Tukey's 1.5 x IQR rule,
-exactly the conventions [`probe_extremes_summary`](@ref) writes out. The two would
-part company only below four trials, where the summary falls back to min/median/max.
-`probe_extremes_summary` is still called here, for the row order, the median-based
-limits and the clip marks.
+X limits come from the box medians; marks beyond them are clipped with arrowheads, and
+the `_ranking.csv` keeps the full numbers.
 """
 function plot_probe_ranking(df::DataFrame;
     xlims::Union{Nothing,Tuple{Float64,Float64}}=nothing,
@@ -408,25 +343,11 @@ function plot_probe_ranking(df::DataFrame;
 end
 
 """
-    plot_param_closeup(df, parameter; box_df=nothing,
-                       save_path=nothing, figsize=(700, 460))
+    plot_param_closeup(df, parameter; box_df=nothing, save_path=nothing, figsize=(700, 460))
 
-One parameter, one figure, one conclusion -- the per-parameter extract of the
-`plot_probe_sensitivity` grid, sized for the write-up rather than for an
-appendix page.
-
-Across-trial median with its inter-quartile band, and a second axis on top
-carrying the parameter's *absolute* values: a reader needs to know that ×2.15 on the yaw length scale
-means 31.6, not only that it is ×2.15.
-
-Pass `box_df` (from [`box_exit_over_trials`](@ref)) for a normalisation
-parameter and the probe intervals where the features leave the fixed `±LL`
-domain are shaded, so "the damage begins exactly where the basis stops being
-able to represent the feature" is read off the figure rather than argued. When
-no such interval falls inside the plotted range the subtitle says so instead of
-the figure simply lacking shading -- for the location parameters the boundary is
-at roughly ±5 and the probe only reaches ±2, and that the probe never leaves the
-domain is the result.
+One parameter's across-trial median and IQR band, with a top axis of absolute values.
+With `box_df` ([`box_exit_over_trials`](@ref)) the probe intervals where features leave
+`±LL` are shaded; if none fall in range the subtitle says so.
 """
 function plot_param_closeup(df::DataFrame, parameter::AbstractString;
     box_df::Union{DataFrame,Nothing}=nothing,

@@ -95,7 +95,7 @@ function preprocess(::DCSC, imu::InertialData, gt::Trajectory; fs_resample=200.0
     for i in axes(mats, 3)
         mats[:, :, i] = gt_aligned.R_nb[:, :, i] * R
     end
-    gt_aligned = HybridZuptInsJl.Trajectory(gt_aligned.t, gt_aligned.pos, mats)
+    gt_aligned = Trajectory(gt_aligned.t, gt_aligned.pos, mats)
     return imu_sync, gt_aligned
 end
 

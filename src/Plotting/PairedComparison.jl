@@ -1,58 +1,20 @@
 """
-Paired per-trial comparison against a baseline.
-
-Every sweep in `scripts/5Results/` runs the *same* trials through every
-estimator, which makes the design paired. Plotting the result as side-by-side
-boxplots throws that pairing away and asks the reader to compare two clouds of
-9-10 points by eye, which is exactly the situation where an eyeball comparison
-is least reliable.
-
-The paired view instead shows, per trial, the change the estimator produced
-relative to the baseline on that same trial. Trial-to-trial difficulty (some
-walks are simply longer or twistier) cancels, so the remaining spread is the
-effect of the estimator rather than the spread of the dataset.
-
-The summary reported is deliberately descriptive -- median difference, a
-bootstrap interval, and a win count -- not a significance test. At n = 9 the
-honest statement is "lower in 8 of 9 trials, median -0.004 m/m", and this
-figure is built to let you write exactly that sentence.
+Paired per-trial comparison against a baseline. Every sweep runs the same trials through
+every estimator, so each box shows per-trial changes relative to the reference on that
+same trial: walk-to-walk difficulty cancels, and the reference itself is the zero line.
+Summaries are descriptive (median, bootstrap interval, win count), not significance tests.
 """
 
 using Random
 
 """
-    function plot_train_ratio_paired_relative_change(
-        paired::DataFrame,
-        dataset_name::AbstractString;
-        value_col::Symbol=:rel_change_pct,
-        metric::Symbol=:rmse,
-        save_path::Union{String,Nothing}=nothing,
-        show_outliers::Bool=true,
-        show_points::Bool=false,
-        series_colors::Union{Nothing,AbstractDict}=nothing,
-    )
+    plot_train_ratio_paired_relative_change(paired, dataset_name; value_col=:rel_change_pct,
+        metric=:rmse, save_path=nothing, show_outliers=true, show_points=false,
+        series_colors=nothing)
 
-`plot_noise_paired_relative_change` with `train_ratio` on the x axis instead of the
-noise spec: same grouped-boxplot machinery, same pairing, but each group is one
-ground-truth availability level rather than one noise realisation.
-
-Each point is one trial's change against the reference estimator on the **same**
-trial at the **same** `train_ratio` (from `paired_estimator_contrast`), so
-walk-to-walk difficulty cancels and a box clear of zero is a consistent effect —
-the claim `plot_corrector_boxplots` cannot make, because there the trial-to-trial
-spread swamps the estimator difference. The reference estimator has no box: it is
-the zero line.
-
-# Arguments
-- `paired`: output of `paired_estimator_contrast`.
-- `dataset_name`: which `dataset_name` to filter to.
-- `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
-- `metric`: only used to name the quantity in the axis label — it must be the one
-  `paired_estimator_contrast` was called with, which is not checked.
-- `show_points`: overlay the individual trials on each box. Worth turning on here:
-  a box typically summarises ~10 trials.
-- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
-  when the document's own caption carries the same information.
+Grouped boxplots of a `paired_estimator_contrast` frame, one group per `train_ratio`.
+`value_col` is `:rel_change_pct` or `:delta`; `metric` only names the axis and must
+match the one the contrast was computed with (not checked).
 """
 function plot_train_ratio_paired_relative_change(
     paired::DataFrame,
@@ -117,38 +79,12 @@ function plot_train_ratio_paired_relative_change(
 end
 
 """
-    plot_dataset_paired_relative_change(
-        paired::DataFrame;
-        value_col::Symbol=:rel_change_pct,
-        metric::Symbol=:rmse,
-        reference_label::AbstractString="baseline",
-        save_path::Union{String,Nothing}=nothing,
-        show_outliers::Bool=true,
-        show_points::Bool=false,
-        show_subtitle::Bool=true,
-    )
+    plot_dataset_paired_relative_change(paired; value_col=:rel_change_pct, metric=:rmse,
+        reference_label="baseline", save_path=nothing, show_outliers=true,
+        show_points=false, show_subtitle=true)
 
-`plot_train_ratio_paired_relative_change` with the dataset on the x axis: one group
-per `dataset_name`, estimators side by side within it, so a frozen hyperparameter
-set can be read across datasets in the same visual language as the noise and
-train-ratio figures.
-
-Each box spans the per-trial changes against the reference estimator on the **same**
-trial (from `paired_estimator_contrast`), so walk-to-walk difficulty cancels and a
-box clear of zero is a consistent effect. The reference estimator has no box: it is
-the zero line.
-
-# Arguments
-- `paired`: output of `paired_estimator_contrast`.
-- `series_colors`: per-series colour override, for series that are variants of a method
-  (`"HSGP (split)"`) and so miss `method_color`'s table. Unnamed series keep the table's.
-- `value_col`: `:rel_change_pct` (default) or `:delta` (the metric's own units).
-- `metric`: only used to name the quantity in the axis label — it must be the one
-  `paired_estimator_contrast` was called with, which is not checked.
-- `show_points`: overlay the individual trials on each box. Worth turning on here:
-  a box typically summarises ~10 trials.
-- `show_subtitle`: draw the subtitle under the title (default `true`). Turn it off
-  when the document's own caption carries the same information.
+As [`plot_train_ratio_paired_relative_change`](@ref), one group per `dataset_name`.
+`series_colors` overrides [`method_color`](@ref) for variant series names.
 """
 function plot_dataset_paired_relative_change(
     paired::DataFrame;
@@ -204,14 +140,8 @@ end
         metric=:rmse, series_colors=nothing, save_path=nothing,
         show_outliers=true, show_points=false)
 
-`plot_train_ratio_paired_relative_change` with the online mocap budget on the x axis:
-one group per number of training strides, estimators side by side within it.
-
-The difference is not cosmetic. There each group is a different evaluation window, so
-the trend across groups mixes "the model got better" with "the test got shorter"; here
-every group is scored on the same strides against a baseline re-run at that same budget
-(from `learning_curve_contrast`), so the trend across groups is the learning curve. The
-reference estimator has no box: it is the zero line.
+As [`plot_train_ratio_paired_relative_change`](@ref), one group per mocap budget, from a
+`learning_curve_contrast` frame (every group scored on the same strides).
 """
 function plot_learning_curve_relative_change(
     paired::DataFrame,
@@ -270,13 +200,8 @@ end
     plot_learning_curve_absolute(df, dataset_name; metric=:rmse,
         series_colors=nothing, save_path=nothing, show_outliers=true, show_points=false)
 
-The learning curve on the metric's own scale: one group per budget, every estimator side
-by side in each, "ZUPT only" included — it is re-run at every budget, since the budget is
-also the mocap it gets.
-
-Takes the sweep frame from `run_online_learning_curve`, not the paired one. Unpaired, so
-the spread of each box is mostly walk-to-walk difficulty; `plot_learning_curve_relative_change`
-is the view that cancels it.
+Unpaired learning curve on the metric's own scale from a `run_online_learning_curve`
+frame: one group per budget, every estimator including `"ZUPT only"`.
 """
 function plot_learning_curve_absolute(
     df::DataFrame,

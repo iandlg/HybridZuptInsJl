@@ -6,8 +6,7 @@
 # for "does the yaw correction work", :rmse_rate is the downstream consequence
 # for position. Report the yaw figure as the primary one.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames
 import CSV
@@ -19,7 +18,7 @@ data_dict = OrderedDict{String,Tuple{String,Vector{Int}}}(
 )
 
 # 2. Align INS / GT trajectories for every trial
-aligned = HybridZuptInsJl.collect_aligned_trajectories(data_dict)
+aligned = StrideGP.collect_aligned_trajectories(data_dict)
 
 ## 3. Hyperparameters
 m = 200
@@ -32,7 +31,7 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 filter_tag = "V4"
 
 estimators = OrderedDict(
-    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "ZUPT only" => StrideGP.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
@@ -41,7 +40,7 @@ output_channels = [:pos_1, :pos_2, :yaw]
 train_ratios = [0.5]
 
 ## 5. Run the sweep
-results_df = HybridZuptInsJl.run_online_correction_sweep(
+results_df = StrideGP.run_online_correction_sweep(
     aligned,
     FRAME,
     FEATURE_TYPE,
@@ -70,7 +69,7 @@ CSV.write(stamped(DATA_SECTION, "yaw_only_correction_$(RUN_STEM)"; ext="csv"),
 
 # Primary: the channel actually being corrected.
 results_figure() do
-    HybridZuptInsJl.boxplot_dataset_comparison(
+    StrideGP.boxplot_dataset_comparison(
         results_df;
         metric=:rmse_yaw,
         train_ratio=0.5,
@@ -80,7 +79,7 @@ end
 
 # Secondary: what it costs downstream in position.
 results_figure() do
-    HybridZuptInsJl.boxplot_dataset_comparison(
+    StrideGP.boxplot_dataset_comparison(
         results_df;
         metric=:rmse_rate,
         train_ratio=0.5,
@@ -92,11 +91,11 @@ end
 # to compare by eye, and they are all the same trials. Same grouped-boxplot
 # view as section 2's dataset comparison, so the two figures read alike.
 for metric in (:rmse_yaw, :rmse)
-    paired = HybridZuptInsJl.paired_estimator_contrast(
+    paired = StrideGP.paired_estimator_contrast(
         results_df; metric=metric, reference_estimator="ZUPT only")
 
     results_figure() do
-        HybridZuptInsJl.plot_dataset_paired_relative_change(
+        StrideGP.plot_dataset_paired_relative_change(
             paired;
             metric=metric,
             reference_label="ZUPT only",

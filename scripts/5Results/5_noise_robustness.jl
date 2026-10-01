@@ -1,31 +1,10 @@
-# Section 5 (noise robustness): how much ground-truth noise can the correction
-# tolerate?
-#
-# Two figures per metric, both with the noise specs on the x axis and each box
-# spanning the trials:
-#
-#   1. Unpaired -- ZUPT only, Static and HSGP side by side, in the metric's own
-#      units. Shows the absolute error level at each noise level.
-#   2. Paired -- Static and HSGP only, as the per-trial relative change against
-#      ZUPT only on the SAME trial and the SAME noise realisation. ZUPT only is
-#      the zero line. Walk-to-walk difficulty cancels here, so a box clear of zero is a
-#      consistent effect; in figure 1 the same effect can hide inside the spread.
-#
-# N_NOISE_DRAWS below controls how many noise realisations each (trial, noise
-# spec) gets: one per seed in SEEDS. At one seed the spread in both figures is
-# purely trial-to-trial; with more, each box also carries the draw-to-draw
-# variability, at n_trials x N_NOISE_DRAWS points per box.
-#
-# Each realisation comes from its own Xoshiro(seed), drawn once per
-# (trial, noise spec, seed) and shared by every estimator in that cell -- that is
-# what makes figure 2 a paired comparison.
-#
-# Set `results_csv` below to re-plot a finished sweep from its scores CSV instead
-# of paying for it again. The figures are then named after that CSV's stem, so a
-# re-plot stays traceable to the sweep it came from.
+# Section 5 (noise robustness): how much ground-truth noise can the correction tolerate?
+# Per metric, noise specs on the x axis, boxes over trials: (1) unpaired, in the metric's
+# units; (2) paired relative change against ZUPT only on the same trial and noise draw.
+# N_NOISE_DRAWS sets the draws per (trial, spec); every estimator in a cell shares one.
+# Set `results_csv` to re-plot a finished sweep from its CSV.
 
-include("../../src/HybridZuptInsJl.jl");
-using .HybridZuptInsJl;
+using StrideGP
 include("_common.jl")
 using OrderedCollections, DataFrames
 import CSV
@@ -52,7 +31,7 @@ results_csv = nothing
 # 2. Align INS / GT trajectories for every trial
 # Skipped when re-plotting from CSV: this and the sweep are the whole cost of the
 # script, and nothing downstream of the scores table needs the trajectories.
-aligned = isnothing(results_csv) ? HybridZuptInsJl.collect_aligned_trajectories(data_dict) : nothing
+aligned = isnothing(results_csv) ? StrideGP.collect_aligned_trajectories(data_dict) : nothing
 
 ## 3. Load HSGP hyperparameters / Input feature type
 m = 200
@@ -75,7 +54,7 @@ filter_tag = "V4"
 # (V4 starts it on the mocap pose at k=1), same fix path, same scoring. A
 # baseline from a different filter is not the thing the corrections are adding to.
 estimators = OrderedDict(
-    "ZUPT only" => HybridZuptInsJl.BaseEstimator,
+    "ZUPT only" => StrideGP.BaseEstimator,
     "Static" => CORRECTORS[filter_tag].static,
     "HSGP" => CORRECTORS[filter_tag].hsgp,
 )
@@ -95,7 +74,7 @@ sigma_tag = match_gt_sigma ? "matchedR" : "assumedR"
 
 # The baseline is only a baseline if it ran through the same filter; assert it
 # rather than trusting the dict above to have been edited in step with the tag.
-@assert CORRECTION_FILTERS[filter_tag] === HybridZuptInsJl.hybrid_zupt_aided_insv4
+@assert CORRECTION_FILTERS[filter_tag] === StrideGP.hybrid_zupt_aided_insv4
 @assert estimators["Static"] === CORRECTORS[filter_tag].static
 @assert estimators["HSGP"] === CORRECTORS[filter_tag].hsgp
 
@@ -105,14 +84,14 @@ train_ratios = [0.5]
 noise_specs = [
     # Clean reference, so the figure carries its own no-noise baseline instead
     # of requiring the reader to compare against a different figure.
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=0.0, tag="No noise"),
-    # HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=0.0, tag="Position Noise Only (0.05m)"),
-    # HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=0.0, tag="Position Noise Only (0.1m)"),
-    # HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=5*pi/180, tag="Heading Noise Only (5°)"),
-    # HybridZuptInsJl.NoiseSpec(; pos_std=0.0, att_std=10*pi/180, tag="Heading Noise Only (10°)"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±10°)"),
-    HybridZuptInsJl.NoiseSpec(; pos_std=1.0, att_std=10*pi/180, tag="Position & Heading Noise (1.0m, ±10°)"),
+    StrideGP.NoiseSpec(; pos_std=0.0, att_std=0.0, tag="No noise"),
+    # StrideGP.NoiseSpec(; pos_std=0.05, att_std=0.0, tag="Position Noise Only (0.05m)"),
+    # StrideGP.NoiseSpec(; pos_std=0.1, att_std=0.0, tag="Position Noise Only (0.1m)"),
+    # StrideGP.NoiseSpec(; pos_std=0.0, att_std=5*pi/180, tag="Heading Noise Only (5°)"),
+    # StrideGP.NoiseSpec(; pos_std=0.0, att_std=10*pi/180, tag="Heading Noise Only (10°)"),
+    StrideGP.NoiseSpec(; pos_std=0.05, att_std=5*pi/180, tag="Position & Heading Noise (0.05m, ±5°)"),
+    StrideGP.NoiseSpec(; pos_std=0.1, att_std=10*pi/180, tag="Position & Heading Noise (0.1m, ±10°)"),
+    StrideGP.NoiseSpec(; pos_std=1.0, att_std=10*pi/180, tag="Position & Heading Noise (1.0m, ±10°)"),
 ]
 ## 5. Run the sweep
 # Each draw is shared by all estimators in its cell, so the paired figure below
@@ -143,7 +122,7 @@ score_cols = [:dataset_name, :dataset_order, :trial_id, :train_ratio, :train_rat
 const CSV_PREFIX = "noise_results"
 
 if isnothing(results_csv)
-    results_df = HybridZuptInsJl.run_online_correction_sweep(
+    results_df = StrideGP.run_online_correction_sweep(
         aligned,
         FRAME,
         FEATURE_TYPE,
@@ -168,13 +147,13 @@ if isnothing(results_csv)
     # copied onto each (spec, seed) key so `paired_estimator_contrast` can pair
     # them inside every cell. Those copies are one measurement repeated, not
     # repeated measurements: its box has no spread beyond the trial-to-trial one.
-    nomocap_df = HybridZuptInsJl.run_online_correction_sweep(
+    nomocap_df = StrideGP.run_online_correction_sweep(
         aligned,
         FRAME,
         FEATURE_TYPE,
         hsgp_p,
         train_ratios,
-        OrderedDict("ZUPT only (no mocap)" => HybridZuptInsJl.BaseEstimator),
+        OrderedDict("ZUPT only (no mocap)" => StrideGP.BaseEstimator),
         output_channels;
         noise_specs=[first(noise_specs)],
         seeds=SEEDS[1:1],
@@ -192,7 +171,7 @@ if isnothing(results_csv)
             d
         end
         for (order, spec) in enumerate(noise_specs)
-        for seed in (HybridZuptInsJl.is_noiseless(spec) ? SEEDS[1:1] : SEEDS)
+        for seed in (StrideGP.is_noiseless(spec) ? SEEDS[1:1] : SEEDS)
     ]...)
 
     # The draw count is in the stem because a 1-draw and a 10-draw file are different
@@ -225,11 +204,11 @@ plot_specs = noise_specs[spec_indexes]
 
 for metric in (:rmse,)
     # paired relative change vs Base on the same trial.
-    paired = HybridZuptInsJl.paired_estimator_contrast(
+    paired = StrideGP.paired_estimator_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR,
         noise_spec_tags=[spec.tag for spec in plot_specs])
     results_figure() do
-        HybridZuptInsJl.plot_noise_paired_relative_change(
+        StrideGP.plot_noise_paired_relative_change(
             paired, DATASET;
             metric=metric,
             show_outliers=true,
