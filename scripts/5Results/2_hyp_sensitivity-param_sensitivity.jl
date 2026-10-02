@@ -22,6 +22,9 @@ hsgp_p, FRAME, FEATURE_TYPE, meta = load_hsgp_params(hsgp_p_key; m=m)
 
 data_key = "ANG2"
 data_dir_path = data_dir(data_key)
+const SECTION = "2_HypSensitivity/SensitivityAnalysis"
+outdir = joinpath("out/Results", SECTION, "data")
+
 
 # Trials to repeat the sweep over. Held-out by default: key 42 was trained on
 # `train_ids(data_key)`, so sweeping all of `trial_ids(data_key)` would run
@@ -71,10 +74,18 @@ box_delta_range = (-12.0, 12.0)
 focus_params = [
     StrideGP.hp_param_name(:yaw, :length_scale),
     StrideGP.stat_param_name(:input_std, 3),
-    StrideGP.stat_param_name(:input_center, 2),
+    # StrideGP.hp_param_name(:pos_1, :noise),
     StrideGP.hp_param_name(:pos_1, :signal_variance),
     StrideGP.stat_param_name(:input_mean, 3),
 ]
+# Optional fixed y limits per close-up, in percent RMSE change; a focus parameter
+# left out here gets limits from its IQR bars.
+focus_ylims = Dict{String,Tuple{Float64,Float64}}(
+    StrideGP.stat_param_name(:input_std, 3) => (-70.0, 25.0),
+    StrideGP.hp_param_name(:pos_1, :noise) => (-70.0, 25.0),
+    StrideGP.hp_param_name(:pos_1, :signal_variance) => (-70.0, 25.0),
+    StrideGP.stat_param_name(:input_mean, 3) => (-70.0, 25.0),
+)
 
 if smoke_test
     sweep_trial_ids = sweep_trial_ids[1:1]
@@ -117,9 +128,6 @@ end
 @info "Probe grids OK for $(length(specs)) parameters"
 
 ## ----- Sweep ---------------------------------------------------------------
-
-const SECTION = "2_HypSensitivity/SensitivityAnalysis"
-outdir = joinpath("out/Results", SECTION, "data")
 
 time = string(Dates.now())
 base_name = "$(filter_tag)_process_only_refBase_key$(hsgp_p_key)_$(data_key)_$(FRAME)_$(FEATURE_TYPE)_$(time)"
@@ -247,7 +255,7 @@ println()
 # `nothing` to plot the sweep just computed above.
 # Artifacts without `refBase` in the name were scored against the trained
 # corrector, not ZUPT only, and would be mislabelled by these figures.
-replot_basename = nothing
+replot_basename = "V4_process_only_refBase_key42_ANG2_HEADING_TWOD_STEP_YAW_2026-10-01T18:05:54.570"
 
 # Both branches load from disk, so the freshly computed sweep goes through the
 # exact same JSON round-trip as a replot -- grid_from_dict then sees identically
@@ -262,58 +270,39 @@ grid = StrideGP.grid_from_dict(plot_meta["grid"])
 stats_grid_meta = get(plot_meta, "stats_grid", nothing)
 
 # GP hyperparameters: one panel per channel and kind, multiplier axis.
-results_figure() do
-    StrideGP.plot_probe_sensitivity(plot_df, grid;
-        save_path=results_path(SECTION, "$(plot_name)_param_var.pdf"))
-end
+# results_figure() do
+#     StrideGP.plot_probe_sensitivity(plot_df, grid;
+#         save_path=results_path(SECTION, "$(plot_name)_param_var.pdf"))
+# end
 
 # Normalisation statistics: one row per family, one column per feature
 # dimension. The two location rows are now on a linear, zero-centred offset axis
 # and the std row stays on the multiplier axis.
-if !isnothing(stats_grid_meta)
-    results_figure() do
-        StrideGP.plot_probe_sensitivity(plot_df,
-            StrideGP.grid_from_dict(stats_grid_meta);
-            save_path=results_path(SECTION, "$(plot_name)_stats_var.pdf"))
-    end
-end
+# if !isnothing(stats_grid_meta)
+#     results_figure() do
+#         StrideGP.plot_probe_sensitivity(plot_df,
+#             StrideGP.grid_from_dict(stats_grid_meta);
+#             save_path=results_path(SECTION, "$(plot_name)_stats_var.pdf"))
+#     end
+# end
 
 # Where the features leave the fixed domain, against what that does to RMSE.
-#
-# A consistency check this figure makes visible: `mu_x[d] += delta*sigma_x[d]`
-# and `c_x[d] += delta` both send z -> z - delta, so for a non-angle dimension
-# the two families must produce bit-identical RMSE -- and they do, to 1e-15, for
-# dims 1 and 2. Dim 3 is the yaw feature, where `normalize_feature!` wraps to
-# +-pi *between* the mean subtraction and the division, so shifting the mean
-# changes what gets wrapped and shifting the centering does not. The two curves
-# coincide there too until the shift is large enough to carry strides across the
-# wrap (delta = -2 in this artifact). That the two location families now agree at
-# all is itself the fix: under the old multiplicative probe they were sized by
-# mu/sigma and by c respectively, and were reported as separate findings with
-# spans differing by an order of magnitude.
 results_figure() do
     StrideGP.plot_box_exit(plot_df, plot_box;
         save_path=results_path(SECTION, "$(plot_name)_box_exit.pdf"))
 end
 
-# Ranking: which parameters move RMSE, by how much, and whether the trials
-# agree. This is the one to read first. Its x limits come from the bars, not the
-# data -- see plot_probe_ranking on why the previous version was unreadable.
+# Ranking: which parameters move RMSE, by how much
 results_figure() do
     StrideGP.plot_probe_ranking(plot_df;
-        xlims=(-100.0, 50.0),
+        xlims=(-75.0, 75.0),
         log_scale=false,
         sides=(:worst,),
         save_path=results_path(SECTION, "$(plot_name)_ranking.pdf"),
         figsize=(900, 475))
 end
 
-# Close-ups, one figure per parameter, sized for the write-up. The ranking
-# compresses each parameter to [min, max], which says how far RMSE moved but not
-# how it got there -- and the shape is often the result: the yaw length scale
-# saturates above x2, which is a bar of the same height as a curve that rises
-# steadily. Normalisation parameters also get domain-containment shading, so the
-# box story travels with the parameter instead of needing the 3x3 grid figure.
+# Close-ups, one figure per parameter
 swept_params = Set(plot_df.parameter)
 for focus_param in focus_params
     if !(focus_param in swept_params)
@@ -325,6 +314,6 @@ for focus_param in focus_params
         StrideGP.plot_param_closeup(plot_df, focus_param;
             box_df=plot_box,
             save_path=results_path(SECTION, "$(plot_name)_$(focus_slug)_sensitivity.pdf"),
-            _ylims=nothing)
+            _ylims=get(focus_ylims, focus_param, nothing))
     end
 end

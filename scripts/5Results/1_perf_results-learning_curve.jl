@@ -20,7 +20,7 @@ const DATA_SECTION = "$(SECTION)/data"
 ## 1. Dataset / trials / budgets — the knobs.
 # `DATA_KEY` in the environment overrides the default, which is how one unattended run
 # covers both datasets without editing the file; a bare REPL include behaves as before.
-data_key = get(ENV, "DATA_KEY", "DCSC")
+data_key = get(ENV, "DATA_KEY", "ANG2")
 # Every trial of the dataset, as in 1_perf_results.jl. Replace with a literal list to
 # subset — but keep it a list from `trial_ids`' dataset (the lists are not interchangeable).
 ids = trial_ids(data_key)
@@ -30,7 +30,7 @@ ids = trial_ids(data_key)
 # need" is worth asking. Eight of ANG2's eleven walks are ~30 strides long, so there the
 # test window and the budgets both have to shrink; the axis is much shorter.
 N_TEST_STRIDES = Dict("DCSC" => 40, "ANG2" => 10)[data_key]
-BUDGETS = Dict("DCSC" => [5, 25, 49], "ANG2" => [3, 8, 16])[data_key] # [20, 30, 40, 50]  [3, 8, 16]
+BUDGETS = Dict("DCSC" => [5, 25, 49], "ANG2" => [3, 9, 16])[data_key] # [20, 30, 40, 50]  [3, 8, 16]
 
 # Set to a scores CSV under out/Results/1_Performance/LearningCurve/data/ to re-plot a
 # finished sweep instead of paying for it again.
@@ -169,6 +169,10 @@ function print_latex_median_table(paired::DataFrame, metric::Symbol)
     println("\\bottomrule\n\\end{tabular}")
 end
 
+ylims_metric = Dict(
+    :rmse => (0.0, 0.4),
+    :rmse_yaw => (0.0, 0.1)
+)
 for metric in (:rmse, :rmse_yaw)
     paired = StrideGP.learning_curve_contrast(
         results_df; metric=metric, reference_estimator=BASE_ESTIMATOR)
@@ -201,6 +205,7 @@ for metric in (:rmse, :rmse_yaw)
             metric=metric,
             show_outliers=true,
             show_points=true,
+            _ylims=ylims_metric[metric],
             save_path=results_path(SECTION, "$(CSV_PREFIX)_$(metric)_absolute_$(run_stem).pdf"),
         )
     end

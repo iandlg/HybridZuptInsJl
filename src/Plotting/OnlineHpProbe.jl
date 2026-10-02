@@ -71,7 +71,7 @@ end
 """
     _draw_probe_panel!(ax, sub; color, markersize, linewidth, max_ticks) -> (probes, med)
 
-One parameter's across-trial median and IQR band of percent RMSE change against its
+One parameter's across-trial median with IQR error bars of percent RMSE change against its
 `probe` coordinate.
 """
 function _draw_probe_panel!(ax::Axis, sub::AbstractDataFrame;
@@ -84,9 +84,8 @@ function _draw_probe_panel!(ax::Axis, sub::AbstractDataFrame;
     hlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
     vlines!(ax, _probe_identity(kind); color=:gray, linestyle=:dot, linewidth=1)
 
-    if n_trials > 1
-        band!(ax, probes, lo, hi; color=(color, 0.22))
-    end
+    n_trials > 1 && rangebars!(ax, probes, lo, hi; color=color, linewidth=1.5,
+        whiskerwidth=8)
     lines!(ax, probes, med; color=color, linewidth=linewidth)
     scatter!(ax, probes, med; color=color, markersize=markersize)
 
@@ -140,7 +139,7 @@ end
     plot_box_exit(df, box_df; save_path=nothing, max_ticks=5)
 
 One panel per input-normalisation parameter: across-trial median RMSE change with IQR
-band (left axis), fraction of strides outside `±LL` (right axis), and a dashed rule where
+bars (left axis), fraction of strides outside `±LL` (right axis), and a dashed rule where
 `max_z_ratio` first crosses 1. `box_df` may cover a wider probe range than `df`.
 """
 function plot_box_exit(df::DataFrame, box_df::DataFrame;
@@ -220,18 +219,21 @@ function plot_box_exit(df::DataFrame, box_df::DataFrame;
 end
 
 """
-    _clip_marks!(ax, y, lo_val, hi_val; color, xlo, xhi)
+    _clip_marks!(ax, pos, lo_val, hi_val; color, lo, hi, vertical=false)
 
-Arrowheads at the frame for each row with a mark outside `[xlo, xhi]`, so clipped
-whiskers don't look bounded.
+Arrowheads at the frame for each box at `pos` with a mark outside `[lo, hi]`, so
+clipped whiskers don't look bounded. Horizontal boxes by default; `vertical=true` for
+boxes standing on the x axis, with `lo`/`hi` then the y limits.
 """
-function _clip_marks!(ax::Axis, y::Real, lo_val::Real, hi_val::Real;
-    color, xlo::Real, xhi::Real)
+function _clip_marks!(ax::Axis, pos::Real, lo_val::Real, hi_val::Real;
+    color, lo::Real, hi::Real, vertical::Bool=false)
 
-    for (v, mk) in ((lo_val, :ltriangle), (hi_val, :rtriangle))
-        cut = clamp(v, xlo, xhi)
+    marks = vertical ? (:dtriangle, :utriangle) : (:ltriangle, :rtriangle)
+    for (v, mk) in zip((lo_val, hi_val), marks)
+        cut = clamp(v, lo, hi)
         isapprox(v, cut; rtol=1e-9) && continue
-        scatter!(ax, [cut], [y]; color=color, marker=mk, markersize=11,
+        x, y = vertical ? (pos, cut) : (cut, pos)
+        scatter!(ax, [x], [y]; color=color, marker=mk, markersize=11,
             strokecolor=:white, strokewidth=0.5)
     end
     return nothing
@@ -286,8 +288,8 @@ function plot_probe_ranking(df::DataFrame;
         xtickformat=_HP_PCT_TICKFORMAT,
         yticks=(1:n, [param_label(params[ypos(i)], chans) for i in 1:n]),
         ygridvisible=false)
-    vlines!(ax, 0.0; color=:gray, linestyle=:dash, linewidth=1)
-    vlines!(ax, trained; color=:black, linestyle=:dot, linewidth=1.5)
+    vlines!(ax, 0.0; color=:black, linestyle=:dash, linewidth=1)
+    vlines!(ax, trained; color=:black, linestyle=:dot, linewidth=1)
 
     # One row per parameter, so the boxes can be as tall as the paired figures' are
     # wide without colliding.
@@ -312,7 +314,7 @@ function plot_probe_ranking(df::DataFrame;
                            min(srow(s).whisker_lo, srow(s).q25) for s in sides)
         hi_drawn = maximum(show_outliers ? maximum(sub[!, s]) :
                            max(srow(s).whisker_hi, srow(s).q75) for s in sides)
-        _clip_marks!(ax, y, lo_drawn, hi_drawn; color=c, xlo=xlo, xhi=xhi)
+        _clip_marks!(ax, y, lo_drawn, hi_drawn; color=c, lo=xlo, hi=xhi)
     end
     xlims!(ax, xlo, xhi)
     # A row of headroom above the top parameter for the two axis annotations.
@@ -320,13 +322,13 @@ function plot_probe_ranking(df::DataFrame;
     # Placed in data space, anchored either side of the trained line, so they
     # stay on it whatever the x limits are -- relative placement would drift the
     # moment `xlims` is passed.
-    :best in sides && text!(ax, trained - 1.0, n + 0.8; text="← best setting",
-        align=(:right, :center), fontsize=11, color=(:black, 0.6))
-    :worst in sides && text!(ax, trained + 1.0, n + 0.8; text="worst setting →",
-        align=(:left, :center), fontsize=11, color=(:black, 0.6))
-    text!(ax, trained, n + 0.35; text="trained", align=(:center, :center),
+    # :best in sides && text!(ax, trained - 1.0, n + 0.8; text="← best setting",
+    #     align=(:right, :center), fontsize=11, color=(:black, 0.6))
+    # :worst in sides && text!(ax, trained + 1.0, n + 0.8; text="worst setting →",
+    #     align=(:left, :center), fontsize=11, color=(:black, 0.6))
+    text!(ax, trained, n + 0.35; text="fitted configuration", align=(:center, :center),
         fontsize=10, color=(:black, 0.6))
-    text!(ax, 0.0, n + 0.35; text="ZUPT only", align=(:center, :center),
+    text!(ax, 0.0, n + 0.35; text="ZUPT-aided INS", align=(:center, :center),
         fontsize=10, color=(:gray, 0.9))
 
     types = ordered_types(unique(g.type))
@@ -345,7 +347,7 @@ end
 """
     plot_param_closeup(df, parameter; box_df=nothing, save_path=nothing, figsize=(700, 460))
 
-One parameter's across-trial median and IQR band, with a top axis of absolute values.
+One parameter's across-trial median with IQR error bars, and a top axis of absolute values.
 With `box_df` ([`box_exit_over_trials`](@ref)) the probe intervals where features leave
 `±LL` are shaded; if none fall in range the subtitle says so.
 """
@@ -386,14 +388,16 @@ function plot_param_closeup(df::DataFrame, parameter::AbstractString;
                 color=(:firebrick, 0.6), linestyle=:dash, linewidth=1.5)
         end
     end
+    hlines!(ax, 0.0; color=:black, linestyle=:dash, linewidth=1)
 
-    n_trials > 1 && band!(ax, probes, qlo, qhi; color=(color, 0.25))
+    n_trials > 1 && rangebars!(ax, probes, qlo, qhi; color=color, linewidth=1.5,
+        whiskerwidth=8)
     lines!(ax, probes, med; color=color, linewidth=2.5)
     scatter!(ax, probes, med; color=color, markersize=9)
     ax.xticks = _probe_ticks(probes, kind; max_ticks=max_ticks)
 
-    # Y limits from the band. Set explicitly rather than left to autoscale, so
-    # a panel cannot be rescaled by anything drawn outside the band -- which is
+    # Y limits from the IQR bars. Set explicitly rather than left to autoscale, so
+    # a panel cannot be rescaled by anything drawn outside the bars -- which is
     # what the per-trial lines did here: single trials reach +458% against an IQR
     # topping out near +80%, and they flattened the median curve the figure
     # exists to show.

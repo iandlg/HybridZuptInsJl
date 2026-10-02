@@ -201,16 +201,18 @@ end
         series_colors=nothing, save_path=nothing, show_outliers=true, show_points=false)
 
 Unpaired learning curve on the metric's own scale from a `run_online_learning_curve`
-frame: one group per budget, every estimator including `"ZUPT only"`.
+frame: one group per budget, every estimator including `"ZUPT only"`. With `_ylims`,
+marks beyond the limits get an arrowhead at the frame.
 """
 function plot_learning_curve_absolute(
     df::DataFrame,
     dataset_name::AbstractString;
     metric::Symbol=:rmse,
-    series_colors::Union{Nothing,AbstractDict}=nothing,
-    save_path::Union{String,Nothing}=nothing,
+    series_colors::Optional{AbstractDict}=nothing,
+    save_path::Optional{String}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
+    _ylims::Optional{Tuple{Float64,Float64}}=nothing
 )
     check_metric(metric)
     groups = df[df.dataset_name .== dataset_name, :]
@@ -228,7 +230,7 @@ function plot_learning_curve_absolute(
     labeled = _grouped_boxplot!(ax, groups, metric;
         group_col=:group, group_order_col=:group_order,
         series_colors=series_colors,
-        show_outliers=show_outliers, show_points=show_points)
+        show_outliers=show_outliers, show_points=show_points, clip_lims=_ylims)
 
     # As in `plot_learning_curve_relative_change`: the wide budgets can rest on fewer trials.
     order = Dict(r.group => r.group_order for r in eachrow(groups))
@@ -238,6 +240,9 @@ function plot_learning_curve_absolute(
 
     if !isempty(labeled)
         Legend(fig[2, 1], ax; orientation=:horizontal, tellwidth=false)
+    end
+    if !isnothing(_ylims)
+        ylims!(ax, _ylims[1], _ylims[2])
     end
 
     if !isnothing(save_path)

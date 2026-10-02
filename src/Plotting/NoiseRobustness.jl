@@ -16,6 +16,7 @@ function _grouped_boxplot!(
     series_colors::Union{Nothing,AbstractDict}=nothing,
     show_outliers::Bool=true,
     show_points::Bool=false,
+    clip_lims::Union{Nothing,Tuple{Real,Real}}=nothing,
 )
     group_order_map = Dict{Any,Int}()
     series_order_map = Dict{Any,Int}()
@@ -70,6 +71,22 @@ function _grouped_boxplot!(
                 jitter = (rand(jitter_rng, length(clean_vals)) .- 0.5) .* (bar_width * 0.35)
                 scatter!(ax, x_pos .+ jitter, clean_vals;
                     color=(:black, 0.45), markersize=4)
+            end
+            # `clip_lims` are the y limits the caller is about to set: arrowheads at
+            # the frame for marks beyond them, as in `plot_probe_ranking`. Only the
+            # marks actually drawn count -- every value when outliers or points are
+            # shown, otherwise the whisker ends (Makie's: data within 1.5 IQR).
+            if !isnothing(clip_lims)
+                if show_outliers || show_points
+                    lo_drawn, hi_drawn = extrema(clean_vals)
+                else
+                    q1, q3 = quantile(clean_vals, (0.25, 0.75))
+                    reach = 1.5 * (q3 - q1)
+                    lo_drawn, hi_drawn = extrema(v for v in clean_vals
+                                                 if q1 - reach <= v <= q3 + reach)
+                end
+                _clip_marks!(ax, x_pos, lo_drawn, hi_drawn; color=series_color[ser],
+                    lo=clip_lims[1], hi=clip_lims[2], vertical=true)
             end
             push!(labeled, ser)
         end
